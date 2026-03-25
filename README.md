@@ -1,3 +1,21 @@
+## Starting CLAW
+
+Double-click `start-claw.bat` — opens API and Web UI automatically.
+
+| Script | Purpose |
+|--------|---------|
+| `start-claw.bat` | Start API + Web UI, open browser |
+| `stop-claw.bat` | Stop all CLAW processes cleanly |
+| `restart-claw.bat` | Stop then start |
+| `status-claw.bat` | Check what's running |
+
+**Ports**
+- API: http://localhost:8765
+- Web UI: http://localhost:3000
+- Status dashboard: http://localhost:3000/status
+
+---
+
 # CLAW — Coding and Language Agent Workbench
 
 Sovereign AI coding agent. Self-hosted replacement for Windsurf/Cursor
