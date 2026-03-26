@@ -1073,6 +1073,49 @@ class TestSubprojectEndpoints:
         assert 'sessions' in data
 
 
+# ─── Agent self-test endpoint ─────────────────────────────────────────────────
+
+class TestAgentSelfTest:
+    def test_self_test_endpoint_exists(self, client):
+        """GET /agent-self-test must exist and return a response dict."""
+        tc, headers = client
+        r = tc.get('/agent-self-test', headers=headers)
+        assert r.status_code == 200
+        data = r.json()
+        assert 'passed' in data
+        assert 'tool_calls_made' in data
+        assert 'answer' in data
+
+    def test_self_test_response_shape(self, client):
+        """Self-test response must contain all expected fields."""
+        tc, headers = client
+        data = tc.get('/agent-self-test', headers=headers).json()
+        for field in ('passed', 'answer', 'tool_calls_made',
+                      'tool_call_count', 'model_used', 'session_id', 'timestamp'):
+            assert field in data, f"Missing field: {field}"
+
+    def test_self_test_tool_calls_is_list(self, client):
+        """tool_calls_made must be a list (empty is OK in mock env)."""
+        tc, headers = client
+        data = tc.get('/agent-self-test', headers=headers).json()
+        assert isinstance(data['tool_calls_made'], list)
+        assert isinstance(data['tool_call_count'], int)
+
+    def test_self_test_read_only(self, client):
+        """Self-test with a non-existent project returns a clean error (not 500)."""
+        tc, headers = client
+        r = tc.get('/agent-self-test?project=does-not-exist', headers=headers)
+        assert r.status_code == 200
+        data = r.json()
+        assert data['passed'] is False
+        assert 'error' in data
+
+    def test_self_test_requires_auth(self, client):
+        tc, _ = client
+        r = tc.get('/agent-self-test')
+        assert r.status_code == 401
+
+
 # ─── Startup: phloe subprojects created ──────────────────────────────────────
 
 class TestPhloeSubprojectsOnStartup:

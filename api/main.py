@@ -623,6 +623,107 @@ async def wiggum_self_test(_: bool = Depends(verify_api_key)):
     }
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Full-pipeline agent self-test
+# Exercises the complete chat → tool loop → answer path using read-only tools.
+# Safe to run at any time — no files are written, no git operations.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_SELF_TEST_PROMPT = """\
+You are running a structured self-test of the CLAW system. \
+Use your tools to answer each of the following checks. \
+Do NOT modify any files or run any commands that write to disk or network.
+
+CHECKS TO COMPLETE:
+
+1. FILES — Verify these files exist and are non-empty by reading the first \
+few lines of each:
+   - core/agent.py
+   - core/memory/store.py
+   - core/tools/registry.py
+   - api/main.py
+
+2. STRUCTURE — Search the codebase for the string "_run_tool_loop" and confirm \
+it exists in core/agent.py.
+
+3. SUBPROJECTS — Search for "create_subproject" and confirm it exists in \
+core/memory/store.py.
+
+4. SERVER — Check whether the API is reachable at http://localhost:8765/health.
+
+5. GIT — Run git_status and report whether the working tree is clean.
+
+After completing all checks, produce a structured report:
+
+## CLAW Self-Test Report
+### Files: PASS / FAIL (list any missing)
+### Structure: PASS / FAIL
+### Subprojects: PASS / FAIL
+### Server: RUNNING / UNREACHABLE
+### Git: CLEAN / DIRTY (list changed files if dirty)
+### Overall: PASS / FAIL
+"""
+
+
+@app.get("/agent-self-test")
+async def agent_self_test(
+    project: str = 'claw',
+    _: bool = Depends(verify_api_key),
+):
+    """
+    Full-pipeline self-test: sends a read-only assessment prompt to the CLAW
+    agent and returns the response. Exercises the complete tool loop.
+
+    Safe to run at any time — read_only=True prevents any file writes.
+    """
+    try:
+        agent = get_agent(project)
+    except HTTPException:
+        return {
+            'passed': False,
+            'error': f"Project '{project}' not loaded",
+            'timestamp': datetime.utcnow().isoformat(),
+        }
+
+    session_id = f'self-test-{uuid.uuid4().hex[:8]}'
+
+    envelope = MessageEnvelope(
+        content=_SELF_TEST_PROMPT,
+        channel=Channel.WEB,
+        project_id=project,
+        session_id=session_id,
+        read_only=True,
+        max_tool_rounds=10,
+    )
+
+    try:
+        response = await agent.process(envelope)
+    except Exception as exc:
+        return {
+            'passed': False,
+            'error': str(exc),
+            'timestamp': datetime.utcnow().isoformat(),
+        }
+
+    answer = response.content or ''
+    passed = (
+        len(answer.strip()) > 50          # got a real answer
+        and 'FAIL' not in answer.upper()  # no explicit failures
+        and bool(response.executed_tool_calls)  # tools were actually used
+    )
+
+    return {
+        'passed': passed,
+        'answer': answer,
+        'tool_calls_made': [t['tool_name'] for t in response.executed_tool_calls],
+        'tool_call_count': len(response.executed_tool_calls),
+        'model_used': response.model_used,
+        'cost_usd': response.cost_usd,
+        'session_id': session_id,
+        'timestamp': datetime.utcnow().isoformat(),
+    }
+
+
 @app.get("/wiggum/{run_id}")
 async def get_wiggum_run(
     run_id: str,
