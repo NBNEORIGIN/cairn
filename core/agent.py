@@ -30,7 +30,7 @@ class ClawAgent:
     REVIEW/DESTRUCTIVE tools still pause for user approval as before.
     """
 
-    MAX_TOOL_ROUNDS = 8  # Max agentic tool-call iterations per request
+    MAX_TOOL_ROUNDS = 12  # Max agentic tool-call iterations per request
 
     def __init__(self, project_id: str, config: dict):
         self.project_id = project_id
@@ -275,6 +275,8 @@ class ClawAgent:
         session_id = envelope.session_id
         executed_tool_calls: list[dict] = []
         total_cost = prior_cost
+        # Track read_file calls to skip duplicates and free up rounds
+        _seen_read_paths: set[str] = set()
 
         # Build the initial messages list once, then extend it each round
         raw_messages = client.build_messages(
@@ -333,8 +335,18 @@ class ClawAgent:
                     executed_tool_calls=executed_tool_calls,
                 )
 
-            # Execute the safe tool
-            result = await self._execute_tool(current_tool_call)
+            # Skip re-reading a file already read this session
+            if tool_name == 'read_file':
+                fp = current_tool_call.get('input', {}).get('file_path', '')
+                if fp in _seen_read_paths:
+                    result = f"[already read {fp} — contents available above]"
+                else:
+                    result = await self._execute_tool(current_tool_call)
+                    if fp:
+                        _seen_read_paths.add(fp)
+            else:
+                result = await self._execute_tool(current_tool_call)
+
             executed_tool_calls.append({
                 'tool_name': tool_name,
                 'result': result,
@@ -362,6 +374,28 @@ class ClawAgent:
 
             if not current_tool_call:
                 break  # Model gave a final answer
+
+        # If the loop exited without a text answer (model returned empty on
+        # force_final, or returned tool markup as text), make one more call
+        # explicitly asking for a synthesis. This is the safety net.
+        if not (current_text or '').strip():
+            logger.info(
+                f"[CLAW] tool loop produced empty response — synthesising answer"
+            )
+            synthesis_msg = (
+                f"Based on the information you just retrieved, please answer "
+                f"the original question: {envelope.content}"
+            )
+            synth_text, _, synth_usage = await client.chat(
+                system=context_prompt,
+                history=history,
+                message=synthesis_msg,
+                tools=None,
+                use_opus=self._should_use_opus(envelope.content),
+                raw_messages=raw_messages,
+            )
+            total_cost += self._calculate_cost(synth_usage, client)
+            current_text = synth_text
 
         # Save the final answer to memory once
         self.memory.add_message(
