@@ -64,44 +64,78 @@ class ContextEngine:
             )
         return content
 
-    def retrieve_tier2(self, task: str, embedding_fn: Callable) -> list[dict]:
+    def retrieve_tier2(
+        self,
+        task: str,
+        embedding_fn: Callable,
+        subproject_id: str | None = None,
+    ) -> list[dict]:
         """
         Retrieve relevant chunks. Falls back to keyword search if
         embedding generation fails (e.g. Ollama unavailable).
+
+        When subproject_id is provided, chunks are filtered to that
+        subproject plus project-level chunks (subproject_id IS NULL).
         """
         try:
-            return self._retrieve_by_embedding(task, embedding_fn)
+            return self._retrieve_by_embedding(task, embedding_fn, subproject_id)
         except Exception as e:
             print(f"Embedding retrieval failed ({e}), "
                   f"falling back to keyword search")
-            return self._retrieve_by_keyword(task)
+            return self._retrieve_by_keyword(task, subproject_id)
 
     def _retrieve_by_embedding(
-        self, task: str, embedding_fn: Callable
+        self,
+        task: str,
+        embedding_fn: Callable,
+        subproject_id: str | None = None,
     ) -> list[dict]:
-        """pgvector similarity search."""
+        """pgvector similarity search with optional subproject scoping."""
         task_embedding = embedding_fn(task)
         conn = self._get_connection()
         with conn.cursor() as cur:
-            cur.execute("""
-                SELECT
-                    file_path,
-                    chunk_content,
-                    chunk_type,
-                    1 - (embedding <=> %s::vector) AS similarity
-                FROM claw_code_chunks
-                WHERE
-                    project_id = %s
-                    AND 1 - (embedding <=> %s::vector) > %s
-                ORDER BY similarity DESC
-                LIMIT %s
-            """, (
-                task_embedding,
-                self.project_id,
-                task_embedding,
-                self.SIMILARITY_THRESHOLD,
-                self.MAX_TIER2_CHUNKS,
-            ))
+            if subproject_id:
+                cur.execute("""
+                    SELECT
+                        file_path,
+                        chunk_content,
+                        chunk_type,
+                        1 - (embedding <=> %s::vector) AS similarity
+                    FROM claw_code_chunks
+                    WHERE
+                        project_id = %s
+                        AND (subproject_id IS NULL OR subproject_id = %s)
+                        AND 1 - (embedding <=> %s::vector) > %s
+                    ORDER BY similarity DESC
+                    LIMIT %s
+                """, (
+                    task_embedding,
+                    self.project_id,
+                    subproject_id,
+                    task_embedding,
+                    self.SIMILARITY_THRESHOLD,
+                    self.MAX_TIER2_CHUNKS,
+                ))
+            else:
+                cur.execute("""
+                    SELECT
+                        file_path,
+                        chunk_content,
+                        chunk_type,
+                        1 - (embedding <=> %s::vector) AS similarity
+                    FROM claw_code_chunks
+                    WHERE
+                        project_id = %s
+                        AND 1 - (embedding <=> %s::vector) > %s
+                    ORDER BY similarity DESC
+                    LIMIT %s
+                """, (
+                    task_embedding,
+                    self.project_id,
+                    task_embedding,
+                    self.SIMILARITY_THRESHOLD,
+                    self.MAX_TIER2_CHUNKS,
+                ))
             rows = cur.fetchall()
         return [
             {
@@ -113,7 +147,11 @@ class ContextEngine:
             for row in rows
         ]
 
-    def _retrieve_by_keyword(self, task: str) -> list[dict]:
+    def _retrieve_by_keyword(
+        self,
+        task: str,
+        subproject_id: str | None = None,
+    ) -> list[dict]:
         """
         Simple keyword search fallback when embeddings are unavailable.
         Extracts meaningful words from the task and does ILIKE search.
@@ -136,17 +174,29 @@ class ContextEngine:
             conditions = ' OR '.join(
                 [f"chunk_content ILIKE %s" for _ in words]
             )
-            params = (
-                [self.project_id]
-                + [f'%{w}%' for w in words]
-                + [self.MAX_TIER2_CHUNKS]
-            )
+            if subproject_id:
+                subproject_clause = (
+                    "AND (subproject_id IS NULL OR subproject_id = %s)"
+                )
+                params = (
+                    [self.project_id, subproject_id]
+                    + [f'%{w}%' for w in words]
+                    + [self.MAX_TIER2_CHUNKS]
+                )
+            else:
+                subproject_clause = ''
+                params = (
+                    [self.project_id]
+                    + [f'%{w}%' for w in words]
+                    + [self.MAX_TIER2_CHUNKS]
+                )
             with conn.cursor() as cur:
                 cur.execute(f"""
                     SELECT file_path, chunk_content, chunk_type,
                            0.5 AS similarity
                     FROM claw_code_chunks
                     WHERE project_id = %s
+                      {subproject_clause}
                       AND ({conditions})
                     ORDER BY length(chunk_content) ASC
                     LIMIT %s
@@ -185,7 +235,12 @@ class ContextEngine:
 
         return target.read_text(encoding='utf-8', errors='replace')
 
-    def build_context_prompt(self, task: str, embedding_fn: Callable) -> str:
+    def build_context_prompt(
+        self,
+        task: str,
+        embedding_fn: Callable,
+        subproject_id: str | None = None,
+    ) -> str:
         """Assemble full context string from all available tiers."""
         parts = []
 
@@ -193,7 +248,7 @@ class ContextEngine:
         parts.append(self.load_tier1())
         parts.append("\n\n")
 
-        chunks = self.retrieve_tier2(task, embedding_fn)
+        chunks = self.retrieve_tier2(task, embedding_fn, subproject_id)
         if chunks:
             parts.append("# RELEVANT CODE\n")
             parts.append(

@@ -60,6 +60,10 @@ class MessageEnvelope:
     # DESTRUCTIVE tools (git push, run_command) are NEVER auto-approved.
     auto_approve_review: bool = False
 
+    # Active subproject for this message (e.g. 'demnurse.nbne.uk').
+    # Scopes session history and pgvector retrieval to this subproject.
+    subproject_id: Optional[str] = None
+
     metadata: dict = field(default_factory=dict)
 
 
@@ -93,5 +97,8 @@ class AgentResponse:
     # Tool calls that were auto-executed during this response (safe/read-only tools)
     executed_tool_calls: list = field(default_factory=list)
     # [{'tool_name': str, 'result': str}, ...]
+
+    # Session lifecycle events (trimming, archiving)
+    metadata: dict = field(default_factory=dict)
 
     timestamp: datetime = field(default_factory=datetime.utcnow)

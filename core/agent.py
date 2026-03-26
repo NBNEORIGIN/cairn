@@ -1,3 +1,4 @@
+import logging
 import os
 import uuid
 from .channels.envelope import MessageEnvelope, AgentResponse
@@ -10,6 +11,9 @@ from .models.deepseek_client import DeepSeekClient
 from .tools.registry import ToolRegistry, RiskLevel
 from .tools.diff_tools import generate_unified_diff, generate_create_diff
 from .memory.store import MemoryStore
+from .memory.summariser import SessionSummariser
+
+logger = logging.getLogger(__name__)
 
 
 class ClawAgent:
@@ -59,6 +63,7 @@ class ClawAgent:
         self._api_provider = os.getenv('API_PROVIDER', 'auto').lower()
         self.tools = ToolRegistry()
         self._register_tools()
+        self.summariser = SessionSummariser(project_id=project_id)
 
         # Cache project root for tool execution
         self._project_root = config.get('codebase_path', '.')
@@ -66,6 +71,10 @@ class ClawAgent:
     async def process(self, envelope: MessageEnvelope) -> AgentResponse:
         """Main entry point. Process a message and return a response."""
         session_id = envelope.session_id
+
+        # Bind subproject to this session on first set
+        if envelope.subproject_id:
+            self.memory.set_session_subproject(session_id, envelope.subproject_id)
 
         self.memory.add_message(
             session_id=session_id,
@@ -78,10 +87,11 @@ class ClawAgent:
         if envelope.tool_approval:
             return await self._handle_tool_approval(envelope)
 
-        # Build context prompt
+        # Build context prompt (scoped to subproject when set)
         context_prompt = self.context.build_context_prompt(
             task=envelope.content,
             embedding_fn=self._embed,
+            subproject_id=envelope.subproject_id,
         )
 
         # System instruction prepended to every prompt
@@ -225,6 +235,8 @@ class ClawAgent:
             cost_usd=cost_usd,
         )
 
+        metadata = await self._check_trim_archive(session_id)
+
         return AgentResponse(
             content=response_text or '',
             session_id=session_id,
@@ -232,6 +244,7 @@ class ClawAgent:
             model_used=model_used,
             tokens_used=usage.get('total_tokens', 0),
             cost_usd=cost_usd,
+            metadata=metadata,
         )
 
     async def _run_tool_loop(
@@ -361,6 +374,8 @@ class ClawAgent:
             cost_usd=total_cost,
         )
 
+        metadata = await self._check_trim_archive(session_id)
+
         return AgentResponse(
             content=current_text or '',
             session_id=session_id,
@@ -368,7 +383,38 @@ class ClawAgent:
             model_used=model_used,
             cost_usd=total_cost,
             executed_tool_calls=executed_tool_calls,
+            metadata=metadata,
         )
+
+    async def _check_trim_archive(self, session_id: str) -> dict:
+        """
+        After each response, check if the session needs trimming or archiving.
+        Returns metadata dict to be included in the AgentResponse.
+        """
+        meta: dict = {}
+        try:
+            if self.memory.should_trim(session_id):
+                removed = self.memory.trim_session(session_id)
+                logger.info(
+                    f"[CLAW] Trimmed {removed} messages from session {session_id}"
+                )
+                meta['session_trimmed'] = True
+                meta['messages_removed'] = removed
+
+            if self.memory.should_archive(session_id):
+                history = self.memory.get_recent_history(session_id, limit=100)
+                summary_bullets = await self.summariser.summarise(
+                    messages=history,
+                    session_id=session_id,
+                )
+                summary = '\n'.join(f'- {b}' for b in summary_bullets)
+                self.memory.archive_session(session_id, summary)
+                logger.info(f"[CLAW] Archived session {session_id}")
+                meta['session_archived'] = True
+                meta['archive_summary'] = summary
+        except Exception as exc:
+            logger.warning(f"[CLAW] trim/archive check failed: {exc}")
+        return meta
 
     async def _handle_tool_approval(
         self, envelope: MessageEnvelope

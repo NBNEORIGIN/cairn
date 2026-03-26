@@ -39,5 +39,28 @@
     "auto_reindex": false,
     "exclude_paths": ["node_modules", "migrations", ".next", "dist"],
     "include_extensions": []
-  }
+  },
+
+  "subprojects": [
+    {
+      "name": "demnurse.nbne.uk",
+      "display_name": "DemNurse",
+      "description": "Amy Law / The Alncom Group — nurse compliance platform"
+    },
+    {
+      "name": "ganbarukai.co.uk",
+      "display_name": "Ganbarukai",
+      "description": "Martial arts school booking and membership"
+    },
+    {
+      "name": "theminddepartment.co.uk",
+      "display_name": "The Mind Department",
+      "description": "Aly Harwood — therapy practice booking and CRM"
+    },
+    {
+      "name": "floe.nbne.uk",
+      "display_name": "Floe NBNE",
+      "description": "NBNE internal Phloe tenant"
+    }
+  ]
 }

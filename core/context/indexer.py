@@ -75,8 +75,16 @@ class CodeIndexer:
                     content_hash VARCHAR(64) NOT NULL,
                     embedding vector(768),
                     last_modified TIMESTAMP,
-                    indexed_at TIMESTAMP DEFAULT NOW()
+                    indexed_at TIMESTAMP DEFAULT NOW(),
+                    subproject_id VARCHAR(200)
                 );
+            """)
+            self.conn.commit()
+
+            # Defensive migration — add subproject_id if missing from existing table
+            cur.execute("""
+                ALTER TABLE claw_code_chunks
+                    ADD COLUMN IF NOT EXISTS subproject_id VARCHAR(200);
             """)
             self.conn.commit()
 
@@ -397,8 +405,9 @@ class CodeIndexer:
             cur.execute("""
                 INSERT INTO claw_code_chunks
                     (project_id, file_path, chunk_content, chunk_type,
-                     chunk_name, content_hash, embedding, last_modified)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, to_timestamp(%s))
+                     chunk_name, content_hash, embedding, last_modified,
+                     subproject_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, to_timestamp(%s), %s)
             """, (
                 self.project_id,
                 kwargs['file_path'],
@@ -408,7 +417,69 @@ class CodeIndexer:
                 kwargs['content_hash'],
                 kwargs['embedding'],
                 kwargs['last_modified'],
+                kwargs.get('subproject_id'),
             ))
+
+    def index_session(
+        self,
+        session_id: str,
+        project_id: str,
+        subproject_id: str | None,
+        summary: str,
+        messages: list[dict],
+    ) -> None:
+        """
+        Index an archived session into pgvector.
+        Creates one chunk per session using the summary as the primary
+        text and key user messages as supporting context.
+        """
+        if not summary and not messages:
+            return
+
+        chunk_text = f"Session summary: {summary}\n\n"
+        for msg in messages:
+            if msg.get('role') == 'user':
+                content = msg.get('content', '')[:200]
+                chunk_text += f"User: {content}\n"
+
+        if len(chunk_text) > MAX_CHUNK_CHARS:
+            chunk_text = chunk_text[:MAX_CHUNK_CHARS]
+
+        try:
+            embedding = self.embed(chunk_text)
+            file_path = f'session/{session_id}'
+
+            # Remove any previous chunk for this session
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    DELETE FROM claw_code_chunks
+                    WHERE project_id = %s AND file_path = %s
+                """, (project_id, file_path))
+
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO claw_code_chunks
+                        (project_id, file_path, chunk_content, chunk_type,
+                         chunk_name, content_hash, embedding, last_modified,
+                         subproject_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), %s)
+                """, (
+                    project_id,
+                    file_path,
+                    chunk_text,
+                    'session',
+                    session_id[:200],
+                    hashlib.sha256(chunk_text.encode()).hexdigest(),
+                    embedding,
+                    subproject_id,
+                ))
+            self.conn.commit()
+        except Exception as exc:
+            try:
+                self.conn.rollback()
+            except Exception:
+                self._reconnect()
+            print(f"[indexer] index_session failed for {session_id}: {exc}")
 
     def _load_clawignore(self) -> list[str]:
         clawignore_path = (

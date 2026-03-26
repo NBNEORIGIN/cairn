@@ -43,10 +43,26 @@ async def lifespan(app: FastAPI):
             if config_path.exists():
                 try:
                     config = json.loads(config_path.read_text())
-                    _agents[project_dir.name] = ClawAgent(
+                    agent = ClawAgent(
                         project_id=project_dir.name,
                         config=config,
                     )
+                    _agents[project_dir.name] = agent
+                    # Seed subprojects declared in config.json
+                    if 'subprojects' in config:
+                        for sp in config['subprojects']:
+                            try:
+                                agent.memory.create_subproject(
+                                    project_id=project_dir.name,
+                                    name=sp['name'],
+                                    display_name=sp['display_name'],
+                                    description=sp.get('description', ''),
+                                )
+                            except Exception as sp_err:
+                                print(
+                                    f'[CLAW startup] subproject '
+                                    f'{sp["name"]} failed: {sp_err}'
+                                )
                     print(f'[CLAW startup] Loaded: {project_dir.name}')
                 except Exception as e:
                     print(f'[CLAW startup] Failed {project_dir.name}: {e}')
@@ -98,10 +114,20 @@ def get_agent(project_id: str) -> ClawAgent:
                 ),
             )
         config = json.loads(config_path.read_text())
-        _agents[project_id] = ClawAgent(
-            project_id=project_id,
-            config=config,
-        )
+        agent = ClawAgent(project_id=project_id, config=config)
+        # Seed subprojects from config when creating agent on demand
+        if 'subprojects' in config:
+            for sp in config['subprojects']:
+                try:
+                    agent.memory.create_subproject(
+                        project_id=project_id,
+                        name=sp['name'],
+                        display_name=sp['display_name'],
+                        description=sp.get('description', ''),
+                    )
+                except Exception:
+                    pass
+        _agents[project_id] = agent
     return _agents[project_id]
 
 
@@ -119,6 +145,13 @@ class ChatRequest(BaseModel):
     image_media_type: str = 'image/png'
     read_only: bool = False   # WiggumOrchestrator sets this for assess/plan passes
     max_tool_rounds: Optional[int] = None   # Override agent MAX_TOOL_ROUNDS per request
+    subproject_id: Optional[str] = None    # Scope session to a subproject
+
+
+class SubprojectCreateRequest(BaseModel):
+    name: str
+    display_name: str
+    description: str = ''
 
 
 class IndexRequest(BaseModel):
@@ -170,6 +203,7 @@ async def chat(
         image_media_type=request.image_media_type,
         read_only=request.read_only,
         max_tool_rounds=request.max_tool_rounds,
+        subproject_id=request.subproject_id,
     )
 
     response = await agent.process(envelope)
@@ -182,7 +216,98 @@ async def chat(
         'tokens_used': response.tokens_used,
         'cost_usd': response.cost_usd,
         'tool_calls': response.executed_tool_calls,
+        'metadata': response.metadata,
     }
+
+
+# ─── Subproject endpoints ────────────────────────────────────────────────────
+
+@app.get("/projects/{project}/subprojects")
+async def get_subprojects(
+    project: str,
+    _: bool = Depends(verify_api_key),
+):
+    """List all subprojects for a project."""
+    agent = get_agent(project)
+    return {'subprojects': agent.memory.get_subprojects(project)}
+
+
+@app.post("/projects/{project}/subprojects")
+async def create_subproject(
+    project: str,
+    body: SubprojectCreateRequest,
+    _: bool = Depends(verify_api_key),
+):
+    """Create a new subproject. Idempotent — safe to call multiple times."""
+    agent = get_agent(project)
+    sp = agent.memory.create_subproject(
+        project_id=project,
+        name=body.name,
+        display_name=body.display_name,
+        description=body.description,
+    )
+    return sp
+
+
+# ─── Session endpoints ───────────────────────────────────────────────────────
+
+@app.get("/projects/{project}/sessions")
+async def get_sessions(
+    project: str,
+    subproject: Optional[str] = None,
+    _: bool = Depends(verify_api_key),
+):
+    """List sessions for a project, optionally scoped to a subproject."""
+    agent = get_agent(project)
+    sessions = agent.memory.get_session_list(
+        project_id=project,
+        subproject_id=subproject,
+    )
+    return {'sessions': sessions}
+
+
+@app.get("/projects/{project}/sessions/{session_id}")
+async def get_session(
+    project: str,
+    session_id: str,
+    _: bool = Depends(verify_api_key),
+):
+    """Return a single session including all messages."""
+    agent = get_agent(project)
+    session = agent.memory.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
+    return session
+
+
+@app.get("/projects/{project}/subprojects/{subproject}/sessions")
+async def get_subproject_sessions(
+    project: str,
+    subproject: str,
+    _: bool = Depends(verify_api_key),
+):
+    """List sessions scoped to a specific subproject."""
+    agent = get_agent(project)
+    sessions = agent.memory.get_session_list(
+        project_id=project,
+        subproject_id=f'{project}:{subproject}',
+    )
+    return {'sessions': sessions}
+
+
+@app.get("/projects/{project}/subprojects/{subproject}/sessions/{session_id}")
+async def get_subproject_session(
+    project: str,
+    subproject: str,
+    session_id: str,
+    _: bool = Depends(verify_api_key),
+):
+    """Return a session belonging to a specific subproject."""
+    agent = get_agent(project)
+    session = agent.memory.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
+    return session
 
 
 @app.get("/projects")

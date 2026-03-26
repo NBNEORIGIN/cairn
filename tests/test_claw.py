@@ -856,3 +856,234 @@ class TestWiggumBatchMode:
         orc = WiggumOrchestrator(goal='test', success_criteria=['x'],
                                   project_id='claw', batch_mode=True)
         assert orc.batch_mode is True
+
+
+# ─── Memory store — subprojects + sessions + archiving ───────────────────────
+
+@pytest.fixture
+def tmp_store(tmp_path):
+    from core.memory.store import MemoryStore
+    return MemoryStore(project_id='testproj', data_dir=str(tmp_path))
+
+
+class TestSubprojects:
+    def test_create_subproject(self, tmp_store):
+        sp = tmp_store.create_subproject(
+            project_id='testproj',
+            name='demnurse.nbne.uk',
+            display_name='DemNurse',
+            description='Test tenant',
+        )
+        assert sp is not None
+        assert sp['name'] == 'demnurse.nbne.uk'
+        assert sp['display_name'] == 'DemNurse'
+
+    def test_create_subproject_idempotent(self, tmp_store):
+        """Calling create_subproject twice must not raise and must return the same record."""
+        sp1 = tmp_store.create_subproject('testproj', 'sp-a', 'SP A')
+        sp2 = tmp_store.create_subproject('testproj', 'sp-a', 'SP A updated')
+        assert sp1['id'] == sp2['id']
+        # display_name is NOT updated on conflict — INSERT OR IGNORE
+        assert sp2['display_name'] == 'SP A'
+
+    def test_get_subprojects(self, tmp_store):
+        tmp_store.create_subproject('testproj', 'alpha', 'Alpha')
+        tmp_store.create_subproject('testproj', 'beta', 'Beta')
+        sps = tmp_store.get_subprojects('testproj')
+        names = [s['name'] for s in sps]
+        assert 'alpha' in names
+        assert 'beta' in names
+
+    def test_get_subproject_by_name(self, tmp_store):
+        tmp_store.create_subproject('testproj', 'gamma', 'Gamma', 'desc')
+        sp = tmp_store.get_subproject_by_name('testproj', 'gamma')
+        assert sp is not None
+        assert sp['description'] == 'desc'
+
+    def test_get_subproject_by_name_not_found(self, tmp_store):
+        assert tmp_store.get_subproject_by_name('testproj', 'nonexistent') is None
+
+
+class TestSessionList:
+    def test_get_session_list_unscoped_returns_all(self, tmp_store):
+        tmp_store.add_message('sess-1', 'user', 'hello', 'web')
+        tmp_store.add_message('sess-2', 'user', 'world', 'web')
+        sessions = tmp_store.get_session_list('testproj')
+        ids = [s['session_id'] for s in sessions]
+        assert 'sess-1' in ids
+        assert 'sess-2' in ids
+
+    def test_get_session_list_scoped_to_subproject(self, tmp_store):
+        sp = tmp_store.create_subproject('testproj', 'client-x', 'Client X')
+        tmp_store.add_message('sess-sp', 'user', 'hi', 'web')
+        tmp_store.set_session_subproject('sess-sp', sp['id'])
+        tmp_store.add_message('sess-other', 'user', 'other', 'web')
+
+        scoped = tmp_store.get_session_list('testproj', subproject_id=sp['id'])
+        ids = [s['session_id'] for s in scoped]
+        assert 'sess-sp' in ids
+        assert 'sess-other' not in ids
+
+    def test_get_session_returns_messages(self, tmp_store):
+        tmp_store.add_message('sess-get', 'user', 'msg 1', 'web')
+        tmp_store.add_message('sess-get', 'assistant', 'reply', 'web')
+        sess = tmp_store.get_session('sess-get')
+        assert sess is not None
+        assert len(sess['messages']) == 2
+        assert sess['archived'] is False
+
+    def test_get_session_not_found_returns_none(self, tmp_store):
+        assert tmp_store.get_session('nonexistent-session-xyz') is None
+
+
+class TestTokenTrackingAndArchiving:
+    def _populate(self, store, session_id: str, word_count: int):
+        """Fill session with messages totalling approx word_count words."""
+        chunk = 'word ' * 100  # 100 words per message
+        for _ in range(word_count // 100):
+            store.add_message(session_id, 'user', chunk.strip(), 'web')
+            store.add_message(session_id, 'assistant', chunk.strip(), 'web')
+
+    def test_estimate_tokens_returns_int(self, tmp_store):
+        tmp_store.add_message('tok-sess', 'user', 'hello world test', 'web')
+        result = tmp_store.estimate_tokens('tok-sess')
+        assert isinstance(result, int)
+        assert result > 0
+
+    def test_should_trim_fires_at_40000(self, tmp_store):
+        # Under threshold
+        tmp_store.add_message('trim-sess', 'user', 'short message', 'web')
+        assert tmp_store.should_trim('trim-sess') is False
+
+        # Patch estimate_tokens to return value > 40000
+        import unittest.mock as mock
+        with mock.patch.object(tmp_store, 'estimate_tokens', return_value=41000):
+            assert tmp_store.should_trim('trim-sess') is True
+
+    def test_should_archive_fires_at_50000(self, tmp_store):
+        tmp_store.add_message('arch-sess', 'user', 'short', 'web')
+        assert tmp_store.should_archive('arch-sess') is False
+
+        import unittest.mock as mock
+        with mock.patch.object(tmp_store, 'estimate_tokens', return_value=51000):
+            assert tmp_store.should_archive('arch-sess') is True
+
+    def test_trim_session_removes_oldest_non_system_messages(self, tmp_store):
+        session_id = 'trim-test'
+        for i in range(10):
+            tmp_store.add_message(session_id, 'user', f'message {i} ' + 'word ' * 50, 'web')
+
+        import unittest.mock as mock
+        # Make it appear over threshold until only a few remain
+        call_count = [0]
+        original = tmp_store.estimate_tokens
+
+        def mock_estimate(sid):
+            call_count[0] += 1
+            # Return high on first 5 calls, then low
+            if call_count[0] <= 5:
+                return 45000
+            return 35000
+
+        with mock.patch.object(tmp_store, 'estimate_tokens', side_effect=mock_estimate):
+            removed = tmp_store.trim_session(session_id)
+        assert removed == 5
+
+    def test_archive_session_moves_to_archive_table(self, tmp_store):
+        session_id = 'archive-me'
+        tmp_store.add_message(session_id, 'user', 'first', 'web')
+        tmp_store.add_message(session_id, 'assistant', 'reply', 'web')
+
+        tmp_store.archive_session(session_id, 'Test summary')
+
+        # Should no longer be in active conversations
+        active = tmp_store.get_recent_history(session_id, limit=100)
+        assert len(active) == 0
+
+        # Should be in archived_sessions
+        archived = tmp_store.get_session(session_id)
+        assert archived is not None
+        assert archived['archived'] is True
+        assert archived['summary'] == 'Test summary'
+        assert len(archived['messages']) == 2
+
+    def test_get_session_finds_archived_session(self, tmp_store):
+        session_id = 'find-archived'
+        tmp_store.add_message(session_id, 'user', 'content', 'web')
+        tmp_store.archive_session(session_id, 'archived summary')
+
+        result = tmp_store.get_session(session_id)
+        assert result is not None
+        assert result['archived'] is True
+
+
+# ─── Subproject + session API endpoints ──────────────────────────────────────
+
+class TestSubprojectEndpoints:
+    def test_get_subprojects_endpoint(self, client):
+        tc, headers = client
+        r = tc.get('/projects/claw/subprojects', headers=headers)
+        assert r.status_code == 200
+        data = r.json()
+        assert 'subprojects' in data
+        assert isinstance(data['subprojects'], list)
+
+    def test_create_subproject_endpoint(self, client):
+        tc, headers = client
+        r = tc.post('/projects/claw/subprojects', headers=headers, json={
+            'name': 'test-client.example.com',
+            'display_name': 'Test Client',
+            'description': 'Created in test',
+        })
+        assert r.status_code == 200
+        data = r.json()
+        assert data['name'] == 'test-client.example.com'
+        assert data['display_name'] == 'Test Client'
+
+    def test_create_subproject_endpoint_idempotent(self, client):
+        tc, headers = client
+        body = {'name': 'idempotent.example.com', 'display_name': 'Idempotent'}
+        r1 = tc.post('/projects/claw/subprojects', headers=headers, json=body)
+        r2 = tc.post('/projects/claw/subprojects', headers=headers, json=body)
+        assert r1.status_code == 200
+        assert r2.status_code == 200
+
+    def test_get_sessions_endpoint(self, client):
+        tc, headers = client
+        r = tc.get('/projects/claw/sessions', headers=headers)
+        assert r.status_code == 200
+        data = r.json()
+        assert 'sessions' in data
+        assert isinstance(data['sessions'], list)
+
+    def test_get_sessions_scoped_endpoint(self, client):
+        tc, headers = client
+        # Create a subproject first
+        tc.post('/projects/claw/subprojects', headers=headers, json={
+            'name': 'scope-test.example.com',
+            'display_name': 'Scope Test',
+        })
+        r = tc.get(
+            '/projects/claw/sessions',
+            headers=headers,
+            params={'subproject': 'claw:scope-test.example.com'},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert 'sessions' in data
+
+
+# ─── Startup: phloe subprojects created ──────────────────────────────────────
+
+class TestPhloeSubprojectsOnStartup:
+    def test_phloe_subprojects_created_on_startup(self, client):
+        """Phloe subprojects from config.json should be seeded on startup."""
+        tc, headers = client
+        r = tc.get('/projects/phloe/subprojects', headers=headers)
+        assert r.status_code == 200
+        data = r.json()
+        names = [sp['name'] for sp in data['subprojects']]
+        assert 'demnurse.nbne.uk' in names
+        assert 'theminddepartment.co.uk' in names
+        assert 'ganbarukai.co.uk' in names
+        assert 'floe.nbne.uk' in names
