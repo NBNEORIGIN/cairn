@@ -87,11 +87,24 @@ class ClawAgent:
         if envelope.tool_approval:
             return await self._handle_tool_approval(envelope)
 
+        # Resolve @ mentions before building context prompt
+        resolved_mentions: list[dict] = []
+        if envelope.mentions:
+            try:
+                resolved_mentions = await self.context.resolve_mentions(
+                    mentions=envelope.mentions,
+                    project_id=self.project_id,
+                    config=self.config,
+                )
+            except Exception as exc:
+                logger.warning(f"[CLAW] mention resolution failed: {exc}")
+
         # Build context prompt (scoped to subproject when set)
         context_prompt = self.context.build_context_prompt(
             task=envelope.content,
             embedding_fn=self._embed,
             subproject_id=envelope.subproject_id,
+            resolved_mentions=resolved_mentions or None,
         )
 
         # System instruction prepended to every prompt
@@ -132,12 +145,27 @@ class ClawAgent:
         context_tokens = estimate_tokens(context_prompt + envelope.content)
         # read_only passes are assessment/plan — treat as SAFE for routing
         routing_risk = 'safe' if envelope.read_only else 'review'
+
+        # Map per-message model_override to a force_tier value
+        _OVERRIDE_MAP = {
+            'auto':     None,
+            'local':    1,
+            'deepseek': 2,
+            'sonnet':   3,
+            'opus':     4,
+        }
+        force_tier = _OVERRIDE_MAP.get(envelope.model_override or '', None)
+
         model_choice = route(
             task=envelope.content,
             context_tokens=context_tokens,
             project_config=self.config,
             risk_level=routing_risk,
+            force_tier=force_tier,
         )
+
+        # Track whether this routing was manually overridden for the response
+        _model_was_manual = envelope.model_override not in (None, 'auto', '')
 
         available_tools = self._get_tools_for_task(
             envelope.content, read_only=envelope.read_only
@@ -193,6 +221,7 @@ class ClawAgent:
                     prior_cost=cost_usd,
                     client=client if model_choice != ModelChoice.LOCAL else None,
                     available_tools=available_tools,
+                    model_was_manual=_model_was_manual,
                 )
             elif tool:
                 # REVIEW / DESTRUCTIVE tool: surface for approval (unchanged)
@@ -236,6 +265,7 @@ class ClawAgent:
         )
 
         metadata = await self._check_trim_archive(session_id)
+        metadata['model_routing'] = 'manual' if _model_was_manual else 'auto'
 
         return AgentResponse(
             content=response_text or '',
@@ -259,6 +289,7 @@ class ClawAgent:
         prior_cost: float,
         client,
         available_tools: list[dict],
+        model_was_manual: bool = False,
     ) -> AgentResponse:
         """
         Agentic tool loop for SAFE tools.
@@ -409,6 +440,7 @@ class ClawAgent:
         )
 
         metadata = await self._check_trim_archive(session_id)
+        metadata['model_routing'] = 'manual' if model_was_manual else 'auto'
 
         return AgentResponse(
             content=current_text or '',

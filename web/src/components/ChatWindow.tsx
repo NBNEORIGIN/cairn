@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, KeyboardEvent } from 'react'
 import { MessageBubble, Message, ToolCallRecord } from './MessageBubble'
 import { PendingToolCall } from './ToolApproval'
 import { SessionSidebar, Subproject } from './SessionSidebar'
@@ -11,22 +11,35 @@ interface Project {
   ready: boolean
 }
 
+interface Mention {
+  type: string   // file | folder | symbol | session | core | web
+  value: string
+  display: string
+}
+
+interface DropdownItem {
+  type: string
+  value: string
+  display: string
+  detail?: string
+}
+
+const MODEL_OPTIONS = [
+  { value: 'auto',     label: 'Auto',    detail: 'recommended',  cost: '' },
+  { value: 'local',    label: '⚡ Local',  detail: 'qwen2.5-coder', cost: 'free' },
+  { value: 'deepseek', label: '🌊 DeepSeek', detail: 'deepseek-chat', cost: '~$0.001' },
+  { value: 'sonnet',   label: '☁ Sonnet', detail: 'claude-sonnet', cost: '~$0.005' },
+  { value: 'opus',     label: '🧠 Opus',   detail: 'claude-opus',  cost: '~$0.015' },
+]
+
 function generateId() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36)
 }
 
 const TOKEN_TRIM_THRESHOLD = 40_000
-const TOKEN_ARCHIVE_THRESHOLD = 50_000
 
 function TokenBar({ tokens }: { tokens: number }) {
   const pct = Math.min(100, (tokens / TOKEN_TRIM_THRESHOLD) * 100)
-  const colour =
-    tokens >= TOKEN_TRIM_THRESHOLD
-      ? 'bg-red-500'
-      : tokens >= TOKEN_TRIM_THRESHOLD * 0.8
-      ? 'bg-amber-500'
-      : 'bg-zinc-500'
-
   const filled = Math.round(pct / 5)
   const empty = 20 - filled
   const bar = '█'.repeat(filled) + '░'.repeat(empty)
@@ -41,6 +54,35 @@ function TokenBar({ tokens }: { tokens: number }) {
         {tokens.toLocaleString()} / {TOKEN_TRIM_THRESHOLD.toLocaleString()} tokens
       </span>
     </div>
+  )
+}
+
+function MentionPill({
+  mention,
+  onRemove,
+}: {
+  mention: Mention
+  onRemove: () => void
+}) {
+  const icon =
+    mention.type === 'file' ? '📄' :
+    mention.type === 'folder' ? '📁' :
+    mention.type === 'symbol' ? '⚙' :
+    mention.type === 'session' ? '💬' :
+    mention.type === 'core' ? '📌' :
+    '🌐'
+
+  return (
+    <span className="inline-flex items-center gap-1 bg-zinc-800 border border-zinc-600 rounded px-2 py-0.5 text-xs text-zinc-300 font-mono">
+      {icon} {mention.display}
+      <button
+        onClick={onRemove}
+        className="ml-1 text-zinc-500 hover:text-zinc-200 leading-none"
+        aria-label="Remove mention"
+      >
+        ✕
+      </button>
+    </span>
   )
 }
 
@@ -67,8 +109,21 @@ export function ChatWindow() {
   // Archive notification
   const [archiveBanner, setArchiveBanner] = useState<string | null>(null)
 
+  // @ mention state
+  const [mentions, setMentions] = useState<Mention[]>([])
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null)
+  const [mentionTab, setMentionTab] = useState<'files' | 'folders' | 'symbols' | 'sessions'>('files')
+  const [mentionItems, setMentionItems] = useState<DropdownItem[]>([])
+  const [mentionIndex, setMentionIndex] = useState(0)
+  const mentionFetchRef = useRef<AbortController | null>(null)
+
+  // Model selector state
+  const [modelOverride, setModelOverride] = useState<string>('auto')
+  const [modelDropdownOpen, setModelDropdownOpen] = useState(false)
+
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const modelDropdownRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -76,6 +131,17 @@ export function ChatWindow() {
 
   useEffect(() => {
     setSessionId(generateId())
+  }, [])
+
+  // Close model dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (modelDropdownRef.current && !modelDropdownRef.current.contains(e.target as Node)) {
+        setModelDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
   }, [])
 
   useEffect(() => {
@@ -140,6 +206,160 @@ export function ChatWindow() {
     return () => document.removeEventListener('paste', handlePaste)
   }, [])
 
+  // ── @ mention dropdown fetching ─────────────────────────────────────────────
+
+  useEffect(() => {
+    if (mentionQuery === null || !projectId) {
+      setMentionItems([])
+      return
+    }
+
+    if (mentionFetchRef.current) mentionFetchRef.current.abort()
+    const ctrl = new AbortController()
+    mentionFetchRef.current = ctrl
+
+    const q = encodeURIComponent(mentionQuery)
+    const apiKey = process.env.NEXT_PUBLIC_CLAW_API_KEY || ''
+    const headers: Record<string, string> = apiKey ? { 'X-API-Key': apiKey } : {}
+
+    const fetchTab = async () => {
+      try {
+        if (mentionTab === 'files') {
+          const r = await fetch(
+            `http://localhost:8765/projects/${projectId}/files?q=${q}`,
+            { headers, signal: ctrl.signal },
+          )
+          const data = await r.json()
+          setMentionItems(
+            (data.files || []).slice(0, 20).map((f: string) => ({
+              type: 'file',
+              value: f,
+              display: f.split('/').pop() || f,
+              detail: f,
+            }))
+          )
+        } else if (mentionTab === 'folders') {
+          // Use files endpoint and deduplicate top-level directories
+          const r = await fetch(
+            `http://localhost:8765/projects/${projectId}/files`,
+            { headers, signal: ctrl.signal },
+          )
+          const data = await r.json()
+          const dirs = new Set<string>()
+          ;(data.files || []).forEach((f: string) => {
+            const parts = f.split('/')
+            if (parts.length > 1) dirs.add(parts[0])
+          })
+          setMentionItems(
+            Array.from(dirs)
+              .filter(d => !mentionQuery || d.toLowerCase().includes(mentionQuery.toLowerCase()))
+              .slice(0, 20)
+              .map(d => ({ type: 'folder', value: d, display: d, detail: d + '/' }))
+          )
+        } else if (mentionTab === 'symbols') {
+          if (!mentionQuery) { setMentionItems([]); return }
+          const r = await fetch(
+            `http://localhost:8765/projects/${projectId}/symbols?q=${q}`,
+            { headers, signal: ctrl.signal },
+          )
+          const data = await r.json()
+          setMentionItems(
+            (data.symbols || []).slice(0, 20).map((s: { name: string; file: string; type: string }) => ({
+              type: 'symbol',
+              value: s.name,
+              display: s.name,
+              detail: `${s.type} in ${s.file}`,
+            }))
+          )
+        } else if (mentionTab === 'sessions') {
+          const r = await fetch(`/api/sessions?project=${projectId}`, { signal: ctrl.signal })
+          const data = await r.json()
+          setMentionItems(
+            (data.sessions || []).slice(0, 20).map((s: { session_id: string; first_message?: string; created_at?: string }) => ({
+              type: 'session',
+              value: s.session_id,
+              display: s.session_id.slice(0, 12),
+              detail: s.first_message?.slice(0, 50) || s.created_at || '',
+            }))
+          )
+        }
+        setMentionIndex(0)
+      } catch {
+        // aborted or failed — ignore
+      }
+    }
+
+    fetchTab()
+  }, [mentionQuery, mentionTab, projectId])
+
+  const closeMentionDropdown = useCallback(() => {
+    setMentionQuery(null)
+    setMentionItems([])
+  }, [])
+
+  const selectMentionItem = useCallback((item: DropdownItem) => {
+    setMentions(prev => {
+      if (prev.some(m => m.type === item.type && m.value === item.value)) return prev
+      return [...prev, { type: item.type, value: item.value, display: item.display }]
+    })
+    // Remove the @query from the textarea
+    setInput(prev => {
+      const atIdx = prev.lastIndexOf('@')
+      return atIdx >= 0 ? prev.slice(0, atIdx) : prev
+    })
+    closeMentionDropdown()
+    textareaRef.current?.focus()
+  }, [closeMentionDropdown])
+
+  // ── Input handling ──────────────────────────────────────────────────────────
+
+  const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value
+    setInput(val)
+    e.target.style.height = 'auto'
+    e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'
+
+    // Detect @ trigger
+    const cursor = e.target.selectionStart ?? val.length
+    const textBeforeCursor = val.slice(0, cursor)
+    const atMatch = textBeforeCursor.match(/@(\S*)$/)
+    if (atMatch) {
+      setMentionQuery(atMatch[1])
+    } else {
+      closeMentionDropdown()
+    }
+  }
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Navigate mention dropdown
+    if (mentionQuery !== null && mentionItems.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setMentionIndex(i => Math.min(i + 1, mentionItems.length - 1))
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setMentionIndex(i => Math.max(i - 1, 0))
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        if (mentionItems[mentionIndex]) selectMentionItem(mentionItems[mentionIndex])
+        return
+      }
+      if (e.key === 'Escape') {
+        closeMentionDropdown()
+        return
+      }
+    }
+
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSubmit()
+    }
+  }
+
   const newSession = useCallback(() => {
     setSessionId(generateId())
     setSessionCost(0)
@@ -147,6 +367,7 @@ export function ChatWindow() {
     setApiCalls(0)
     setSessionTokens(0)
     setArchiveBanner(null)
+    setMentions([])
     setMessages([{
       id: generateId(),
       role: 'system',
@@ -177,6 +398,14 @@ export function ChatWindow() {
 
     setPastedImage(null)
 
+    // Capture current mentions and reset (one-shot per message)
+    const currentMentions = mentions
+    setMentions([])
+
+    // Capture current model override and reset to auto
+    const currentOverride = modelOverride === 'auto' ? undefined : modelOverride
+    setModelOverride('auto')
+
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
@@ -190,6 +419,8 @@ export function ChatWindow() {
           image_base64: imgBase64 || undefined,
           image_media_type: imgType,
           subproject_id: activeSubprojectId || undefined,
+          mentions: currentMentions,
+          model_override: currentOverride,
         }),
       })
 
@@ -210,12 +441,10 @@ export function ChatWindow() {
           setSessionCost(c => c + (data.cost_usd || 0))
         }
 
-        // Accumulate token estimate
         if (data.tokens_used) {
           setSessionTokens(t => t + (data.tokens_used as number))
         }
 
-        // Check for archive notification
         const meta = data.metadata || {}
         if (meta.session_archived) {
           setArchiveBanner(meta.archive_summary || 'Session archived — summary added to context')
@@ -228,6 +457,7 @@ export function ChatWindow() {
           content: data.content || '(no response)',
           modelUsed: data.model_used,
           costUsd: data.cost_usd,
+          modelRouting: meta.model_routing || 'auto',
           pendingToolCall: data.pending_tool_call || null,
           toolCalls: (data.tool_calls || []) as ToolCallRecord[],
         }])
@@ -250,7 +480,7 @@ export function ChatWindow() {
     } finally {
       setLoading(false)
     }
-  }, [projectId, sessionId, pastedImage, pastedImageType, activeSubprojectId, newSession])
+  }, [projectId, sessionId, pastedImage, pastedImageType, activeSubprojectId, mentions, modelOverride, newSession])
 
   const handleSubmit = () => {
     const text = input.trim()
@@ -280,20 +510,8 @@ export function ChatWindow() {
     })
   }, [sendMessage])
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSubmit()
-    }
-  }
-
-  const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setInput(e.target.value)
-    e.target.style.height = 'auto'
-    e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'
-  }
-
   const activeSubproject = subprojects.find(sp => sp.id === activeSubprojectId)
+  const selectedModel = MODEL_OPTIONS.find(m => m.value === modelOverride) || MODEL_OPTIONS[0]
 
   return (
     <div className="flex h-full">
@@ -404,6 +622,7 @@ export function ChatWindow() {
 
         {/* Input area */}
         <div className="border-t border-zinc-800 bg-zinc-950 px-4 py-3">
+          {/* Image preview */}
           {pastedImage && (
             <div className="relative mb-2 inline-block">
               <img
@@ -419,7 +638,75 @@ export function ChatWindow() {
               </button>
             </div>
           )}
-          <div className="flex gap-3 items-end">
+
+          {/* Context pills — pinned @ mentions */}
+          {mentions.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {mentions.map((m, i) => (
+                <MentionPill
+                  key={`${m.type}:${m.value}`}
+                  mention={m}
+                  onRemove={() => setMentions(prev => prev.filter((_, j) => j !== i))}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* @ mention dropdown */}
+          {mentionQuery !== null && (
+            <div className="relative mb-2">
+              <div className="absolute bottom-0 left-0 right-0 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 overflow-hidden">
+                {/* Tabs */}
+                <div className="flex border-b border-zinc-800">
+                  {(['files', 'folders', 'symbols', 'sessions'] as const).map(tab => (
+                    <button
+                      key={tab}
+                      onClick={() => { setMentionTab(tab); setMentionIndex(0) }}
+                      className={`flex-1 py-1.5 text-[11px] font-medium transition-colors capitalize
+                        ${mentionTab === tab
+                          ? 'text-zinc-100 bg-zinc-800'
+                          : 'text-zinc-500 hover:text-zinc-300'
+                        }`}
+                    >
+                      {tab}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Items */}
+                {mentionItems.length === 0 ? (
+                  <div className="px-3 py-2 text-xs text-zinc-600 italic">
+                    {mentionQuery ? `No ${mentionTab} matching "${mentionQuery}"` : `Type to search ${mentionTab}…`}
+                  </div>
+                ) : (
+                  <div className="max-h-48 overflow-y-auto">
+                    {mentionItems.map((item, i) => (
+                      <button
+                        key={`${item.type}:${item.value}`}
+                        onClick={() => selectMentionItem(item)}
+                        className={`w-full text-left px-3 py-1.5 flex items-center gap-2 text-xs transition-colors
+                          ${i === mentionIndex ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-300 hover:bg-zinc-800'}`}
+                      >
+                        <span className="font-mono text-zinc-200 truncate">{item.display}</span>
+                        {item.detail && (
+                          <span className="text-zinc-600 truncate text-[10px] ml-auto shrink-0 max-w-[40%]">
+                            {item.detail}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <div className="px-3 py-1 border-t border-zinc-800 text-[10px] text-zinc-700">
+                  ↑↓ navigate · Enter to add · Esc to close
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Input row */}
+          <div className="flex gap-2 items-end">
             <textarea
               ref={textareaRef}
               value={input}
@@ -428,24 +715,63 @@ export function ChatWindow() {
               placeholder={
                 projectId
                   ? activeSubproject
-                    ? `Ask CLAW about ${activeSubproject.display_name}…`
-                    : `Ask CLAW about ${projectId}…`
+                    ? `Ask CLAW about ${activeSubproject.display_name}… (@ to pin context)`
+                    : `Ask CLAW about ${projectId}… (@ to pin context)`
                   : 'Select a project first'
               }
               disabled={!projectId || loading}
               rows={1}
               className="flex-1 bg-zinc-900 border border-zinc-700 text-zinc-100 text-sm rounded-lg px-3 py-2 resize-none min-h-[38px] max-h-[120px] focus:outline-none focus:border-zinc-500 placeholder:text-zinc-600 disabled:opacity-50"
             />
+
+            {/* Model selector */}
+            <div ref={modelDropdownRef} className="relative shrink-0">
+              <button
+                onClick={() => setModelDropdownOpen(o => !o)}
+                className={`h-[38px] px-2.5 text-xs rounded-lg border transition-colors flex items-center gap-1
+                  ${modelOverride !== 'auto'
+                    ? 'bg-zinc-700 border-zinc-500 text-zinc-100'
+                    : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-zinc-500'
+                  }`}
+                title="Select model for this message"
+              >
+                {selectedModel.label} <span className="text-zinc-600">▾</span>
+              </button>
+
+              {modelDropdownOpen && (
+                <div className="absolute bottom-full right-0 mb-1 w-52 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 overflow-hidden">
+                  {MODEL_OPTIONS.map(opt => (
+                    <button
+                      key={opt.value}
+                      onClick={() => { setModelOverride(opt.value); setModelDropdownOpen(false) }}
+                      className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between transition-colors
+                        ${modelOverride === opt.value ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-300 hover:bg-zinc-800'}`}
+                    >
+                      <span className="flex items-center gap-2">
+                        {modelOverride === opt.value && <span className="text-zinc-400">●</span>}
+                        {modelOverride !== opt.value && <span className="text-zinc-700">○</span>}
+                        <span>{opt.label}</span>
+                        <span className="text-zinc-600 text-[10px]">{opt.detail}</span>
+                      </span>
+                      {opt.cost && (
+                        <span className="text-zinc-600 text-[10px] ml-2 shrink-0">{opt.cost}</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <button
               onClick={handleSubmit}
               disabled={(!input.trim() && !pastedImage) || loading || !projectId}
-              className="px-4 py-2 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
+              className="h-[38px] px-4 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40 text-white text-sm rounded-lg transition-colors shrink-0"
             >
               Send
             </button>
           </div>
           <p className="text-xs text-zinc-700 mt-1.5">
-            Enter to send · Shift+Enter for newline
+            Enter to send · Shift+Enter for newline · @ to pin context
           </p>
         </div>
       </div>

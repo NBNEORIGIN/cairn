@@ -133,6 +133,12 @@ def get_agent(project_id: str) -> ClawAgent:
 
 # ─── Request/Response models ────────────────────────────────────────────────
 
+class MentionedContext(BaseModel):
+    type: str     # file | folder | symbol | session | core | web
+    value: str    # path, symbol name, session_id, or search query
+    display: str  # short label shown in the pill UI
+
+
 class ChatRequest(BaseModel):
     content: str
     project_id: str
@@ -146,6 +152,8 @@ class ChatRequest(BaseModel):
     read_only: bool = False   # WiggumOrchestrator sets this for assess/plan passes
     max_tool_rounds: Optional[int] = None   # Override agent MAX_TOOL_ROUNDS per request
     subproject_id: Optional[str] = None    # Scope session to a subproject
+    mentions: list[MentionedContext] = []  # @ mentioned context items
+    model_override: Optional[str] = None  # 'auto'|'local'|'deepseek'|'sonnet'|'opus'
 
 
 class SubprojectCreateRequest(BaseModel):
@@ -204,6 +212,8 @@ async def chat(
         read_only=request.read_only,
         max_tool_rounds=request.max_tool_rounds,
         subproject_id=request.subproject_id,
+        mentions=[m.model_dump() for m in request.mentions],
+        model_override=request.model_override,
     )
 
     response = await agent.process(envelope)
@@ -308,6 +318,107 @@ async def get_subproject_session(
     if not session:
         raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
     return session
+
+
+@app.get("/projects/{project}/files")
+async def get_project_files(
+    project: str,
+    q: Optional[str] = None,
+    _: bool = Depends(verify_api_key),
+):
+    """
+    Return all indexed file paths for a project.
+    Optional ?q= filter applied as a case-insensitive substring match.
+    Falls back to walking the codebase directory if pgvector is unavailable.
+    """
+    db_url = os.getenv('DATABASE_URL', '')
+    files: list[str] = []
+
+    if db_url:
+        try:
+            import psycopg2
+            conn = psycopg2.connect(db_url)
+            with conn.cursor() as cur:
+                if q:
+                    cur.execute(
+                        "SELECT DISTINCT file_path FROM claw_code_chunks "
+                        "WHERE project_id=%s AND file_path ILIKE %s ORDER BY file_path",
+                        (project, f'%{q}%'),
+                    )
+                else:
+                    cur.execute(
+                        "SELECT DISTINCT file_path FROM claw_code_chunks "
+                        "WHERE project_id=%s ORDER BY file_path",
+                        (project,),
+                    )
+                files = [row[0] for row in cur.fetchall()]
+            conn.close()
+        except Exception:
+            pass
+
+    if not files:
+        # Fallback: walk codebase_path from config
+        config_path = _PROJECTS_ROOT / project / 'config.json'
+        if config_path.exists():
+            config = json.loads(config_path.read_text())
+            codebase = config.get('codebase_path', '')
+            if codebase:
+                base = Path(codebase)
+                SKIP = {'.git', '__pycache__', 'node_modules', '.venv', '.next', 'dist'}
+                EXTS = {'.py', '.ts', '.tsx', '.js', '.jsx', '.json', '.md', '.yaml', '.yml'}
+                for p in sorted(base.rglob('*')):
+                    if p.is_file() and p.suffix in EXTS:
+                        if not any(part in SKIP for part in p.parts):
+                            rel = str(p.relative_to(base)).replace('\\', '/')
+                            if q is None or q.lower() in rel.lower():
+                                files.append(rel)
+                files = files[:500]
+
+    return {'files': files, 'count': len(files)}
+
+
+@app.get("/projects/{project}/symbols")
+async def get_project_symbols(
+    project: str,
+    q: str = '',
+    _: bool = Depends(verify_api_key),
+):
+    """
+    Search pgvector index for symbol names (function/class definitions).
+    Requires ?q= search term. Returns symbol name + file it's in.
+    """
+    db_url = os.getenv('DATABASE_URL', '')
+    symbols: list[dict] = []
+
+    if not db_url:
+        return {'symbols': symbols}
+
+    try:
+        import psycopg2
+        conn = psycopg2.connect(db_url)
+        with conn.cursor() as cur:
+            pattern = f'%{q}%'
+            cur.execute(
+                """
+                SELECT DISTINCT ON (chunk_name) chunk_name, file_path, chunk_type
+                FROM claw_code_chunks
+                WHERE project_id=%s
+                  AND chunk_type IN ('function', 'class', 'method')
+                  AND chunk_name ILIKE %s
+                ORDER BY chunk_name, file_path
+                LIMIT 30
+                """,
+                (project, pattern),
+            )
+            symbols = [
+                {'name': row[0], 'file': row[1], 'type': row[2]}
+                for row in cur.fetchall()
+            ]
+        conn.close()
+    except Exception:
+        pass
+
+    return {'symbols': symbols}
 
 
 @app.get("/projects")

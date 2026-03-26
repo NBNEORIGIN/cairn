@@ -95,7 +95,12 @@ def route(
     # ── Project-level config override ─────────────────────────────────────
     forced_model = project_config.get('force_model')
     if forced_model == 'api':
-        return _pick_api_tier(task)
+        # "api" means Claude — do NOT sub-route to DeepSeek.
+        # Projects set this to skip Ollama; they expect Claude, not DeepSeek.
+        # Use force_model: "deepseek" to explicitly opt-in to DeepSeek.
+        return ModelChoice.API
+    if forced_model == 'deepseek':
+        return ModelChoice.DEEPSEEK if _deepseek_available() else ModelChoice.API
     if forced_model == 'local':
         return ModelChoice.LOCAL
 

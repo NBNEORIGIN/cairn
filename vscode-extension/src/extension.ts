@@ -142,6 +142,122 @@ export function activate(context: vscode.ExtensionContext) {
             }
         }),
 
+        vscode.commands.registerCommand('claw.addMention', async () => {
+            const config = vscode.workspace.getConfiguration('claw');
+            const apiUrl = config.get<string>('apiUrl', 'http://localhost:8765');
+            const apiKey = config.get<string>('apiKey', '');
+            const projectId = config.get<string>('defaultProject', 'claw');
+
+            // Step 1 — pick context type
+            const typeChoice = await vscode.window.showQuickPick(
+                [
+                    { label: '📄 File', value: 'file', description: 'Pin a specific file' },
+                    { label: '📁 Folder', value: 'folder', description: 'Pin all files in a folder' },
+                    { label: '⚙ Symbol', value: 'symbol', description: 'Pin a function or class by name' },
+                    { label: '💬 Session', value: 'session', description: 'Attach a past session' },
+                    { label: '📌 core.md', value: 'core', description: 'Attach the project core.md' },
+                    { label: '🌐 Web search', value: 'web', description: 'Search the web and attach results' },
+                ],
+                { placeHolder: 'What context do you want to pin?' },
+            );
+            if (!typeChoice) { return; }
+
+            let value = '';
+            let display = '';
+
+            if (typeChoice.value === 'core') {
+                value = 'core.md';
+                display = 'core.md';
+            } else if (typeChoice.value === 'web') {
+                const query = await vscode.window.showInputBox({ prompt: 'Web search query' });
+                if (!query) { return; }
+                value = query;
+                display = query.slice(0, 30);
+            } else if (typeChoice.value === 'file' || typeChoice.value === 'folder') {
+                try {
+                    const res = await fetch(`${apiUrl}/projects/${projectId}/files`, {
+                        headers: { 'X-API-Key': apiKey },
+                    });
+                    const data = await res.json() as { files: string[] };
+                    let items = (data.files || []).map((f: string) => ({ label: f }));
+                    if (typeChoice.value === 'folder') {
+                        const dirs = new Set<string>();
+                        data.files.forEach((f: string) => {
+                            const parts = f.split('/');
+                            if (parts.length > 1) { dirs.add(parts[0]); }
+                        });
+                        items = Array.from(dirs).map(d => ({ label: d + '/' }));
+                    }
+                    const picked = await vscode.window.showQuickPick(items, {
+                        placeHolder: `Select a ${typeChoice.value}`,
+                        matchOnDescription: true,
+                    });
+                    if (!picked) { return; }
+                    value = picked.label.replace(/\/$/, '');
+                    display = value.split('/').pop() || value;
+                } catch {
+                    vscode.window.showErrorMessage('CLAW: Could not fetch file list');
+                    return;
+                }
+            } else if (typeChoice.value === 'symbol') {
+                const query = await vscode.window.showInputBox({ prompt: 'Symbol name (function or class)' });
+                if (!query) { return; }
+                try {
+                    const res = await fetch(
+                        `${apiUrl}/projects/${projectId}/symbols?q=${encodeURIComponent(query)}`,
+                        { headers: { 'X-API-Key': apiKey } },
+                    );
+                    const data = await res.json() as { symbols: Array<{ name: string; file: string; type: string }> };
+                    if (!data.symbols?.length) {
+                        vscode.window.showWarningMessage(`No symbols found matching "${query}"`);
+                        return;
+                    }
+                    const picked = await vscode.window.showQuickPick(
+                        data.symbols.map(s => ({ label: s.name, description: `${s.type} in ${s.file}` })),
+                        { placeHolder: 'Select symbol' },
+                    );
+                    if (!picked) { return; }
+                    value = picked.label;
+                    display = picked.label;
+                } catch {
+                    vscode.window.showErrorMessage('CLAW: Could not fetch symbols');
+                    return;
+                }
+            } else if (typeChoice.value === 'session') {
+                try {
+                    const res = await fetch(
+                        `${apiUrl}/projects/${projectId}/sessions`,
+                        { headers: { 'X-API-Key': apiKey } },
+                    );
+                    const data = await res.json() as { sessions: Array<{ session_id: string; first_message?: string }> };
+                    const picked = await vscode.window.showQuickPick(
+                        (data.sessions || []).map(s => ({
+                            label: s.session_id.slice(0, 16),
+                            description: s.first_message?.slice(0, 60) || '',
+                            value: s.session_id,
+                        })),
+                        { placeHolder: 'Select session to attach' },
+                    );
+                    if (!picked) { return; }
+                    value = (picked as any).value;
+                    display = picked.label;
+                } catch {
+                    vscode.window.showErrorMessage('CLAW: Could not fetch sessions');
+                    return;
+                }
+            }
+
+            if (!value) { return; }
+
+            // Send the mention to the panel
+            if (ClawPanel.currentPanel) {
+                ClawPanel.currentPanel.addMention({ type: typeChoice.value, value, display });
+                vscode.window.showInformationMessage(`CLAW: Pinned ${typeChoice.value} — ${display}`);
+            } else {
+                vscode.window.showWarningMessage('CLAW panel is not open');
+            }
+        }),
+
         vscode.commands.registerCommand('claw.switchProject', async () => {
             const config = vscode.workspace.getConfiguration('claw');
             const apiUrl = config.get<string>('apiUrl', 'http://localhost:8765');

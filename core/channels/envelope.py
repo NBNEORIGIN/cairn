@@ -64,6 +64,16 @@ class MessageEnvelope:
     # Scopes session history and pgvector retrieval to this subproject.
     subproject_id: Optional[str] = None
 
+    # @ mentioned context items explicitly pinned by the user.
+    # Each dict: {'type': str, 'value': str, 'display': str}
+    # type = file | folder | symbol | session | core | web
+    # Resolved by ContextEngine.resolve_mentions() before pgvector retrieval.
+    mentions: list = field(default_factory=list)
+
+    # Override automatic model routing for this message only.
+    # Values: 'auto' | 'local' | 'deepseek' | 'sonnet' | 'opus'
+    model_override: Optional[str] = None
+
     metadata: dict = field(default_factory=dict)
 
 

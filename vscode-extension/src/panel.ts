@@ -58,7 +58,7 @@ export class ClawPanel {
             async (message) => {
                 switch (message.type) {
                     case 'sendMessage':
-                        await this._handleSend(message.content);
+                        await this._handleSend({ content: message.content, mentions: message.mentions, modelOverride: message.modelOverride });
                         break;
                     case 'approveTool':
                         await this._handleApproval(message, true);
@@ -109,7 +109,15 @@ export class ClawPanel {
         this._panel.reveal();
     }
 
-    private async _handleSend(content: string) {
+    public addMention(mention: { type: string; value: string; display: string }) {
+        this._panel.webview.postMessage({ type: 'addMention', mention });
+    }
+
+    private async _handleSend(message: { content: string; mentions?: Array<{ type: string; value: string; display: string }>; modelOverride?: string }) {
+        const content = typeof message === 'string' ? message : message.content;
+        const mentions = (typeof message === 'object' && message.mentions) ? message.mentions : [];
+        const modelOverride = (typeof message === 'object' && message.modelOverride) ? message.modelOverride : undefined;
+
         const config = vscode.workspace.getConfiguration('claw');
         const apiUrl = config.get<string>('apiUrl', 'http://localhost:8765');
         const apiKey = config.get<string>('apiKey', '');
@@ -135,6 +143,8 @@ export class ClawPanel {
                     channel: 'vscode',
                     active_file: activeFile,
                     selected_text: selectedText,
+                    mentions,
+                    model_override: modelOverride,
                 }),
             });
 
@@ -307,6 +317,22 @@ export class ClawPanel {
     border-top:1px solid var(--vscode-panel-border);
     flex-shrink:0
   }
+  #mentions-row{
+    padding:4px 12px 0;background:var(--vscode-panel-background);
+    display:flex;flex-wrap:wrap;gap:4px;flex-shrink:0
+  }
+  .mention-pill{
+    display:inline-flex;align-items:center;gap:4px;
+    background:var(--vscode-input-background);
+    border:1px solid var(--vscode-panel-border);
+    border-radius:4px;padding:1px 6px;font-size:11px;
+    color:var(--vscode-foreground)
+  }
+  .mention-pill button{
+    background:none;border:none;padding:0 0 0 2px;
+    cursor:pointer;color:var(--vscode-descriptionForeground);
+    font-size:11px;height:auto
+  }
   #input-row{
     padding:8px 12px;
     border-top:1px solid var(--vscode-panel-border);
@@ -335,8 +361,9 @@ export class ClawPanel {
 </div>
 <div id="messages"></div>
 <div id="cost-row">$0.0000 | local: 0 | api: 0</div>
+<div id="mentions-row"></div>
 <div id="input-row">
-  <textarea id="inp" placeholder="Ask CLAW..." rows="1"></textarea>
+  <textarea id="inp" placeholder="Ask CLAW... (@ to mention)" rows="1"></textarea>
   <button id="send" class="btn-ok">Send</button>
 </div>
 
@@ -348,8 +375,23 @@ const send = document.getElementById('send');
 const costRow  = document.getElementById('cost-row');
 const modelBadge = document.getElementById('model-badge');
 const projectBadge = document.getElementById('project-badge');
+const mentionsRow = document.getElementById('mentions-row');
 
 let sessionCost = 0, localCalls = 0, apiCalls = 0;
+let pendingMentions = [];
+
+function renderMentions(){
+  mentionsRow.innerHTML = '';
+  pendingMentions.forEach((m,i)=>{
+    const icon = m.type==='file'?'📄':m.type==='folder'?'📁':m.type==='symbol'?'⚙':m.type==='session'?'💬':m.type==='core'?'📌':'🌐';
+    const pill = document.createElement('span');
+    pill.className='mention-pill';
+    pill.innerHTML=icon+' '+esc(m.display)+'<button onclick="removeMention('+i+')">✕</button>';
+    mentionsRow.appendChild(pill);
+  });
+}
+
+function removeMention(i){ pendingMentions.splice(i,1); renderMentions(); }
 
 function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
 
@@ -431,7 +473,10 @@ function doSend(){
   inp.value = ''; inp.style.height='auto';
   const thinking = addMsg('assistant','Thinking…',false);
   thinking.classList.add('thinking');
-  vscode.postMessage({type:'sendMessage', content:text});
+  const mentions = [...pendingMentions];
+  pendingMentions = [];
+  renderMentions();
+  vscode.postMessage({type:'sendMessage', content:text, mentions});
 }
 
 send.addEventListener('click', doSend);
@@ -490,7 +535,13 @@ window.addEventListener('message', e=>{
       break;
 
     case 'activeFileChanged':
-      // Could show in a status bar, for now no-op
+      break;
+
+    case 'addMention':
+      if(msg.mention && !pendingMentions.find(m=>m.type===msg.mention.type&&m.value===msg.mention.value)){
+        pendingMentions.push(msg.mention);
+        renderMentions();
+      }
       break;
   }
 });

@@ -215,6 +215,175 @@ class ContextEngine:
             print(f"Keyword fallback also failed: {e}")
             return []
 
+    async def resolve_mentions(
+        self,
+        mentions: list[dict],
+        project_id: str,
+        config: dict,
+    ) -> list[dict]:
+        """
+        Resolve @ mention dicts to content chunks.
+
+        Each mention: {'type': str, 'value': str, 'display': str}
+        Returns list of {'label': str, 'content': str} ready to inject.
+        Called before pgvector retrieval — mentioned context is always included.
+        """
+        import asyncio
+        results = []
+        codebase_path = config.get('codebase_path', '.')
+
+        for mention in mentions:
+            mtype = mention.get('type', '')
+            value = mention.get('value', '')
+            display = mention.get('display', value)
+            try:
+                if mtype == 'file':
+                    content = await asyncio.to_thread(
+                        self._read_file_safe, codebase_path, value
+                    )
+                    results.append({'label': f'file: {display}', 'content': content})
+
+                elif mtype == 'folder':
+                    chunks = await asyncio.to_thread(
+                        self._read_folder_safe, codebase_path, value, 20
+                    )
+                    for label, content in chunks:
+                        results.append({'label': f'file: {label}', 'content': content})
+
+                elif mtype == 'symbol':
+                    chunks = self._search_symbol_pgvector(value, project_id)
+                    for chunk in chunks:
+                        results.append({
+                            'label': f'symbol: {display} ({chunk["file"]})',
+                            'content': chunk['content'],
+                        })
+
+                elif mtype == 'session':
+                    content = self._read_session_content(value)
+                    if content:
+                        results.append({'label': f'session: {display}', 'content': content})
+
+                elif mtype == 'core':
+                    content = self.load_tier1()
+                    results.append({'label': 'core.md', 'content': content})
+
+                elif mtype == 'web':
+                    content = await self._web_search_chunk(value)
+                    if content:
+                        results.append({'label': f'web: {display}', 'content': content})
+
+            except Exception as exc:
+                results.append({
+                    'label': f'{mtype}: {display}',
+                    'content': f'[Could not resolve mention: {exc}]',
+                })
+
+        return results
+
+    def _read_file_safe(self, codebase_path: str, file_path: str) -> str:
+        """Read a file, enforcing the project boundary."""
+        base = Path(codebase_path).resolve()
+        target = (base / file_path).resolve()
+        if not str(target).startswith(str(base)):
+            raise PermissionError(f"Path '{file_path}' escapes project root")
+        if not target.exists():
+            raise FileNotFoundError(f"File not found: {file_path}")
+        content = target.read_text(encoding='utf-8', errors='replace')
+        # Cap at 8000 chars to avoid blowing the context window with one file
+        if len(content) > 8000:
+            content = content[:8000] + '\n… [truncated at 8000 chars]'
+        return content
+
+    def _read_folder_safe(
+        self, codebase_path: str, folder: str, limit: int
+    ) -> list[tuple[str, str]]:
+        """Return (rel_path, content) for up to `limit` files in a folder."""
+        base = Path(codebase_path).resolve()
+        target = (base / folder).resolve()
+        if not str(target).startswith(str(base)):
+            raise PermissionError(f"Folder '{folder}' escapes project root")
+        if not target.is_dir():
+            raise FileNotFoundError(f"Folder not found: {folder}")
+        SKIP = {'.git', '__pycache__', 'node_modules', '.venv', '.next'}
+        EXTS = {'.py', '.ts', '.tsx', '.js', '.json', '.md'}
+        results = []
+        for p in sorted(target.rglob('*')):
+            if len(results) >= limit:
+                break
+            if p.is_file() and p.suffix in EXTS:
+                if not any(part in SKIP for part in p.parts):
+                    rel = str(p.relative_to(base)).replace('\\', '/')
+                    try:
+                        text = p.read_text(encoding='utf-8', errors='replace')[:3000]
+                        results.append((rel, text))
+                    except Exception:
+                        pass
+        return results
+
+    def _search_symbol_pgvector(self, symbol: str, project_id: str) -> list[dict]:
+        """Find chunks whose chunk_name matches the symbol name."""
+        try:
+            conn = self._get_connection()
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT file_path, chunk_content
+                    FROM claw_code_chunks
+                    WHERE project_id=%s AND chunk_name ILIKE %s
+                    ORDER BY length(chunk_content) ASC
+                    LIMIT 3
+                    """,
+                    (project_id, f'%{symbol}%'),
+                )
+                return [{'file': r[0], 'content': r[1]} for r in cur.fetchall()]
+        except Exception:
+            return []
+
+    def _read_session_content(self, session_id: str) -> str:
+        """Read session messages from SQLite store."""
+        import sqlite3
+        import glob as _glob
+        # Find any SQLite DB that might contain this session
+        data_dir = Path(os.getenv('CLAW_DATA_DIR', './data'))
+        dbs = list(data_dir.glob('*.db'))
+        for db_path in dbs:
+            try:
+                conn = sqlite3.connect(str(db_path))
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    "SELECT role, content FROM messages WHERE session_id=? ORDER BY timestamp ASC LIMIT 30",
+                    (session_id,),
+                ).fetchall()
+                conn.close()
+                if rows:
+                    lines = [f'{r["role"]}: {r["content"][:200]}' for r in rows]
+                    return '\n'.join(lines)
+            except Exception:
+                pass
+        return ''
+
+    async def _web_search_chunk(self, query: str) -> str:
+        """Perform a web search and return results as text."""
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(
+                    'https://api.duckduckgo.com/',
+                    params={'q': query, 'format': 'json', 'no_html': '1'},
+                )
+                data = r.json()
+                abstract = data.get('AbstractText', '')
+                topics = data.get('RelatedTopics', [])[:3]
+                parts = []
+                if abstract:
+                    parts.append(abstract)
+                for t in topics:
+                    if isinstance(t, dict) and t.get('Text'):
+                        parts.append(t['Text'])
+                return '\n'.join(parts) if parts else f'[No results for: {query}]'
+        except Exception as exc:
+            return f'[Web search failed: {exc}]'
+
     def load_tier3(self, file_path: str) -> str:
         """
         Load a complete file on demand.
@@ -240,13 +409,27 @@ class ContextEngine:
         task: str,
         embedding_fn: Callable,
         subproject_id: str | None = None,
+        resolved_mentions: list[dict] | None = None,
     ) -> str:
-        """Assemble full context string from all available tiers."""
+        """Assemble full context string from all available tiers.
+
+        resolved_mentions, if provided, are injected first under an
+        '=== EXPLICITLY MENTIONED CONTEXT ===' header so the model
+        knows these were pinned by the user rather than retrieved.
+        """
         parts = []
 
         parts.append("# PROJECT CONTEXT\n")
         parts.append(self.load_tier1())
         parts.append("\n\n")
+
+        if resolved_mentions:
+            parts.append("=== EXPLICITLY MENTIONED CONTEXT ===\n")
+            for chunk in resolved_mentions:
+                parts.append(f"[{chunk['label']}]\n")
+                parts.append(chunk['content'])
+                parts.append("\n\n")
+            parts.append("=== END MENTIONED CONTEXT ===\n\n")
 
         chunks = self.retrieve_tier2(task, embedding_fn, subproject_id)
         if chunks:

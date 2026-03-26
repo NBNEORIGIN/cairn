@@ -40,11 +40,12 @@ D:\claw\
 - To restart: right-click the tray icon → Restart API / Restart Web
 
 ## Current model config
-- API_PROVIDER=auto: tries Claude first, falls back to OpenAI on rate-limit
-- Default model: claude-sonnet-4-6 (CLAUDE_MODEL in .env)
-- Fallback model: gpt-4o (OPENAI_MODEL in .env)
+- Default: Claude Sonnet (claude-sonnet-4-6) — used by all projects with force_model: "api"
+- Fallback: gpt-4o on Claude 429/529
 - Opus escalation: architecture/security/trade-off keywords → claude-opus-4-6
+- DeepSeek (deepseek-chat): available but NOT auto-routed — must set force_model: "deepseek" in config.json to use
 - Local model (disabled): qwen2.5-coder:7b via Ollama — re-enable after RTX 3090
+- Routing logic: force_model in config → task_classifier tier → promote to next available tier
 
 ## WIGGUM loop
 - POST /wiggum  {"goal": "...", "success_criteria": [...], "project": "claw"}
@@ -85,6 +86,18 @@ Tools registered for this project. Risk levels:
 4. The venv is at D:\claw\.venv — always use .\.venv\Scripts\activate on Windows
 5. Ports: API=8765, Web UI=3000
 
+## Session Log
+
+### Session 2026-03-24 — claw
+- `force_model: "api"` in config.json now means Claude only — DeepSeek is never auto-selected for these projects
+- DeepSeek DSML markup leaking as plain text was root cause of broken tool loop and garbled output
+- `router.py`: `force_model: "api"` bypasses DeepSeek sub-routing entirely; use `force_model: "deepseek"` to opt in
+- `deepseek_client.py`: added `_parse_dsml_tool_call()` fallback to parse DSML text when structured tool_calls absent
+- `MessageBubble.tsx`: model label now shows actual provider (`🌊 deepseek` / `☁ claude` / `⚡ local`) not hardcoded "claude"
+- Chat history, subproject scoping, token trimming/archiving implemented (sessions + subprojects + archived_sessions tables)
+- SessionSidebar component added; ChatWindow integrates subproject dropdown and token bar
+- 107 tests passing
+
 ## Known issues / recent changes
 - Migrated from NSSM Windows services to tray-based process manager (no admin needed)
 - OpenAI fallback added (API_PROVIDER=auto) — automatic failover to gpt-4o
@@ -93,3 +106,4 @@ Tools registered for this project. Risk levels:
 - tool_choice: auto in claude_client.py ensures Claude uses tools reliably
 - web_fetch uses verify=False (SSL) to handle Cloudflare-protected sites
 - generate_video and generate_image registered but not in permissions (GPU-intensive)
+- DeepSeek routing bug fixed 2026-03-24: was silently routing all "api" projects to DeepSeek

@@ -13,6 +13,7 @@ export interface Message {
   content: string
   modelUsed?: string
   costUsd?: number
+  modelRouting?: string   // 'auto' | 'manual'
   pendingToolCall?: PendingToolCall | null
   toolCalls?: ToolCallRecord[]
   imagePreview?: string   // data URL for pasted image thumbnail
@@ -64,6 +65,14 @@ function renderMarkdown(text: string) {
   return parts
 }
 
+function modelLabel(m: string): string {
+  const s = m.toLowerCase()
+  if (s.includes('qwen') || s.includes('llama') || s.includes('ollama')) return '⚡ local'
+  if (s.includes('deepseek')) return '🌊 deepseek'
+  if (s.includes('gpt') || s.includes('openai')) return '🤖 openai'
+  return '☁ claude'
+}
+
 export function MessageBubble({ message, onApprove, onReject }: MessageBubbleProps) {
   if (message.role === 'user') {
     return (
@@ -95,13 +104,18 @@ export function MessageBubble({ message, onApprove, onReject }: MessageBubblePro
       <div className="flex items-center gap-2 mb-1">
         <span className="text-xs font-mono text-zinc-500">
           {message.modelUsed
-            ? (message.modelUsed.includes('qwen') ? '⚡ local' : '☁ claude')
+            ? modelLabel(message.modelUsed)
             : 'CLAW'
           }
         </span>
         {(message.costUsd ?? 0) > 0 && (
           <span className="text-xs text-zinc-600">
             ${message.costUsd!.toFixed(4)}
+          </span>
+        )}
+        {message.modelRouting === 'manual' && (
+          <span className="text-[10px] text-amber-600 border border-amber-800 rounded px-1 py-0.5 font-mono">
+            manual
           </span>
         )}
       </div>
