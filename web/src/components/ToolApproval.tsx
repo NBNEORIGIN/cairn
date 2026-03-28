@@ -19,9 +19,9 @@ interface ToolApprovalProps {
 }
 
 const RISK_STYLES = {
-  safe:        'border-zinc-600 bg-zinc-900',
-  review:      'border-amber-600 bg-amber-950/30',
-  destructive: 'border-red-600 bg-red-950/30',
+  safe:        'border-slate-200 bg-white',
+  review:      'border-amber-200 bg-amber-50/80',
+  destructive: 'border-rose-200 bg-rose-50/80',
 }
 
 const RISK_ICONS = {
@@ -35,16 +35,16 @@ export function ToolApproval({ toolCall, onApprove, onReject }: ToolApprovalProp
   const riskIcon  = RISK_ICONS[toolCall.risk_level]  || '🔧'
 
   return (
-    <div className={`border rounded-lg p-3 mt-2 ${riskStyle}`}>
-      <div className="flex items-center gap-2 font-semibold text-sm mb-1">
+    <div className={`mt-3 rounded-[22px] border p-4 shadow-sm ${riskStyle}`}>
+      <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
         <span>{riskIcon}</span>
-        <span className="text-zinc-200">{toolCall.tool_name}</span>
-        <span className="ml-auto text-xs text-zinc-500 uppercase tracking-wide">
+        <span className="text-slate-800">{toolCall.tool_name}</span>
+        <span className="ml-auto text-xs uppercase tracking-wide text-slate-500">
           {toolCall.risk_level}
         </span>
       </div>
 
-      <p className="text-xs text-zinc-400 mb-3">{toolCall.description}</p>
+      <p className="mb-3 text-xs leading-6 text-slate-600">{toolCall.description}</p>
 
       {toolCall.diff_preview && (
         <div className="mb-3">
@@ -55,13 +55,13 @@ export function ToolApproval({ toolCall, onApprove, onReject }: ToolApprovalProp
       <div className="flex gap-2">
         <button
           onClick={() => onApprove(toolCall)}
-          className="px-3 py-1 text-xs rounded bg-emerald-700 hover:bg-emerald-600 text-white transition-colors"
+          className="rounded-xl bg-sky-600 px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-sky-700"
         >
           Apply
         </button>
         <button
           onClick={() => onReject(toolCall)}
-          className="px-3 py-1 text-xs rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-200 transition-colors"
+          className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50"
         >
           Reject
         </button>

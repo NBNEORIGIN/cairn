@@ -1,0 +1,13 @@
+skill_id: theminddepartment
+project_id: phloe
+display_name: The Mind Department
+description: Therapy practice booking and CRM tenant
+triggers:
+  - the mind department
+  - mind department
+  - aly harwood
+  - therapy practice
+subproject_id: theminddepartment.co.uk
+key_rules:
+  - Keep therapy-client data within the tenant boundary
+prompt_hint: Use when prompts mention The Mind Department or Aly Harwood

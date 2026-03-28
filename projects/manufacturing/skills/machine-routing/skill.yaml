@@ -1,0 +1,13 @@
+skill_id: machine-routing
+project_id: manufacturing
+display_name: Machine Routing
+description: Machine routing and production-floor constraints across ROLF, MIMAKI, and MUTOH
+triggers:
+  - machine routing
+  - mimaki
+  - mutoh
+  - rolf
+subproject_id:
+key_rules:
+  - Keep machine names and routing rules explicit
+prompt_hint: Use for machine-specific production questions

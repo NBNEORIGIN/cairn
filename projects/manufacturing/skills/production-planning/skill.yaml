@@ -1,0 +1,14 @@
+skill_id: production-planning
+project_id: manufacturing
+display_name: Production Planning
+description: Manufacturing stock, M-numbers, machine routing, and make-today style operational decisions.
+triggers:
+  - production planning
+  - what should we make today
+  - make today
+  - stock planning
+subproject_id:
+prompt_hint: Prefer concrete stock and machine terminology over generic ERP language, and be explicit about assumptions when data is missing
+key_rules:
+  - Preserve NBNE manufacturing vocabulary.
+  - Distinguish stock state from proposed production actions.

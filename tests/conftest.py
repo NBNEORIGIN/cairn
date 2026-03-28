@@ -3,6 +3,7 @@ Shared fixtures for the CLAW test suite.
 """
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -17,7 +18,7 @@ os.environ.setdefault("OPENAI_API_KEY", "")
 os.environ.setdefault("API_PROVIDER", "claude")
 os.environ.setdefault("CLAW_API_KEY", "claw-dev-key-change-in-production")
 os.environ.setdefault("DATABASE_URL", "postgresql://postgres:postgres123@localhost:5432/claw")
-os.environ.setdefault("CLAW_DATA_DIR", str(ROOT / "data"))
+os.environ.setdefault("CLAW_DATA_DIR", tempfile.mkdtemp(prefix="claw-pytest-data-"))
 os.environ.setdefault("OLLAMA_BASE_URL", "http://localhost:11434")
 os.environ.setdefault("OLLAMA_MODEL", "qwen2.5-coder:7b")
 os.environ.setdefault("CLAW_FORCE_API", "true")

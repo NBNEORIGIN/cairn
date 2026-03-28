@@ -1,0 +1,16 @@
+skill_id: self-modification
+project_id: claw
+display_name: CLAW Self-Modification
+description: Changes to CLAW's own runtime, UI, validator, and tool loop
+triggers:
+  - improve claw
+  - implement in claw
+  - update claw
+  - fix claw
+  - claw ui
+  - claw prompt
+subproject_id:
+key_rules:
+  - Preserve project and subproject isolation
+  - Prefer additive hardening over destructive rewrites
+prompt_hint: Keep verification tight because CLAW uses these paths on itself

@@ -1,0 +1,106 @@
+[
+  {
+    "id": "chat-request-flow",
+    "prompt": "Read the CLAW codebase and explain how chat requests flow from the web UI to the model response. Name the main files involved and point out where model routing, context retrieval, validation, and streaming happen.",
+    "required_markers": [
+      "ChatWindow.tsx",
+      "api/main.py",
+      "core/agent.py",
+      "core/context/engine.py",
+      "core/models/router.py",
+      "core/models/output_validator.py"
+    ],
+    "forbidden_markers": ["process_stream()", "web/app/page.tsx"]
+  },
+  {
+    "id": "model-routing",
+    "prompt": "Explain how CLAW chooses between local, DeepSeek, Sonnet, Opus, and fallback providers.",
+    "required_markers": [
+      "route_decision",
+      "task_classifier.py",
+      "force_tier",
+      "DeepSeek",
+      "OpenAI"
+    ]
+  },
+  {
+    "id": "context-retrieval",
+    "prompt": "Explain how CLAW retrieves context for a prompt, including core.md, hybrid retrieval, and explicit read_file use.",
+    "required_markers": [
+      "core.md",
+      "hybrid",
+      "read_file",
+      "core/context/engine.py"
+    ]
+  },
+  {
+    "id": "validation",
+    "prompt": "Describe CLAW's output validation path and what happens when validation fails.",
+    "required_markers": [
+      "output_validator.py",
+      "CHECK 1",
+      "CHECK 5",
+      "_validate_final_response"
+    ]
+  },
+  {
+    "id": "streaming",
+    "prompt": "Describe CLAW's streaming flow and the SSE events the web UI listens for.",
+    "required_markers": [
+      "/chat/stream",
+      "process_streaming",
+      "complete",
+      "tool_start"
+    ]
+  },
+  {
+    "id": "session-memory",
+    "prompt": "Explain how CLAW stores session history, lists sessions, and archives long conversations.",
+    "required_markers": [
+      "MemoryStore",
+      "SQLite",
+      "archive_session",
+      "sessions"
+    ]
+  },
+  {
+    "id": "tool-approvals",
+    "prompt": "Explain how CLAW handles SAFE tools versus REVIEW/DESTRUCTIVE tools.",
+    "required_markers": [
+      "RiskLevel.SAFE",
+      "pending_tool_call",
+      "_run_tool_loop",
+      "/chat/stop"
+    ]
+  },
+  {
+    "id": "subproject-scoping",
+    "prompt": "Explain how CLAW scopes sessions and retrieval to subprojects or clients.",
+    "required_markers": [
+      "subproject_id",
+      "get_session_list",
+      "retrieve_tier2",
+      "resolve_mentions"
+    ]
+  },
+  {
+    "id": "vision-routing",
+    "prompt": "Explain how CLAW handles image messages and routes them to a vision-capable model.",
+    "required_markers": [
+      "image_base64",
+      "requires_vision",
+      "sonnet",
+      "openai"
+    ]
+  },
+  {
+    "id": "wiggum",
+    "prompt": "Explain what WIGGUM is in CLAW and which endpoints or files support it.",
+    "required_markers": [
+      "/wiggum",
+      "core/wiggum.py",
+      "WiggumOrchestrator",
+      "api/main.py"
+    ]
+  }
+]

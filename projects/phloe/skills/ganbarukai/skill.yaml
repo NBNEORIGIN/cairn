@@ -1,0 +1,12 @@
+skill_id: ganbarukai
+project_id: phloe
+display_name: Ganbarukai
+description: Martial arts school booking and membership tenant
+triggers:
+  - ganbarukai
+  - martial arts booking
+  - dojo booking
+subproject_id: ganbarukai.co.uk
+key_rules:
+  - Keep Ganbarukai changes tenant-scoped
+prompt_hint: Match prompts about Ganbarukai bookings and membership flows

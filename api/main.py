@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+import time
 import traceback
 import uuid
 from datetime import datetime
@@ -8,14 +9,14 @@ from pathlib import Path
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 
 load_dotenv()
 
-from core.agent import ClawAgent
+from core.agent import ClawAgent, GenerationStopped, GenerationTimedOut
 from core.channels.envelope import MessageEnvelope, Channel
 from api.middleware.auth import verify_api_key
 
@@ -26,12 +27,17 @@ _PROJECTS_ROOT = _CLAW_ROOT / 'projects'                 # D:\claw\projects
 
 # Module-level test result cache — populated when run_tests tool runs
 _test_cache: dict = {}
+_status_summary_cache: dict[str, object] = {
+    'data': None,
+    'expires_at': 0.0,
+}
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan handler — auto-loads every project that has a config.json."""
     print(f'[CLAW startup] Scanning: {_PROJECTS_ROOT.absolute()}')
+    active_watchers = []
     if _PROJECTS_ROOT.exists():
         candidates = [
             d for d in sorted(_PROJECTS_ROOT.iterdir())
@@ -63,6 +69,34 @@ async def lifespan(app: FastAPI):
                                     f'[CLAW startup] subproject '
                                     f'{sp["name"]} failed: {sp_err}'
                                 )
+                    codebase_path = config.get('codebase_path')
+                    db_url = os.getenv('DATABASE_URL', '')
+                    watcher_enabled = os.getenv('CLAW_ENABLE_WATCHER', '').lower() in {
+                        '1', 'true', 'yes', 'on',
+                    }
+                    if watcher_enabled and codebase_path and db_url:
+                        try:
+                            from core.context.indexer import CodeIndexer
+                            from core.context.watcher import FileWatcher
+
+                            watcher = FileWatcher(
+                                path=codebase_path,
+                                indexer=CodeIndexer(
+                                    project_id=project_dir.name,
+                                    codebase_path=codebase_path,
+                                    db_url=db_url,
+                                ),
+                                loop=asyncio.get_running_loop(),
+                                context_engine=agent.context,
+                            )
+                            watcher.start()
+                            agent._watcher = watcher
+                            active_watchers.append(watcher)
+                        except Exception as watcher_err:
+                            print(
+                                f'[CLAW startup] watcher disabled for '
+                                f'{project_dir.name}: {watcher_err}'
+                            )
                     print(f'[CLAW startup] Loaded: {project_dir.name}')
                 except Exception as e:
                     print(f'[CLAW startup] Failed {project_dir.name}: {e}')
@@ -70,6 +104,12 @@ async def lifespan(app: FastAPI):
         print(f'[CLAW startup] Projects dir not found: {_PROJECTS_ROOT.absolute()}')
 
     yield
+
+    for watcher in active_watchers:
+        try:
+            watcher.stop()
+        except Exception:
+            pass
 
 
 app = FastAPI(
@@ -99,6 +139,28 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 # Agent registry — one instance per project, loaded on first request
 _agents: dict[str, ClawAgent] = {}
+
+
+def _default_retrieval_mode() -> str:
+    if _agents:
+        modes = {agent.context.retrieval_mode for agent in _agents.values()}
+        return next(iter(modes)) if len(modes) == 1 else 'mixed'
+
+    if os.getenv('DATABASE_URL', ''):
+        try:
+            import rank_bm25  # noqa: F401
+            return 'hybrid'
+        except Exception:
+            return 'cosine'
+    return 'keyword'
+
+
+def _bm25_available() -> bool:
+    try:
+        from core.memory.retriever import BM25Okapi
+        return BM25Okapi is not None
+    except Exception:
+        return False
 
 
 def get_agent(project_id: str) -> ClawAgent:
@@ -140,6 +202,8 @@ class MentionedContext(BaseModel):
 
 
 class ChatRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     content: str
     project_id: str
     session_id: str
@@ -153,7 +217,13 @@ class ChatRequest(BaseModel):
     max_tool_rounds: Optional[int] = None   # Override agent MAX_TOOL_ROUNDS per request
     subproject_id: Optional[str] = None    # Scope session to a subproject
     mentions: list[MentionedContext] = []  # @ mentioned context items
+    skill_ids: list[str] = []              # Manually activated skills
     model_override: Optional[str] = None  # 'auto'|'local'|'deepseek'|'sonnet'|'opus'
+
+
+class StopRequest(BaseModel):
+    project_id: str
+    session_id: str
 
 
 class SubprojectCreateRequest(BaseModel):
@@ -213,10 +283,36 @@ async def chat(
         max_tool_rounds=request.max_tool_rounds,
         subproject_id=request.subproject_id,
         mentions=[m.model_dump() for m in request.mentions],
+        skill_ids=request.skill_ids,
         model_override=request.model_override,
     )
 
-    response = await agent.process(envelope)
+    try:
+        response = await agent.process(envelope)
+    except GenerationStopped:
+        agent.clear_stop(request.session_id)
+        return {
+            'content': '',
+            'session_id': request.session_id,
+            'pending_tool_call': None,
+            'model_used': '',
+            'tokens_used': 0,
+            'cost_usd': 0.0,
+            'tool_calls': [],
+            'metadata': {'stopped': True},
+        }
+    except GenerationTimedOut as exc:
+        agent.clear_stop(request.session_id)
+        return {
+            'content': str(exc),
+            'session_id': request.session_id,
+            'pending_tool_call': None,
+            'model_used': '',
+            'tokens_used': 0,
+            'cost_usd': 0.0,
+            'tool_calls': [],
+            'metadata': {'timed_out': True},
+        }
 
     return {
         'content': response.content,
@@ -230,6 +326,16 @@ async def chat(
     }
 
 
+@app.post("/chat/stop")
+async def chat_stop(
+    request: StopRequest,
+    _: bool = Depends(verify_api_key),
+):
+    agent = get_agent(request.project_id)
+    agent.request_stop(request.session_id)
+    return {'status': 'stopping', 'session_id': request.session_id}
+
+
 # ─── SSE streaming chat endpoint ─────────────────────────────────────────────
 
 @app.get("/chat/stream")
@@ -238,7 +344,11 @@ async def chat_stream(
     session_id: str,
     message: str,
     mentions: Optional[str] = None,      # JSON-encoded list[MentionedContext]
+    skill_ids: Optional[str] = None,     # JSON-encoded list[str]
     model_override: Optional[str] = None,
+    subproject_id: Optional[str] = None,
+    image_b64: Optional[str] = None,
+    image_media_type: str = 'image/png',
     _: bool = Depends(verify_api_key),
 ):
     """
@@ -260,11 +370,19 @@ async def chat_stream(
     import json as _json
 
     parsed_mentions = []
+    parsed_skill_ids: list[str] = []
     if mentions:
         try:
             parsed_mentions = _json.loads(mentions)
         except Exception:
             pass
+    if skill_ids:
+        try:
+            parsed_skill_ids = [str(item) for item in _json.loads(skill_ids)]
+        except Exception:
+            parsed_skill_ids = [
+                item.strip() for item in skill_ids.split(',') if item.strip()
+            ]
 
     agent = get_agent(project)
 
@@ -273,8 +391,12 @@ async def chat_stream(
         channel=Channel.WEB,
         project_id=project,
         session_id=session_id,
+        subproject_id=subproject_id,
         mentions=parsed_mentions,
+        skill_ids=parsed_skill_ids,
         model_override=model_override,
+        image_base64=image_b64,
+        image_media_type=image_media_type,
     )
 
     async def event_generator():
@@ -307,6 +429,27 @@ async def get_subprojects(
     """List all subprojects for a project."""
     agent = get_agent(project)
     return {'subprojects': agent.memory.get_subprojects(project)}
+
+
+@app.get("/projects/{project}/skills")
+async def get_skills(
+    project: str,
+    _: bool = Depends(verify_api_key),
+):
+    """List all disk-backed skills for a project."""
+    agent = get_agent(project)
+    return {
+        'skills': [
+            {
+                'skill_id': skill.skill_id,
+                'display_name': skill.display_name,
+                'description': skill.description,
+                'subproject_id': skill.subproject_id,
+                'has_decisions': skill.decisions_path.exists(),
+            }
+            for skill in agent.skills.list_skills()
+        ]
+    }
 
 
 @app.post("/projects/{project}/subprojects")
@@ -351,7 +494,7 @@ async def get_session(
 ):
     """Return a single session including all messages."""
     agent = get_agent(project)
-    session = agent.memory.get_session(session_id)
+    session = agent.memory.get_session(session_id, project_id=project)
     if not session:
         raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
     return session
@@ -381,14 +524,18 @@ async def get_subproject_session(
 ):
     """Return a session belonging to a specific subproject."""
     agent = get_agent(project)
-    session = agent.memory.get_session(session_id)
+    session = agent.memory.get_session(
+        session_id,
+        project_id=project,
+        subproject_id=f'{project}:{subproject}',
+    )
     if not session:
         raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
     return session
 
 
 @app.get("/projects/{project}/files")
-async def get_project_files(
+def get_project_files(
     project: str,
     q: Optional[str] = None,
     _: bool = Depends(verify_api_key),
@@ -404,22 +551,24 @@ async def get_project_files(
     if db_url:
         try:
             import psycopg2
-            conn = psycopg2.connect(db_url)
-            with conn.cursor() as cur:
-                if q:
-                    cur.execute(
-                        "SELECT DISTINCT file_path FROM claw_code_chunks "
-                        "WHERE project_id=%s AND file_path ILIKE %s ORDER BY file_path",
-                        (project, f'%{q}%'),
-                    )
-                else:
-                    cur.execute(
-                        "SELECT DISTINCT file_path FROM claw_code_chunks "
-                        "WHERE project_id=%s ORDER BY file_path",
-                        (project,),
-                    )
-                files = [row[0] for row in cur.fetchall()]
-            conn.close()
+            conn = psycopg2.connect(db_url, connect_timeout=1)
+            try:
+                with conn.cursor() as cur:
+                    if q:
+                        cur.execute(
+                            "SELECT DISTINCT file_path FROM claw_code_chunks "
+                            "WHERE project_id=%s AND file_path ILIKE %s ORDER BY file_path",
+                            (project, f'%{q}%'),
+                        )
+                    else:
+                        cur.execute(
+                            "SELECT DISTINCT file_path FROM claw_code_chunks "
+                            "WHERE project_id=%s ORDER BY file_path",
+                            (project,),
+                        )
+                    files = [row[0] for row in cur.fetchall()]
+            finally:
+                conn.close()
         except Exception:
             pass
 
@@ -433,10 +582,21 @@ async def get_project_files(
                 base = Path(codebase)
                 SKIP = {'.git', '__pycache__', 'node_modules', '.venv', '.next', 'dist'}
                 EXTS = {'.py', '.ts', '.tsx', '.js', '.jsx', '.json', '.md', '.yaml', '.yml'}
-                for p in sorted(base.rglob('*')):
-                    if p.is_file() and p.suffix in EXTS:
-                        if not any(part in SKIP for part in p.parts):
-                            rel = str(p.relative_to(base)).replace('\\', '/')
+                stack = [base]
+                while stack:
+                    current = stack.pop()
+                    try:
+                        entries = sorted(current.iterdir(), key=lambda p: p.name.lower())
+                    except Exception:
+                        continue
+                    for entry in entries:
+                        if entry.name in SKIP:
+                            continue
+                        if entry.is_dir():
+                            stack.append(entry)
+                            continue
+                        if entry.suffix in EXTS:
+                            rel = str(entry.relative_to(base)).replace('\\', '/')
                             if q is None or q.lower() in rel.lower():
                                 files.append(rel)
                 files = files[:500]
@@ -445,7 +605,7 @@ async def get_project_files(
 
 
 @app.get("/projects/{project}/symbols")
-async def get_project_symbols(
+def get_project_symbols(
     project: str,
     q: str = '',
     _: bool = Depends(verify_api_key),
@@ -462,26 +622,28 @@ async def get_project_symbols(
 
     try:
         import psycopg2
-        conn = psycopg2.connect(db_url)
-        with conn.cursor() as cur:
-            pattern = f'%{q}%'
-            cur.execute(
-                """
-                SELECT DISTINCT ON (chunk_name) chunk_name, file_path, chunk_type
-                FROM claw_code_chunks
-                WHERE project_id=%s
-                  AND chunk_type IN ('function', 'class', 'method')
-                  AND chunk_name ILIKE %s
-                ORDER BY chunk_name, file_path
-                LIMIT 30
-                """,
-                (project, pattern),
-            )
-            symbols = [
-                {'name': row[0], 'file': row[1], 'type': row[2]}
-                for row in cur.fetchall()
-            ]
-        conn.close()
+        conn = psycopg2.connect(db_url, connect_timeout=1)
+        try:
+            with conn.cursor() as cur:
+                pattern = f'%{q}%'
+                cur.execute(
+                    """
+                    SELECT DISTINCT ON (chunk_name) chunk_name, file_path, chunk_type
+                    FROM claw_code_chunks
+                    WHERE project_id=%s
+                      AND chunk_type IN ('function', 'class', 'method')
+                      AND chunk_name ILIKE %s
+                    ORDER BY chunk_name, file_path
+                    LIMIT 30
+                    """,
+                    (project, pattern),
+                )
+                symbols = [
+                    {'name': row[0], 'file': row[1], 'type': row[2]}
+                    for row in cur.fetchall()
+                ]
+        finally:
+            conn.close()
     except Exception:
         pass
 
@@ -601,7 +763,7 @@ async def health():
 
     try:
         import httpx
-        async with httpx.AsyncClient(timeout=3) as client:
+        async with httpx.AsyncClient(timeout=1) as client:
             r = await client.get(f'{ollama_base}/api/tags')
             if r.status_code == 200:
                 ollama_reachable = True
@@ -621,6 +783,8 @@ async def health():
 
     return {
         'status': 'ok',
+        'retrieval_mode': _default_retrieval_mode(),
+        'bm25_available': _bm25_available(),
         'ollama_available': ollama_reachable,
         'ollama_active_model': ollama_active_model,
         'ollama_model_ready': ollama_model_ready,
@@ -633,6 +797,7 @@ async def health():
         'deepseek_key_set': bool(os.getenv('DEEPSEEK_API_KEY')),
         'openai_key_set': bool(os.getenv('OPENAI_API_KEY')),
         'projects_loaded': list(_agents.keys()),
+        'skills_loaded': sum(len(agent.skills.list_skills()) for agent in _agents.values()),
     }
 
 
@@ -1122,6 +1287,17 @@ def _read_test_cache() -> dict:
     return {'passed': None, 'failed': None, 'errors': None, 'last_run': None}
 
 
+def _read_eval_cache() -> dict:
+    """Read last CLAW eval result from cache file, or return nulls."""
+    cache_path = _CLAW_ROOT / 'data' / 'eval_cache.json'
+    if cache_path.exists():
+        try:
+            return json.loads(cache_path.read_text())
+        except Exception:
+            pass
+    return {'passed': None, 'failed': None, 'suite': None, 'last_run': None}
+
+
 async def _ollama_status_fast() -> dict:
     """Lightweight Ollama status check (reuses health logic, 3s timeout)."""
     from core.models.ollama_client import _vram_for, _VRAM_AVAILABLE_GB
@@ -1130,7 +1306,7 @@ async def _ollama_status_fast() -> dict:
     fallback  = os.getenv('OLLAMA_MODEL', 'qwen2.5-coder:7b')
     try:
         import httpx as _httpx
-        async with _httpx.AsyncClient(timeout=3) as hx:
+        async with _httpx.AsyncClient(timeout=1) as hx:
             r = await hx.get(f'{ollama_base}/api/tags')
             if r.status_code == 200:
                 installed = [m['name'] for m in r.json().get('models', [])]
@@ -1157,7 +1333,7 @@ async def _project_index_count(project_id: str) -> int | None:
         import psycopg2 as _pg
 
         def _query():
-            conn = _pg.connect(db_url)
+            conn = _pg.connect(db_url, connect_timeout=1)
             with conn.cursor() as cur:
                 cur.execute(
                     'SELECT COUNT(DISTINCT file_path) FROM claw_code_chunks WHERE project_id=%s',
@@ -1169,7 +1345,7 @@ async def _project_index_count(project_id: str) -> int | None:
 
         return await asyncio.wait_for(
             asyncio.get_event_loop().run_in_executor(None, _query),
-            timeout=3.0,
+            timeout=1.0,
         )
     except Exception:
         return None
@@ -1182,9 +1358,16 @@ async def status_summary(_: bool = Depends(verify_api_key)):
       git info, test results, API keys, Ollama, projects, WIGGUM runs.
     Frontend calls this once; no fan-out requests needed.
     """
+    now = time.monotonic()
+    cached = _status_summary_cache.get('data')
+    expires_at = float(_status_summary_cache.get('expires_at', 0.0) or 0.0)
+    if cached is not None and now < expires_at:
+        return cached
+
     # Run independent queries concurrently
     git = _git_info()
     tests = _read_test_cache()
+    eval_results = _read_eval_cache()
     ollama, *index_counts = await asyncio.gather(
         _ollama_status_fast(),
         *[_project_index_count(pid) for pid in sorted(_agents)],
@@ -1203,6 +1386,8 @@ async def status_summary(_: bool = Depends(verify_api_key)):
             'loaded': True,
             'codebase_exists': bool(codebase_path and Path(codebase_path).exists()),
             'files_indexed': index_counts[i],
+            'retrieval_mode': agent.context.retrieval_mode,
+            'skill_count': len(agent.skills.list_skills()),
             'watcher_active': bool(watcher and getattr(watcher, '_active', False)),
             'last_reindex': last_reindex,
         })
@@ -1218,6 +1403,8 @@ async def status_summary(_: bool = Depends(verify_api_key)):
                         'loaded': False,
                         'codebase_exists': None,
                         'files_indexed': None,
+                        'retrieval_mode': None,
+                        'skill_count': 0,
                         'watcher_active': False,
                         'last_reindex': None,
                     })
@@ -1247,10 +1434,11 @@ async def status_summary(_: bool = Depends(verify_api_key)):
         if a.get('status', 'pending') == 'pending'
     )
 
-    return {
+    payload = {
         'api_status': 'ok',
         **git,
         'test_results': tests,
+        'eval_results': eval_results,
         'api_keys': {
             'anthropic': bool(os.getenv('ANTHROPIC_API_KEY')),
             'deepseek': bool(os.getenv('DEEPSEEK_API_KEY')),
@@ -1262,6 +1450,10 @@ async def status_summary(_: bool = Depends(verify_api_key)):
         'pending_approvals': pending,
         'generated_at': datetime.utcnow().isoformat(),
     }
+
+    _status_summary_cache['data'] = payload
+    _status_summary_cache['expires_at'] = now + 5.0
+    return payload
 
 
 # ─── WIGGUM list / get (existing, kept here) ─────────────────────────────────

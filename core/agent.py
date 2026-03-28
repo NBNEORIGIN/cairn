@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import time
@@ -5,17 +6,29 @@ import uuid
 from typing import AsyncGenerator
 from .channels.envelope import MessageEnvelope, AgentResponse
 from .context.engine import ContextEngine
-from .models.router import route, estimate_tokens, ModelChoice, _deepseek_available
+from .models.router import route_decision, estimate_tokens, ModelChoice
+from .models.output_validator import validate
 from .models.ollama_client import OllamaClient
 from .models.claude_client import ClaudeClient
 from .models.openai_client import OpenAIClient
 from .models.deepseek_client import DeepSeekClient
 from .tools.registry import ToolRegistry, RiskLevel
 from .tools.diff_tools import generate_unified_diff, generate_create_diff
+from .memory.assembler import MemoryAssembler, MemoryPacket
+from .memory.cache_manager import CacheManager
 from .memory.store import MemoryStore
 from .memory.summariser import SessionSummariser
+from .skills.manager import SkillManager
 
 logger = logging.getLogger(__name__)
+
+
+class GenerationStopped(Exception):
+    """Raised when a session has been asked to stop its in-flight work."""
+
+
+class GenerationTimedOut(Exception):
+    """Raised when a request exceeds the end-to-end deadline."""
 
 
 class ClawAgent:
@@ -33,6 +46,7 @@ class ClawAgent:
     """
 
     MAX_TOOL_ROUNDS = 12  # Max agentic tool-call iterations per request
+    EXPLANATION_MAX_TOOL_ROUNDS = 6
 
     def __init__(self, project_id: str, config: dict):
         self.project_id = project_id
@@ -66,51 +80,30 @@ class ClawAgent:
         self.tools = ToolRegistry()
         self._register_tools()
         self.summariser = SessionSummariser(project_id=project_id)
+        self.cache_manager = CacheManager(self.memory)
+        self.assembler = MemoryAssembler(
+            retriever=getattr(self.context, 'hybrid_retriever', None),
+            store=self.memory,
+            project_configs=config,
+        )
+        self.skills = SkillManager(project_id=project_id)
+        self._stop_requests: set[str] = set()
 
         # Cache project root for tool execution
         self._project_root = config.get('codebase_path', '.')
 
-    async def process(self, envelope: MessageEnvelope) -> AgentResponse:
-        """Main entry point. Process a message and return a response."""
-        session_id = envelope.session_id
+    def request_stop(self, session_id: str) -> None:
+        self._stop_requests.add(session_id)
 
-        # Bind subproject to this session on first set
-        if envelope.subproject_id:
-            self.memory.set_session_subproject(session_id, envelope.subproject_id)
+    def clear_stop(self, session_id: str) -> None:
+        self._stop_requests.discard(session_id)
 
-        self.memory.add_message(
-            session_id=session_id,
-            role='user',
-            content=envelope.content,
-            channel=envelope.channel.value,
-        )
+    def _check_stop(self, session_id: str) -> None:
+        if session_id in self._stop_requests:
+            raise GenerationStopped(f'Stopped session {session_id}')
 
-        # Handle tool approval response
-        if envelope.tool_approval:
-            return await self._handle_tool_approval(envelope)
-
-        # Resolve @ mentions before building context prompt
-        resolved_mentions: list[dict] = []
-        if envelope.mentions:
-            try:
-                resolved_mentions = await self.context.resolve_mentions(
-                    mentions=envelope.mentions,
-                    project_id=self.project_id,
-                    config=self.config,
-                )
-            except Exception as exc:
-                logger.warning(f"[CLAW] mention resolution failed: {exc}")
-
-        # Build context prompt (scoped to subproject when set)
-        context_prompt = self.context.build_context_prompt(
-            task=envelope.content,
-            embedding_fn=self._embed,
-            subproject_id=envelope.subproject_id,
-            resolved_mentions=resolved_mentions or None,
-        )
-
-        # System instruction prepended to every prompt
-        context_prompt = (
+    def _system_prompt_prefix(self) -> str:
+        return (
             "You are CLAW, a sovereign AI coding agent.\n"
             "Rules:\n"
             "1. Use your provided tools to answer requests — do not describe "
@@ -122,29 +115,160 @@ class ClawAgent:
             "'new_str'. Do not use 'path', 'parameters', or other variants.\n"
             "4. If you are unsure what a file contains, call read_file to find "
             "out — do not guess.\n\n"
-        ) + context_prompt
+        )
 
-        # Append active file from VS Code if provided
-        if envelope.active_file:
-            try:
-                file_content = self.context.load_tier3(envelope.active_file)
-                context_prompt += (
-                    f"\n\n# CURRENTLY OPEN FILE\n"
-                    f"## {envelope.active_file}\n"
-                    f"```\n{file_content}\n```\n"
-                )
-            except (FileNotFoundError, PermissionError):
-                pass
+    def _request_deadline_seconds(self) -> float:
+        raw = os.getenv('CLAW_REQUEST_TIMEOUT_SECONDS', '90')
+        try:
+            return max(15.0, float(raw))
+        except (TypeError, ValueError):
+            return 90.0
 
-        if envelope.selected_text:
-            context_prompt += (
-                f"\n\n# SELECTED CODE\n"
-                f"```\n{envelope.selected_text}\n```\n"
+    def _initialise_request_deadline(self, envelope: MessageEnvelope) -> None:
+        envelope.metadata['_deadline_at'] = time.monotonic() + self._request_deadline_seconds()
+
+    def _check_request_active(
+        self,
+        envelope: MessageEnvelope,
+        stage: str = '',
+    ) -> None:
+        self._check_stop(envelope.session_id)
+        deadline_at = envelope.metadata.get('_deadline_at')
+        if deadline_at is None:
+            return
+        if time.monotonic() > float(deadline_at):
+            raise GenerationTimedOut(
+                f"Request timed out while {stage or 'processing the message'}."
             )
 
-        history = self.memory.get_recent_history(session_id, limit=10)
+    def _provider_name_for_request(
+        self,
+        model_choice: ModelChoice,
+        client,
+        use_opus: bool,
+    ) -> str:
+        if model_choice == ModelChoice.LOCAL:
+            return 'local'
+        if isinstance(client, DeepSeekClient):
+            return 'deepseek'
+        if isinstance(client, OpenAIClient):
+            return 'openai'
+        if use_opus:
+            return 'opus'
+        return 'claude'
 
-        context_tokens = estimate_tokens(context_prompt + envelope.content)
+    @staticmethod
+    def _provider_name(tier: int) -> str:
+        return {
+            1: 'ollama',
+            2: 'deepseek',
+            3: 'sonnet',
+            4: 'opus',
+        }.get(tier, 'sonnet')
+
+    def _resolve_request_skills(
+        self,
+        envelope: MessageEnvelope,
+    ) -> tuple[list, list[str], str | None]:
+        active_skills = self.skills.resolve_for_request(
+            query=envelope.content,
+            subproject_id=envelope.subproject_id,
+            manual_skill_ids=envelope.skill_ids,
+        )
+        active_skill_ids = [skill.skill_id for skill in active_skills]
+        effective_subproject_id = envelope.subproject_id or self.skills.primary_subproject_id(active_skills)
+        return active_skills, active_skill_ids, effective_subproject_id
+
+    def _assemble_context_prompt(
+        self,
+        base_context_prompt: str,
+        history: list[dict],
+        provider_name: str,
+        skill_blocks: list[str],
+    ) -> tuple[str, dict]:
+        assembly = self.assembler.assemble_legacy(
+            base_context_prompt=base_context_prompt,
+            history=history,
+            provider=provider_name,
+            skill_blocks=skill_blocks,
+        )
+        return self._system_prompt_prefix() + assembly.prompt, assembly.metadata
+
+    def _chunk_response_text(self, text: str, chunk_size: int = 180) -> list[str]:
+        if not text:
+            return []
+        text = text.replace('\r\n', '\n')
+        chunks: list[str] = []
+        for paragraph in text.split('\n\n'):
+            paragraph = paragraph.strip()
+            if not paragraph:
+                continue
+            while len(paragraph) > chunk_size:
+                split_at = paragraph.rfind(' ', 0, chunk_size)
+                if split_at < 40:
+                    split_at = chunk_size
+                chunks.append(paragraph[:split_at] + ('\n\n' if '\n' not in paragraph[:split_at] else ''))
+                paragraph = paragraph[split_at:].lstrip()
+            if paragraph:
+                chunks.append(paragraph + '\n\n')
+        return chunks
+
+    async def process(self, envelope: MessageEnvelope) -> AgentResponse:
+        """Main entry point. Process a message and return a response."""
+        session_id = envelope.session_id
+        self.clear_stop(session_id)
+        self._initialise_request_deadline(envelope)
+
+        active_skills, active_skill_ids, effective_subproject_id = (
+            self._resolve_request_skills(envelope)
+        )
+
+        # Bind subproject to this session on first set
+        if effective_subproject_id:
+            self.memory.set_session_subproject(session_id, effective_subproject_id)
+        if active_skill_ids:
+            self.memory.set_session_skills(session_id, active_skill_ids)
+
+        self.memory.add_message(
+            session_id=session_id,
+            role='user',
+            content=envelope.content,
+            channel=envelope.channel.value,
+            subproject_id=effective_subproject_id,
+        )
+
+        # Handle tool approval response
+        if envelope.tool_approval:
+            return await self._handle_tool_approval(envelope)
+
+        # Resolve @ mentions before building context prompt
+        resolved_mentions: list[dict] = []
+        if envelope.mentions:
+            try:
+                self._check_request_active(envelope, 'resolving mentions')
+                resolved_mentions = await self.context.resolve_mentions(
+                    mentions=envelope.mentions,
+                    project_id=self.project_id,
+                    config=self.config,
+                )
+            except Exception as exc:
+                logger.warning(f"[CLAW] mention resolution failed: {exc}")
+
+        # Build context prompt (scoped to subproject when set)
+        raw_context_prompt, context_meta = self.context.build_context_prompt(
+            task=envelope.content,
+            embedding_fn=self._embed,
+            subproject_id=effective_subproject_id,
+            resolved_mentions=resolved_mentions or None,
+            include_metadata=True,
+        )
+        self._check_request_active(envelope, 'building context')
+
+        # Append active file from VS Code if provided
+        history = self.memory.get_recent_history(session_id, limit=10)
+        rough_context_tokens = estimate_tokens(
+            self._system_prompt_prefix() + raw_context_prompt + envelope.content
+        )
         # read_only passes are assessment/plan — treat as SAFE for routing
         routing_risk = 'safe' if envelope.read_only else 'review'
 
@@ -156,15 +280,23 @@ class ClawAgent:
             'sonnet':   3,
             'opus':     4,
         }
-        force_tier = _OVERRIDE_MAP.get(envelope.model_override or '', None)
+        requested_model = (envelope.model_override or '').lower()
+        has_image = bool(envelope.image_base64)
+        force_tier = _OVERRIDE_MAP.get(requested_model, None)
+        if has_image and (force_tier is None or force_tier < 3):
+            force_tier = 3
 
-        model_choice = route(
+        routing_decision = route_decision(
             task=envelope.content,
-            context_tokens=context_tokens,
+            context_tokens=rough_context_tokens,
             project_config=self.config,
             risk_level=routing_risk,
+            project=self.project_id,
+            files_in_context=context_meta.get('context_file_count', 0),
             force_tier=force_tier,
         )
+        model_choice = routing_decision.choice
+        use_opus = routing_decision.use_opus
 
         # Track whether this routing was manually overridden for the response
         _model_was_manual = envelope.model_override not in (None, 'auto', '')
@@ -173,29 +305,86 @@ class ClawAgent:
             envelope.content, read_only=envelope.read_only
         )
 
-
-
         if model_choice == ModelChoice.LOCAL:
             # Resolve preferred vs fallback model on first local call
             await self.ollama.resolve_active_model(
                 self._ollama_preferred, self._ollama_fallback
             )
+            provider_name = 'local'
+            skill_blocks = self.skills.build_context_blocks(active_skills)
+            context_prompt, assembly_meta = self._assemble_context_prompt(
+                raw_context_prompt,
+                history,
+                provider_name,
+                skill_blocks,
+            )
+            if envelope.active_file:
+                try:
+                    file_content = self.context.load_tier3(envelope.active_file)
+                    context_prompt += (
+                        f"\n\n# CURRENTLY OPEN FILE\n"
+                        f"## {envelope.active_file}\n"
+                        f"```\n{file_content}\n```\n"
+                    )
+                    context_meta['context_files'] = sorted({
+                        *context_meta.get('context_files', []),
+                        envelope.active_file,
+                    })
+                    context_meta['context_file_count'] = len(context_meta['context_files'])
+                except (FileNotFoundError, PermissionError):
+                    pass
+            if envelope.selected_text:
+                context_prompt += (
+                    f"\n\n# SELECTED CODE\n"
+                    f"```\n{envelope.selected_text}\n```\n"
+                )
             response_text, tool_call, usage = await self.ollama.chat(
                 system=context_prompt,
                 history=history,
                 message=envelope.content,
                 tools=available_tools,
             )
+            self._check_request_active(envelope, 'waiting for the local model')
             model_used = self.ollama.model
             cost_usd = 0.0
             client = None
         else:
-            use_opus = self._should_use_opus(envelope.content)
             client, model_used = await self._get_api_client(
                 use_opus=use_opus,
                 prefer_deepseek=(model_choice == ModelChoice.DEEPSEEK),
+                provider_override=requested_model or None,
+                requires_vision=has_image,
             )
-            response_text, tool_call, usage = await client.chat(
+            provider_name = self._provider_name_for_request(model_choice, client, use_opus)
+            skill_blocks = self.skills.build_context_blocks(active_skills)
+            context_prompt, assembly_meta = self._assemble_context_prompt(
+                raw_context_prompt,
+                history,
+                provider_name,
+                skill_blocks,
+            )
+            if envelope.active_file:
+                try:
+                    file_content = self.context.load_tier3(envelope.active_file)
+                    context_prompt += (
+                        f"\n\n# CURRENTLY OPEN FILE\n"
+                        f"## {envelope.active_file}\n"
+                        f"```\n{file_content}\n```\n"
+                    )
+                    context_meta['context_files'] = sorted({
+                        *context_meta.get('context_files', []),
+                        envelope.active_file,
+                    })
+                    context_meta['context_file_count'] = len(context_meta['context_files'])
+                except (FileNotFoundError, PermissionError):
+                    pass
+            if envelope.selected_text:
+                context_prompt += (
+                    f"\n\n# SELECTED CODE\n"
+                    f"```\n{envelope.selected_text}\n```\n"
+                )
+            response_text, tool_call, usage, client, model_used = await self._chat_with_fallback(
+                client,
                 system=context_prompt,
                 history=history,
                 message=envelope.content,
@@ -203,9 +392,35 @@ class ClawAgent:
                 use_opus=use_opus,
                 image_base64=envelope.image_base64,
                 image_media_type=envelope.image_media_type,
+                provider_override=requested_model or None,
+                requires_vision=has_image,
             )
+            self._check_request_active(envelope, 'waiting for the API model')
             cost_usd = self._calculate_cost(usage, client)
 
+        # Build MemoryPacket for structured metadata (non-critical)
+        memory_packet: MemoryPacket | None = None
+        try:
+            memory_packet = await self.assembler.assemble(
+                query=envelope.content,
+                project_id=self.project_id,
+                session_id=session_id,
+                provider=provider_name,
+                subproject_id=effective_subproject_id,
+                skill_ids=active_skill_ids,
+                mentions=resolved_mentions,
+            )
+        except Exception as exc:
+            logger.warning('[CLAW] assembler.assemble failed: %s', exc)
+
+        context_tokens = estimate_tokens(context_prompt + envelope.content)
+        memory_meta = self._build_memory_metadata(
+            context_meta=context_meta,
+            context_tokens=context_tokens,
+            assembly_meta=assembly_meta,
+            active_skill_ids=active_skill_ids,
+            packet=memory_packet,
+        )
 
         # --- Tool handling ---
         if tool_call:
@@ -223,18 +438,27 @@ class ClawAgent:
                     prior_cost=cost_usd,
                     client=client if model_choice != ModelChoice.LOCAL else None,
                     available_tools=available_tools,
+                    use_opus=use_opus,
+                    context_files=context_meta.get('context_files', []),
                     model_was_manual=_model_was_manual,
+                    memory_meta=memory_meta,
                 )
             elif tool:
                 # REVIEW / DESTRUCTIVE tool: surface for approval (unchanged)
+                approval_text = response_text or self._queued_tool_fallback_response(
+                    envelope.content,
+                    tool_call,
+                    [],
+                )
                 self.memory.add_message(
                     session_id=session_id,
                     role='assistant',
-                    content=response_text or '',
+                    content=approval_text,
                     channel=envelope.channel.value,
                     model_used=model_used,
                     tokens_used=usage.get('total_tokens', 0),
                     cost_usd=cost_usd,
+                    subproject_id=envelope.subproject_id,
                 )
                 pending_tool_call = {
                     'tool_call_id': str(uuid.uuid4()),
@@ -246,16 +470,38 @@ class ClawAgent:
                     'auto_approve': False,
                 }
                 return AgentResponse(
-                    content=response_text or '',
+                    content=approval_text,
                     session_id=session_id,
                     project_id=self.project_id,
                     pending_tool_call=pending_tool_call,
                     model_used=model_used,
                     tokens_used=usage.get('total_tokens', 0),
                     cost_usd=cost_usd,
+                    metadata={
+                        'model_routing': 'manual' if _model_was_manual else 'auto',
+                        'memory': memory_meta,
+                    },
                 )
 
         # No tool call — plain text response
+        validation_meta: dict = {}
+        response_text, client, model_used, cost_usd, validation_meta = (
+            await self._validate_final_response(
+                response_text=response_text or '',
+                envelope=envelope,
+                context_prompt=context_prompt,
+                history=history,
+                model_choice=model_choice,
+                use_opus=use_opus,
+                available_tools=available_tools,
+                context_files=context_meta.get('context_files', []),
+                executed_tool_calls=[],
+                current_client=client,
+                current_model_used=model_used,
+                current_cost=cost_usd,
+            )
+        )
+
         self.memory.add_message(
             session_id=session_id,
             role='assistant',
@@ -264,10 +510,13 @@ class ClawAgent:
             model_used=model_used,
             tokens_used=usage.get('total_tokens', 0),
             cost_usd=cost_usd,
+            subproject_id=envelope.subproject_id,
         )
 
         metadata = await self._check_trim_archive(session_id)
         metadata['model_routing'] = 'manual' if _model_was_manual else 'auto'
+        metadata['memory'] = memory_meta
+        metadata.update(validation_meta)
 
         return AgentResponse(
             content=response_text or '',
@@ -301,14 +550,22 @@ class ClawAgent:
         session_id = envelope.session_id
 
         try:
+            self.clear_stop(session_id)
+            self._initialise_request_deadline(envelope)
+            active_skills, active_skill_ids, effective_subproject_id = (
+                self._resolve_request_skills(envelope)
+            )
             # ── Memory ───────────────────────────────────────────────────────
-            if envelope.subproject_id:
-                self.memory.set_session_subproject(session_id, envelope.subproject_id)
+            if effective_subproject_id:
+                self.memory.set_session_subproject(session_id, effective_subproject_id)
+            if active_skill_ids:
+                self.memory.set_session_skills(session_id, active_skill_ids)
             self.memory.add_message(
                 session_id=session_id,
                 role='user',
                 content=envelope.content,
                 channel=envelope.channel.value,
+                subproject_id=effective_subproject_id,
             )
 
             # Tool approvals are not streamed — delegate and yield complete
@@ -326,9 +583,12 @@ class ClawAgent:
                 return
 
             # ── @ mention resolution ─────────────────────────────────────────
+            yield {'type': 'status', 'message': 'Loading project context…'}
             resolved_mentions: list[dict] = []
             if envelope.mentions:
                 try:
+                    self._check_request_active(envelope, 'resolving mentions')
+                    yield {'type': 'status', 'message': 'Resolving pinned context…'}
                     resolved_mentions = await self.context.resolve_mentions(
                         mentions=envelope.mentions,
                         project_id=self.project_id,
@@ -338,88 +598,136 @@ class ClawAgent:
                     logger.warning(f'[stream] mention resolution failed: {exc}')
 
             # ── Context ───────────────────────────────────────────────────────
-            context_prompt = self.context.build_context_prompt(
+            raw_context_prompt, context_meta = self.context.build_context_prompt(
                 task=envelope.content,
                 embedding_fn=self._embed,
-                subproject_id=envelope.subproject_id,
+                subproject_id=effective_subproject_id,
                 resolved_mentions=resolved_mentions or None,
+                include_metadata=True,
             )
-            context_prompt = (
-                "You are CLAW, a sovereign AI coding agent.\n"
-                "Rules:\n"
-                "1. Use your provided tools to answer requests — do not describe "
-                "what you would do, just do it.\n"
-                "2. NEVER invent or hallucinate file contents, tool results, or "
-                "command output. If a tool returns an error, report it exactly.\n"
-                "3. Tool parameter names are exact — use the schema. "
-                "read_file takes 'file_path', edit_file takes 'file_path'/'old_str'/"
-                "'new_str'. Do not use 'path', 'parameters', or other variants.\n"
-                "4. If you are unsure what a file contains, call read_file to find "
-                "out — do not guess.\n\n"
-            ) + context_prompt
+            self._check_request_active(envelope, 'building context')
 
-            if envelope.active_file:
-                try:
-                    fc = self.context.load_tier3(envelope.active_file)
-                    context_prompt += (
-                        f'\n\n# CURRENTLY OPEN FILE\n## {envelope.active_file}\n'
-                        f'```\n{fc}\n```\n'
-                    )
-                except (FileNotFoundError, PermissionError):
-                    pass
-
-            if envelope.selected_text:
-                context_prompt += f'\n\n# SELECTED CODE\n```\n{envelope.selected_text}\n```\n'
+            retrieved_chunk_count = int(context_meta.get('retrieved_chunk_count', 0) or 0)
+            retrieval_mode = str(context_meta.get('retrieval_mode', 'context'))
+            context_file_count = int(context_meta.get('context_file_count', 0) or 0)
+            yield {
+                'type': 'status',
+                'message': (
+                    f'Loaded {retrieved_chunk_count} {retrieval_mode} chunks '
+                    f'across {context_file_count} files'
+                ),
+            }
 
             history = self.memory.get_recent_history(session_id, limit=10)
-            context_tokens = estimate_tokens(context_prompt + envelope.content)
+            rough_context_tokens = estimate_tokens(
+                self._system_prompt_prefix() + raw_context_prompt + envelope.content
+            )
 
             # ── Routing ───────────────────────────────────────────────────────
             routing_risk = 'safe' if envelope.read_only else 'review'
             _OVERRIDE_MAP = {'auto': None, 'local': 1, 'deepseek': 2, 'sonnet': 3, 'opus': 4}
-            force_tier = _OVERRIDE_MAP.get(envelope.model_override or '', None)
-            model_choice = route(
+            requested_model = (envelope.model_override or '').lower()
+            has_image = bool(envelope.image_base64)
+            force_tier = _OVERRIDE_MAP.get(requested_model, None)
+            if has_image and (force_tier is None or force_tier < 3):
+                force_tier = 3
+            routing_decision = route_decision(
                 task=envelope.content,
-                context_tokens=context_tokens,
+                context_tokens=rough_context_tokens,
                 project_config=self.config,
                 risk_level=routing_risk,
+                project=self.project_id,
+                files_in_context=context_meta.get('context_file_count', 0),
                 force_tier=force_tier,
             )
+            model_choice = routing_decision.choice
+            use_opus = routing_decision.use_opus
             _model_was_manual = envelope.model_override not in (None, 'auto', '')
-            _tier_map = {ModelChoice.LOCAL: 1, ModelChoice.DEEPSEEK: 2, ModelChoice.API: 3}
 
             yield {
                 'type': 'routing',
-                'tier': _tier_map.get(model_choice, 3),
+                'tier': routing_decision.actual_tier.value,
                 'manual': _model_was_manual,
             }
-            yield {'type': 'tokens', 'estimated': context_tokens, 'limit': 40_000}
+            yield {'type': 'tokens', 'estimated': rough_context_tokens, 'limit': 40_000}
 
             available_tools = self._get_tools_for_task(
                 envelope.content, read_only=envelope.read_only
             )
+            yield {'type': 'status', 'message': 'Calling model…'}
 
             # ── First model call ──────────────────────────────────────────────
             if model_choice == ModelChoice.LOCAL:
                 await self.ollama.resolve_active_model(
                     self._ollama_preferred, self._ollama_fallback
                 )
+                provider_name = 'local'
+                skill_blocks = self.skills.build_context_blocks(active_skills)
+                context_prompt, assembly_meta = self._assemble_context_prompt(
+                    raw_context_prompt,
+                    history,
+                    provider_name,
+                    skill_blocks,
+                )
+                if envelope.active_file:
+                    try:
+                        fc = self.context.load_tier3(envelope.active_file)
+                        context_prompt += (
+                            f'\n\n# CURRENTLY OPEN FILE\n## {envelope.active_file}\n'
+                            f'```\n{fc}\n```\n'
+                        )
+                        context_meta['context_files'] = sorted({
+                            *context_meta.get('context_files', []),
+                            envelope.active_file,
+                        })
+                        context_meta['context_file_count'] = len(context_meta['context_files'])
+                    except (FileNotFoundError, PermissionError):
+                        pass
+                if envelope.selected_text:
+                    context_prompt += f'\n\n# SELECTED CODE\n```\n{envelope.selected_text}\n```\n'
                 response_text, tool_call, usage = await self.ollama.chat(
                     system=context_prompt,
                     history=history,
                     message=envelope.content,
                     tools=available_tools,
                 )
+                self._check_request_active(envelope, 'waiting for the local model')
                 model_used = self.ollama.model
                 total_cost = 0.0
                 client = None
             else:
-                use_opus = self._should_use_opus(envelope.content)
                 client, model_used = await self._get_api_client(
                     use_opus=use_opus,
                     prefer_deepseek=(model_choice == ModelChoice.DEEPSEEK),
+                    provider_override=requested_model or None,
+                    requires_vision=has_image,
                 )
-                response_text, tool_call, usage = await client.chat(
+                provider_name = self._provider_name_for_request(model_choice, client, use_opus)
+                skill_blocks = self.skills.build_context_blocks(active_skills)
+                context_prompt, assembly_meta = self._assemble_context_prompt(
+                    raw_context_prompt,
+                    history,
+                    provider_name,
+                    skill_blocks,
+                )
+                if envelope.active_file:
+                    try:
+                        fc = self.context.load_tier3(envelope.active_file)
+                        context_prompt += (
+                            f'\n\n# CURRENTLY OPEN FILE\n## {envelope.active_file}\n'
+                            f'```\n{fc}\n```\n'
+                        )
+                        context_meta['context_files'] = sorted({
+                            *context_meta.get('context_files', []),
+                            envelope.active_file,
+                        })
+                        context_meta['context_file_count'] = len(context_meta['context_files'])
+                    except (FileNotFoundError, PermissionError):
+                        pass
+                if envelope.selected_text:
+                    context_prompt += f'\n\n# SELECTED CODE\n```\n{envelope.selected_text}\n```\n'
+                response_text, tool_call, usage, client, model_used = await self._chat_with_fallback(
+                    client,
                     system=context_prompt,
                     history=history,
                     message=envelope.content,
@@ -427,19 +735,45 @@ class ClawAgent:
                     use_opus=use_opus,
                     image_base64=envelope.image_base64,
                     image_media_type=envelope.image_media_type,
+                    provider_override=requested_model or None,
+                    requires_vision=has_image,
                 )
+                self._check_request_active(envelope, 'waiting for the API model')
                 total_cost = self._calculate_cost(usage, client)
 
             yield {
                 'type': 'routing',
-                'tier': _tier_map.get(model_choice, 3),
+                'tier': routing_decision.actual_tier.value,
                 'model': model_used,
                 'manual': _model_was_manual,
             }
 
+            # Build MemoryPacket for structured metadata
+            try:
+                memory_packet = await self.assembler.assemble(
+                    query=envelope.content,
+                    project_id=self.project_id,
+                    session_id=session_id,
+                    provider=provider_name,
+                    subproject_id=effective_subproject_id,
+                    skill_ids=active_skill_ids,
+                    mentions=resolved_mentions,
+                )
+            except Exception as exc:
+                logger.warning('[stream] assembler.assemble failed: %s', exc)
+                memory_packet = None
+
+            memory_meta = self._build_memory_metadata(
+                context_meta=context_meta,
+                context_tokens=estimate_tokens(context_prompt + envelope.content),
+                assembly_meta=assembly_meta,
+                active_skill_ids=active_skill_ids,
+                packet=memory_packet,
+            )
+
             executed_tool_calls: list[dict] = []
             _seen_read_paths: set[str] = set()
-            max_rounds = getattr(envelope, 'max_tool_rounds', None) or self.MAX_TOOL_ROUNDS
+            max_rounds = self._effective_max_tool_rounds(envelope)
 
             raw_messages = (
                 client.build_messages(
@@ -460,6 +794,7 @@ class ClawAgent:
 
                 tool_name = current_tool_call['name']
                 tool = self.tools.get(tool_name)
+                self._check_request_active(envelope, f'executing tool round {round_num + 1}')
 
                 if not tool:
                     break
@@ -470,6 +805,11 @@ class ClawAgent:
                     and not (auto_approve_review and tool.risk_level == RiskLevel.REVIEW)
                 ):
                     # REVIEW/DESTRUCTIVE — emit queued event, stop loop
+                    approval_text = current_text or self._queued_tool_fallback_response(
+                        envelope.content,
+                        current_tool_call,
+                        executed_tool_calls,
+                    )
                     yield {
                         'type': 'tool_queued',
                         'tool': tool_name,
@@ -481,11 +821,12 @@ class ClawAgent:
                     self.memory.add_message(
                         session_id=session_id,
                         role='assistant',
-                        content=current_text or '',
+                        content=approval_text,
                         channel=envelope.channel.value,
                         model_used=model_used,
                         tokens_used=0,
                         cost_usd=total_cost,
+                        subproject_id=envelope.subproject_id,
                     )
                     pending = {
                         'tool_call_id': str(uuid.uuid4()),
@@ -498,10 +839,13 @@ class ClawAgent:
                     }
                     yield {
                         'type': 'complete',
-                        'response': current_text or '',
+                        'response': approval_text,
                         'cost_usd': total_cost,
                         'model_used': model_used,
-                        'metadata': {'model_routing': 'manual' if _model_was_manual else 'auto'},
+                        'metadata': {
+                            'model_routing': 'manual' if _model_was_manual else 'auto',
+                            'memory': memory_meta,
+                        },
                         'executed_tool_calls': executed_tool_calls,
                         'pending_tool_call': pending,
                     }
@@ -513,6 +857,10 @@ class ClawAgent:
                     'tool': tool_name,
                     'params': current_tool_call['input'],
                     'risk': 'safe',
+                }
+                yield {
+                    'type': 'status',
+                    'message': self._describe_tool_call(current_tool_call),
                 }
                 t0 = time.time()
 
@@ -527,6 +875,7 @@ class ClawAgent:
                         result = await self._execute_tool(current_tool_call)
                     except Exception as exc:
                         result = f'Tool error: {exc}'
+                self._check_request_active(envelope, f'finishing tool {tool_name}')
 
                 duration_ms = int((time.time() - t0) * 1000)
                 yield {
@@ -535,7 +884,11 @@ class ClawAgent:
                     'duration_ms': duration_ms,
                     'result_chars': len(result),
                 }
-                executed_tool_calls.append({'tool_name': tool_name, 'result': result})
+                executed_tool_calls.append({
+                    'tool_name': tool_name,
+                    'input': current_tool_call.get('input', {}),
+                    'result': result,
+                })
 
                 if client:
                     raw_messages = client.append_tool_round(
@@ -545,14 +898,17 @@ class ClawAgent:
                 # Next model call
                 force_final = (round_num == max_rounds - 1)
                 if client:
-                    next_text, next_tool_call, cont_usage = await client.chat(
+                    yield {'type': 'status', 'message': 'Thinking about tool results…'}
+                    next_text, next_tool_call, cont_usage, client, model_used = await self._chat_with_fallback(
+                        client,
                         system=context_prompt,
                         history=history,
                         message=envelope.content,
                         tools=available_tools if not force_final else None,
-                        use_opus=self._should_use_opus(envelope.content),
+                        use_opus=use_opus,
                         raw_messages=raw_messages,
                     )
+                    self._check_request_active(envelope, 'thinking about tool results')
                     total_cost += self._calculate_cost(cont_usage, client)
                 else:
                     next_text, next_tool_call, _ = await self.ollama.chat(
@@ -561,6 +917,7 @@ class ClawAgent:
                         message=f"{envelope.content}\n\nTool result ({tool_name}):\n{result}",
                         tools=available_tools if not force_final else None,
                     )
+                    self._check_request_active(envelope, 'thinking about tool results')
 
                 current_text = next_text
                 current_tool_call = next_tool_call
@@ -568,23 +925,45 @@ class ClawAgent:
             # ── Synthesis fallback ────────────────────────────────────────────
             if not (current_text or '').strip():
                 logger.info('[stream] tool loop produced empty response — synthesising')
+                yield {'type': 'status', 'message': 'Synthesising final answer…'}
                 synthesis_msg = (
                     f'Based on the information you just retrieved, please answer '
                     f'the original question: {envelope.content}'
                 )
                 if client:
-                    synth_text, _, synth_usage = await client.chat(
+                    synth_text, _, synth_usage, client, model_used = await self._chat_with_fallback(
+                        client,
                         system=context_prompt,
                         history=history,
                         message=synthesis_msg,
                         tools=None,
-                        use_opus=self._should_use_opus(envelope.content),
+                        use_opus=use_opus,
                         raw_messages=raw_messages,
                     )
+                    self._check_request_active(envelope, 'synthesising the final answer')
                     total_cost += self._calculate_cost(synth_usage, client)
                     current_text = synth_text
 
             # ── Save to memory ────────────────────────────────────────────────
+            yield {'type': 'status', 'message': 'Validating answer…'}
+            validation_meta: dict = {}
+            current_text, client, model_used, total_cost, validation_meta = (
+                await self._validate_final_response(
+                    response_text=current_text or '',
+                    envelope=envelope,
+                    context_prompt=context_prompt,
+                    history=history,
+                    model_choice=model_choice,
+                    use_opus=use_opus,
+                    available_tools=available_tools,
+                    context_files=context_meta.get('context_files', []),
+                    executed_tool_calls=executed_tool_calls,
+                    current_client=client,
+                    current_model_used=model_used,
+                    current_cost=total_cost,
+                )
+            )
+
             self.memory.add_message(
                 session_id=session_id,
                 role='assistant',
@@ -593,9 +972,15 @@ class ClawAgent:
                 model_used=model_used,
                 tokens_used=0,
                 cost_usd=total_cost,
+                subproject_id=envelope.subproject_id,
             )
             metadata = await self._check_trim_archive(session_id)
             metadata['model_routing'] = 'manual' if _model_was_manual else 'auto'
+            metadata['memory'] = memory_meta
+            metadata.update(validation_meta)
+
+            for chunk in self._chunk_response_text(current_text or ''):
+                yield {'type': 'response_delta', 'text': chunk}
 
             yield {
                 'type': 'complete',
@@ -607,9 +992,33 @@ class ClawAgent:
                 'pending_tool_call': None,
             }
 
+        except GenerationStopped:
+            logger.info('[stream] generation stopped for %s', session_id)
+            yield {
+                'type': 'complete',
+                'response': '',
+                'cost_usd': 0.0,
+                'model_used': '',
+                'metadata': {'stopped': True},
+                'executed_tool_calls': [],
+                'pending_tool_call': None,
+            }
+        except GenerationTimedOut as exc:
+            logger.warning('[stream] request timed out for %s: %s', session_id, exc)
+            yield {
+                'type': 'complete',
+                'response': str(exc),
+                'cost_usd': 0.0,
+                'model_used': '',
+                'metadata': {'timed_out': True},
+                'executed_tool_calls': [],
+                'pending_tool_call': None,
+            }
         except Exception as exc:
             logger.exception(f'[stream] unhandled error: {exc}')
             yield {'type': 'error', 'message': str(exc)}
+        finally:
+            self.clear_stop(session_id)
 
     async def _run_tool_loop(
         self,
@@ -623,7 +1032,10 @@ class ClawAgent:
         prior_cost: float,
         client,
         available_tools: list[dict],
+        use_opus: bool,
+        context_files: list[str] | None = None,
         model_was_manual: bool = False,
+        memory_meta: dict | None = None,
     ) -> AgentResponse:
         """
         Agentic tool loop for SAFE tools.
@@ -642,23 +1054,27 @@ class ClawAgent:
         total_cost = prior_cost
         # Track read_file calls to skip duplicates and free up rounds
         _seen_read_paths: set[str] = set()
+        context_files = context_files or []
 
         # Build the initial messages list once, then extend it each round
-        raw_messages = client.build_messages(
-            context_prompt,
-            history,
-            envelope.content,
-            getattr(envelope, 'image_base64', None),
-            getattr(envelope, 'image_media_type', 'image/png'),
-        )
+        raw_messages = None
+        if client:
+            raw_messages = client.build_messages(
+                context_prompt,
+                history,
+                envelope.content,
+                getattr(envelope, 'image_base64', None),
+                getattr(envelope, 'image_media_type', 'image/png'),
+            )
 
         current_tool_call = first_tool_call
         current_text = first_response_text
 
         # Honour per-request round cap (used by WiggumOrchestrator assess/plan)
-        max_rounds = getattr(envelope, 'max_tool_rounds', None) or self.MAX_TOOL_ROUNDS
+        max_rounds = self._effective_max_tool_rounds(envelope)
 
         for round_num in range(max_rounds):
+            self._check_request_active(envelope, f'executing tool round {round_num + 1}')
             tool_name = current_tool_call['name']
             tool = self.tools.get(tool_name)
 
@@ -674,12 +1090,18 @@ class ClawAgent:
                 tool.risk_level != RiskLevel.SAFE
                 and not (auto_approve_review and tool.risk_level == RiskLevel.REVIEW)
             ):
+                approval_text = current_text or self._queued_tool_fallback_response(
+                    envelope.content,
+                    current_tool_call,
+                    executed_tool_calls,
+                )
                 self.memory.add_message(
                     session_id=session_id, role='assistant',
-                    content=current_text or '',
+                    content=approval_text,
                     channel=envelope.channel.value,
                     model_used=model_used,
                     tokens_used=0, cost_usd=total_cost,
+                    subproject_id=envelope.subproject_id,
                 )
                 pending = {
                     'tool_call_id': str(uuid.uuid4()),
@@ -691,13 +1113,17 @@ class ClawAgent:
                     'auto_approve': False,
                 }
                 return AgentResponse(
-                    content=current_text or '',
+                    content=approval_text,
                     session_id=session_id,
                     project_id=self.project_id,
                     pending_tool_call=pending,
                     model_used=model_used,
                     cost_usd=total_cost,
                     executed_tool_calls=executed_tool_calls,
+                    metadata={
+                        'model_routing': 'manual' if model_was_manual else 'auto',
+                        'memory': memory_meta or {},
+                    },
                 )
 
             # Skip re-reading a file already read this session
@@ -711,28 +1137,42 @@ class ClawAgent:
                         _seen_read_paths.add(fp)
             else:
                 result = await self._execute_tool(current_tool_call)
+            self._check_request_active(envelope, f'finishing tool {tool_name}')
 
             executed_tool_calls.append({
                 'tool_name': tool_name,
+                'input': current_tool_call.get('input', {}),
                 'result': result,
             })
 
             # Extend the messages list with this tool round
-            raw_messages = client.append_tool_round(
-                raw_messages, current_text, current_tool_call, result
-            )
+            if client and raw_messages is not None:
+                raw_messages = client.append_tool_round(
+                    raw_messages, current_text, current_tool_call, result
+                )
 
             # On the last allowed round, force a text answer (no tools)
             force_final = (round_num == max_rounds - 1)
-            next_text, next_tool_call, cont_usage = await client.chat(
-                system=context_prompt,
-                history=history,
-                message=envelope.content,
-                tools=available_tools if not force_final else None,
-                use_opus=self._should_use_opus(envelope.content),
-                raw_messages=raw_messages,
-            )
-            total_cost += self._calculate_cost(cont_usage, client)
+            if client:
+                next_text, next_tool_call, cont_usage, client, model_used = await self._chat_with_fallback(
+                    client,
+                    system=context_prompt,
+                    history=history,
+                    message=envelope.content,
+                    tools=available_tools if not force_final else None,
+                    use_opus=use_opus,
+                    raw_messages=raw_messages,
+                )
+                self._check_request_active(envelope, 'thinking about tool results')
+                total_cost += self._calculate_cost(cont_usage, client)
+            else:
+                next_text, next_tool_call, _ = await self.ollama.chat(
+                    system=context_prompt,
+                    history=history,
+                    message=f"{envelope.content}\n\nTool result ({tool_name}):\n{result}",
+                    tools=available_tools if not force_final else None,
+                )
+                self._check_request_active(envelope, 'thinking about tool results')
 
             current_text = next_text
             current_tool_call = next_tool_call  # type: ignore[assignment]
@@ -751,16 +1191,46 @@ class ClawAgent:
                 f"Based on the information you just retrieved, please answer "
                 f"the original question: {envelope.content}"
             )
-            synth_text, _, synth_usage = await client.chat(
-                system=context_prompt,
+            if client:
+                synth_text, _, synth_usage, client, model_used = await self._chat_with_fallback(
+                    client,
+                    system=context_prompt,
+                    history=history,
+                    message=synthesis_msg,
+                    tools=None,
+                    use_opus=use_opus,
+                    raw_messages=raw_messages,
+                )
+                self._check_request_active(envelope, 'synthesising the final answer')
+                total_cost += self._calculate_cost(synth_usage, client)
+                current_text = synth_text
+            else:
+                synth_text, _, _ = await self.ollama.chat(
+                    system=context_prompt,
+                    history=history,
+                    message=synthesis_msg,
+                    tools=None,
+                )
+                self._check_request_active(envelope, 'synthesising the final answer')
+                current_text = synth_text
+
+        validation_meta: dict = {}
+        current_text, client, model_used, total_cost, validation_meta = (
+            await self._validate_final_response(
+                response_text=current_text or '',
+                envelope=envelope,
+                context_prompt=context_prompt,
                 history=history,
-                message=synthesis_msg,
-                tools=None,
-                use_opus=self._should_use_opus(envelope.content),
-                raw_messages=raw_messages,
+                model_choice=model_choice,
+                use_opus=use_opus,
+                available_tools=available_tools,
+                context_files=context_files,
+                executed_tool_calls=executed_tool_calls,
+                current_client=client,
+                current_model_used=model_used,
+                current_cost=total_cost,
             )
-            total_cost += self._calculate_cost(synth_usage, client)
-            current_text = synth_text
+        )
 
         # Save the final answer to memory once
         self.memory.add_message(
@@ -771,10 +1241,13 @@ class ClawAgent:
             model_used=model_used,
             tokens_used=0,
             cost_usd=total_cost,
+            subproject_id=envelope.subproject_id,
         )
 
         metadata = await self._check_trim_archive(session_id)
         metadata['model_routing'] = 'manual' if model_was_manual else 'auto'
+        metadata['memory'] = memory_meta or {}
+        metadata.update(validation_meta)
 
         return AgentResponse(
             content=current_text or '',
@@ -803,9 +1276,11 @@ class ClawAgent:
 
             if self.memory.should_archive(session_id):
                 history = self.memory.get_recent_history(session_id, limit=100)
+                active_skill_ids = self.memory.get_session_skills(session_id)
                 summary_bullets = await self.summariser.summarise(
                     messages=history,
                     session_id=session_id,
+                    skill_ids=active_skill_ids,
                 )
                 summary = '\n'.join(f'- {b}' for b in summary_bullets)
                 self.memory.archive_session(session_id, summary)
@@ -830,6 +1305,7 @@ class ClawAgent:
                 role='assistant',
                 content='Tool call rejected by user.',
                 channel=envelope.channel.value,
+                subproject_id=envelope.subproject_id,
             )
             return AgentResponse(
                 content='Understood — change discarded.',
@@ -891,9 +1367,16 @@ class ClawAgent:
             )
             cost_usd = 0.0
         else:
-            use_opus = self._should_use_opus(envelope.content)
+            use_opus = route_decision(
+                task=envelope.content,
+                context_tokens=estimate_tokens(context_prompt + envelope.content),
+                project_config=self.config,
+                risk_level='review',
+                project=self.project_id,
+            ).use_opus
             client, _ = await self._get_api_client(use_opus=use_opus)
-            response_text, _, usage = await client.chat(
+            response_text, _, usage, client, model_used = await self._chat_with_fallback(
+                client,
                 system=context_prompt,
                 history=history,
                 message=f"{envelope.content}\n\n{tool_result_message}",
@@ -915,6 +1398,7 @@ class ClawAgent:
             model_used=model_used,
             tokens_used=usage.get('total_tokens', 0),
             cost_usd=cost_usd,
+            subproject_id=envelope.subproject_id,
         )
 
         return AgentResponse(
@@ -950,6 +1434,353 @@ class ClawAgent:
             return str(result)
         except Exception as e:
             return f"ERROR: Tool execution failed: {e}"
+
+    async def _validate_final_response(
+        self,
+        response_text: str,
+        envelope: MessageEnvelope,
+        context_prompt: str,
+        history: list[dict],
+        model_choice: ModelChoice,
+        use_opus: bool,
+        available_tools: list[dict],
+        context_files: list[str],
+        executed_tool_calls: list[dict],
+        current_client,
+        current_model_used: str,
+        current_cost: float,
+    ) -> tuple[str, object | None, str, float, dict]:
+        """
+        Validate the final user-visible response and retry on recoverable
+        failures with progressively stronger models.
+        """
+        metadata: dict = {}
+        written_files = self._written_files_from_tool_calls(executed_tool_calls)
+
+        if not (response_text or '').strip() and executed_tool_calls and current_client is not None:
+            synthesized_text, current_client, current_model_used, current_cost = (
+                await self._retry_empty_response_with_current_client(
+                    envelope=envelope,
+                    context_prompt=context_prompt,
+                    history=history,
+                    executed_tool_calls=executed_tool_calls,
+                    current_client=current_client,
+                    current_model_used=current_model_used,
+                    current_cost=current_cost,
+                    use_opus=use_opus,
+                )
+            )
+            if synthesized_text.strip():
+                response_text = synthesized_text
+
+        validation = validate(
+            response_text,
+            executed_tool_calls=executed_tool_calls,
+            files_in_context=context_files,
+            written_files=written_files,
+            project=self.project_id,
+            project_root=self._project_root,
+        )
+        if validation.passed:
+            return response_text, current_client, current_model_used, current_cost, metadata
+
+        metadata['validation_failures'] = validation.failures
+
+        if validation.hard_fail:
+            failure_text = "Validation failed:\n" + '\n'.join(
+                f'- {failure}' for failure in validation.failures
+            )
+            return failure_text, current_client, current_model_used, current_cost, metadata
+
+        recovery_message = self._build_validation_retry_prompt(
+            envelope.content,
+            validation.failures,
+            executed_tool_calls,
+            context_files=context_files,
+        )
+
+        for retry_choice in self._next_model_choices(
+            model_choice,
+            requires_vision=bool(envelope.image_base64),
+        ):
+            if retry_choice == ModelChoice.LOCAL:
+                continue
+            retry_client, _ = await self._get_api_client(
+                use_opus=use_opus,
+                prefer_deepseek=(
+                    retry_choice == ModelChoice.DEEPSEEK
+                    and not envelope.image_base64
+                ),
+                provider_override=(
+                    (envelope.model_override or '').lower() or None
+                    if retry_choice == ModelChoice.API else None
+                ),
+                requires_vision=bool(envelope.image_base64),
+            )
+            retried_text, _, retry_usage, retry_client, retry_model_used = await self._chat_with_fallback(
+                retry_client,
+                system=context_prompt,
+                history=history,
+                message=recovery_message,
+                tools=None,
+                use_opus=use_opus,
+                image_base64=envelope.image_base64,
+                image_media_type=envelope.image_media_type,
+                provider_override=(envelope.model_override or '').lower() or None,
+                requires_vision=bool(envelope.image_base64),
+            )
+            retry_cost = current_cost + self._calculate_cost(retry_usage, retry_client)
+            retried_validation = validate(
+                retried_text or '',
+                executed_tool_calls=executed_tool_calls,
+                files_in_context=context_files,
+                written_files=written_files,
+                project=self.project_id,
+                project_root=self._project_root,
+            )
+            if retried_validation.passed:
+                metadata['validation_recovered'] = True
+                metadata['validation_retries'] = metadata.get('validation_retries', 0) + 1
+                return (
+                    retried_text,
+                    retry_client,
+                    retry_model_used,
+                    retry_cost,
+                    metadata,
+                )
+            metadata['validation_failures'] = retried_validation.failures
+            current_cost = retry_cost
+
+        if any(failure.startswith('CHECK 5') for failure in metadata['validation_failures']) and executed_tool_calls:
+            metadata['validation_fallback_used'] = 'tool_results_summary'
+            return (
+                self._tool_results_fallback_response(
+                    envelope.content,
+                    executed_tool_calls,
+                ),
+                current_client,
+                current_model_used,
+                current_cost,
+                metadata,
+            )
+
+        failure_text = "Validation failed:\n" + '\n'.join(
+            f'- {failure}' for failure in metadata['validation_failures']
+        )
+        return failure_text, current_client, current_model_used, current_cost, metadata
+
+    async def _retry_empty_response_with_current_client(
+        self,
+        envelope: MessageEnvelope,
+        context_prompt: str,
+        history: list[dict],
+        executed_tool_calls: list[dict],
+        current_client,
+        current_model_used: str,
+        current_cost: float,
+        use_opus: bool,
+    ) -> tuple[str, object, str, float]:
+        synthesis_prompt = self._build_empty_response_retry_prompt(
+            envelope.content,
+            executed_tool_calls,
+        )
+        retried_text, _, retry_usage, current_client, current_model_used = await self._chat_with_fallback(
+            current_client,
+            system=context_prompt,
+            history=history,
+            message=synthesis_prompt,
+            tools=None,
+            use_opus=use_opus,
+            image_base64=envelope.image_base64,
+            image_media_type=envelope.image_media_type,
+            provider_override=(envelope.model_override or '').lower() or None,
+            requires_vision=bool(envelope.image_base64),
+        )
+        current_cost += self._calculate_cost(retry_usage, current_client)
+        return retried_text or '', current_client, current_model_used, current_cost
+
+    def _build_memory_metadata(
+        self,
+        context_meta: dict,
+        context_tokens: int,
+        assembly_meta: dict | None = None,
+        active_skill_ids: list[str] | None = None,
+        packet: MemoryPacket | None = None,
+    ) -> dict:
+        # Legacy path: build from context_meta + assembly_meta
+        match_counts = context_meta.get('match_quality_counts', {}) or {}
+        budget_pct = min(100, round((context_tokens / 40_000) * 100, 1))
+        assembly_meta = assembly_meta or {}
+        section_tokens = context_meta.get('assembly_tokens', {}) or {}
+        return {
+            'retrieval_mode': context_meta.get('retrieval_mode', 'keyword'),
+            'chunks': int(context_meta.get('retrieved_chunk_count', 0) or 0),
+            'files': int(context_meta.get('context_file_count', 0) or 0),
+            'mentions': int(context_meta.get('resolved_mention_count', 0) or 0),
+            'estimated_tokens': int(context_tokens or 0),
+            'budget_pct': float(assembly_meta.get('budget_pct', budget_pct)),
+            'exact_hits': int(match_counts.get('exact', 0) or 0),
+            'semantic_hits': int(match_counts.get('semantic', 0) or 0),
+            'both_hits': int(match_counts.get('exact+semantic', 0) or 0),
+            'retrieved_files': list(context_meta.get('retrieved_files', []) or []),
+            'provider': assembly_meta.get('provider'),
+            'budget_total': int(assembly_meta.get('budget_total', 0) or 0),
+            'budget_used': int(assembly_meta.get('budget_used', 0) or 0),
+            'history_messages': int(assembly_meta.get('history_messages', 0) or 0),
+            'core_tokens': int(section_tokens.get('core', 0) or 0),
+            'skill_tokens': int(section_tokens.get('skill', 0) or 0),
+            'mention_tokens': int(section_tokens.get('mentions', 0) or 0),
+            'retrieved_tokens': int(section_tokens.get('retrieved', 0) or 0),
+            'active_skills': list(active_skill_ids or []),
+        }
+
+        # Enrich with MemoryPacket data when available (budget breakdowns, provider info)
+        if packet is not None:
+            from .memory.assembler import PROVIDER_BUDGETS
+            budget = PROVIDER_BUDGETS.get(packet.provider, PROVIDER_BUDGETS.get('sonnet', {}))
+            result['provider'] = packet.provider
+            result['budget_total'] = budget.get('total', 0)
+            result['budget_used'] = packet.total_tokens_estimated
+            result['budget_pct'] = packet.budget_used_pct
+            result['estimated_tokens'] = packet.total_tokens_estimated
+            result['history_messages'] = len(packet.recent_messages)
+            result['core_tokens'] = self.assembler._estimate_tokens(packet.core_rules)
+            result['skill_tokens'] = self.assembler._estimate_tokens(packet.skill_context or '')
+            result['mention_tokens'] = sum(
+                self.assembler._estimate_tokens(m.get('content', ''))
+                for m in packet.mentioned_context
+            )
+            result['retrieved_tokens'] = sum(
+                self.assembler._estimate_tokens(c.get('content', ''))
+                for c in packet.retrieved_chunks
+            )
+            result['active_skills'] = list(packet.active_skills)
+
+        return result
+
+    def _written_files_from_tool_calls(self, executed_tool_calls: list[dict]) -> list[str]:
+        written_files: list[str] = []
+        for call in executed_tool_calls:
+            tool_name = call.get('tool_name')
+            result = call.get('result', '')
+            file_path = call.get('input', {}).get('file_path')
+            if tool_name in {'edit_file', 'create_file'} and file_path and str(result).startswith('OK:'):
+                written_files.append(os.path.join(self._project_root, file_path))
+        return written_files
+
+    def _build_validation_retry_prompt(
+        self,
+        original_message: str,
+        failures: list[str],
+        executed_tool_calls: list[dict],
+        context_files: list[str] | None = None,
+    ) -> str:
+        failure_block = '\n'.join(f'- {failure}' for failure in failures)
+        tool_summary = self._tool_results_summary(executed_tool_calls)
+        prompt = (
+            "The previous draft failed validation.\n"
+            f"Validation failures:\n{failure_block}\n\n"
+            f"Original request:\n{original_message}\n\n"
+            "Write a corrected final answer. Do not mention tool names, "
+            "simulated actions, or nonexistent files."
+        )
+        if context_files:
+            allowed = '\n'.join(f'- {path}' for path in context_files[:20])
+            prompt += (
+                "\n\nIf you mention files, ONLY use files from this allowlist "
+                "or files explicitly shown in tool results:\n"
+                f"{allowed}"
+            )
+        if tool_summary:
+            prompt += f"\n\nAvailable tool results:\n{tool_summary}"
+        return prompt
+
+    def _build_empty_response_retry_prompt(
+        self,
+        original_message: str,
+        executed_tool_calls: list[dict],
+    ) -> str:
+        tool_summary = self._tool_results_summary(executed_tool_calls)
+        prompt = (
+            "You already gathered the needed context with tools, but your last "
+            "draft was empty.\n\n"
+            f"Original request:\n{original_message}\n\n"
+            "Write a direct final answer now.\n"
+            "Requirements:\n"
+            "- Answer the user's question directly.\n"
+            "- Mention the main files involved when relevant.\n"
+            "- Summarise the flow or result in clear prose or bullets.\n"
+            "- Do not call tools.\n"
+            "- Do not say you cannot, cannot access, or need more tools.\n"
+        )
+        if tool_summary:
+            prompt += f"\n\nAvailable tool results:\n{tool_summary}"
+        return prompt
+
+    def _tool_results_summary(self, executed_tool_calls: list[dict]) -> str:
+        lines: list[str] = []
+        for call in executed_tool_calls[-6:]:
+            result = str(call.get('result', ''))
+            if len(result) > 400:
+                result = result[:400] + '...'
+            lines.append(
+                f"{call.get('tool_name', 'tool')} "
+                f"{call.get('input', {})}: {result}"
+            )
+        return '\n'.join(lines)
+
+    def _tool_results_fallback_response(
+        self,
+        original_message: str,
+        executed_tool_calls: list[dict],
+    ) -> str:
+        files_reviewed: list[str] = []
+        searches: list[str] = []
+        for call in executed_tool_calls:
+            tool_name = call.get('tool_name')
+            inp = call.get('input', {})
+            if tool_name == 'read_file':
+                file_path = inp.get('file_path')
+                if file_path and file_path not in files_reviewed:
+                    files_reviewed.append(file_path)
+            elif tool_name == 'search_code':
+                query = inp.get('query')
+                if query:
+                    searches.append(query)
+
+        response = (
+            f"I gathered context for your request, `{original_message}`.\n\n"
+            "Here are the main sources CLAW inspected:"
+        )
+        if files_reviewed:
+            response += '\n' + '\n'.join(f"- `{path}`" for path in files_reviewed[:8])
+        else:
+            response += "\n- No file paths were captured from the tool results."
+
+        if searches:
+            response += (
+                "\n\nSearches run:\n"
+                + '\n'.join(f"- `{query}`" for query in searches[:4])
+            )
+
+        response += (
+            "\n\nThe model did not produce a polished final narrative after using those tools, "
+            "but the retrieved files above are the primary sources for answering the request."
+        )
+        return response
+
+    def _next_model_choices(
+        self,
+        current_choice: ModelChoice,
+        requires_vision: bool = False,
+    ) -> list[ModelChoice]:
+        if current_choice == ModelChoice.LOCAL:
+            if requires_vision:
+                return [ModelChoice.API]
+            return [ModelChoice.DEEPSEEK, ModelChoice.API]
+        if current_choice == ModelChoice.DEEPSEEK:
+            return [ModelChoice.API]
+        return []
 
     def _generate_diff_preview(self, tool_call: dict) -> str:
         name = tool_call['name']
@@ -1001,6 +1832,8 @@ class ClawAgent:
         self,
         use_opus: bool = False,
         prefer_deepseek: bool = False,
+        provider_override: str | None = None,
+        requires_vision: bool = False,
     ) -> tuple[object, str]:
         """
         Return (client, model_name) using the 5-tier routing logic.
@@ -1015,7 +1848,18 @@ class ClawAgent:
           prefer_deepseek=False → Claude (Sonnet or Opus)
           Either way: on Claude 429/529 fall back to DeepSeek → OpenAI
         """
-        import anthropic
+        override = (provider_override or '').lower()
+
+        if override in ('sonnet', 'opus'):
+            model = self.claude.opus_model if override == 'opus' else self.claude.model
+            return self.claude, model
+
+        if override == 'deepseek':
+            if requires_vision:
+                return self.claude, self.claude.model
+            if not self.deepseek:
+                raise RuntimeError('model_override=deepseek but DEEPSEEK_API_KEY not set')
+            return self.deepseek, self.deepseek.model
 
         # ── Explicit provider overrides ──────────────────────────────────────
         if self._api_provider == 'openai':
@@ -1024,13 +1868,17 @@ class ClawAgent:
             return self.openai, self.openai.model
 
         if self._api_provider == 'deepseek':
+            if requires_vision:
+                if self.openai:
+                    return self.openai, self.openai.model
+                return self.claude, self.claude.opus_model if use_opus else self.claude.model
             if not self.deepseek:
                 raise RuntimeError('API_PROVIDER=deepseek but DEEPSEEK_API_KEY not set')
             return self.deepseek, self.deepseek.model
 
         # ── Auto / Claude mode ────────────────────────────────────────────────
         # Tier 2: DeepSeek when router selected it and key is available
-        if prefer_deepseek and self.deepseek and not use_opus:
+        if prefer_deepseek and self.deepseek and not use_opus and not requires_vision:
             return self.deepseek, self.deepseek.model
 
         # Tier 3/4: Claude (Sonnet or Opus)
@@ -1055,31 +1903,109 @@ class ClawAgent:
         self,
         client,
         **kwargs,
-    ) -> tuple[str, object, dict]:
+    ) -> tuple[str, dict | None, dict, object, str]:
         """
-        Wrap a client.chat() call with automatic fallback on Claude overload.
-        Falls back: Claude → DeepSeek → OpenAI.
+        Wrap a client.chat() call with automatic fallback on retryable
+        provider errors. Falls back: Claude → DeepSeek → OpenAI.
         """
-        import anthropic
+        request_kwargs = dict(kwargs)
+        requires_vision = bool(
+            request_kwargs.pop('requires_vision', False)
+            or request_kwargs.get('image_base64')
+        )
+        provider_override = request_kwargs.pop('provider_override', None)
+        timeout_seconds = self._model_timeout_seconds()
         try:
-            return await client.chat(**kwargs)
-        except (anthropic.RateLimitError, anthropic.APIStatusError) as exc:
-            status = getattr(exc, 'status_code', None)
-            if status not in (429, 529):
+            response_text, tool_call, usage = await asyncio.wait_for(
+                client.chat(**request_kwargs),
+                timeout=timeout_seconds,
+            )
+            return (
+                response_text,
+                tool_call,
+                usage,
+                client,
+                self._model_name_for_client(client, request_kwargs.get('use_opus', False)),
+            )
+        except Exception as exc:
+            if not self._is_retryable_api_error(exc, allow_timeout=True):
                 raise
-            # Try DeepSeek first
-            if self.deepseek and not isinstance(client, DeepSeekClient):
-                fallback = self.deepseek
-            elif self.openai and not isinstance(client, OpenAIClient):
-                fallback = self.openai
-            else:
-                raise
-            # Strip Claude-only kwargs before retrying
-            safe_kwargs = {
-                k: v for k, v in kwargs.items()
-                if k not in ('use_opus',)
-            }
-            return await fallback.chat(**safe_kwargs)
+            fallback = self._fallback_client_for(
+                client,
+                requires_vision=requires_vision,
+                provider_override=provider_override,
+            )
+            if fallback is None:
+                raise GenerationTimedOut(
+                    f"Model call timed out or failed after {timeout_seconds:.0f}s and no fallback provider was available."
+                ) from exc
+            safe_kwargs = dict(request_kwargs)
+            if not isinstance(fallback, ClaudeClient):
+                safe_kwargs.pop('use_opus', None)
+            try:
+                response_text, tool_call, usage = await asyncio.wait_for(
+                    fallback.chat(**safe_kwargs),
+                    timeout=timeout_seconds,
+                )
+            except asyncio.TimeoutError as timeout_exc:
+                raise GenerationTimedOut(
+                    f"Fallback model call timed out after {timeout_seconds:.0f}s."
+                ) from timeout_exc
+            return (
+                response_text,
+                tool_call,
+                usage,
+                fallback,
+                self._model_name_for_client(fallback, False),
+            )
+
+    def _fallback_client_for(
+        self,
+        client,
+        requires_vision: bool = False,
+        provider_override: str | None = None,
+    ):
+        override = (provider_override or '').lower()
+        if isinstance(client, ClaudeClient):
+            if requires_vision or override in ('sonnet', 'opus'):
+                if self.openai:
+                    return self.openai
+                return None
+            if self.deepseek:
+                return self.deepseek
+            if self.openai:
+                return self.openai
+            return None
+        if isinstance(client, DeepSeekClient):
+            if requires_vision:
+                if self.openai:
+                    return self.openai
+                return self.claude
+            if self.openai:
+                return self.openai
+            return None
+        return None
+
+    def _model_name_for_client(self, client, use_opus: bool) -> str:
+        if isinstance(client, ClaudeClient):
+            return client.opus_model if use_opus else client.model
+        return getattr(client, 'model', '')
+
+    def _is_retryable_api_error(self, exc: Exception, allow_timeout: bool = False) -> bool:
+        if allow_timeout and isinstance(exc, asyncio.TimeoutError):
+            return True
+        status = getattr(exc, 'status_code', None)
+        if status in (429, 529):
+            return True
+        msg = str(exc).lower()
+        return any(token in msg for token in ('429', '529', 'rate limit', 'overload'))
+
+    def _model_timeout_seconds(self) -> float:
+        raw = os.getenv('CLAW_MODEL_TIMEOUT_SECONDS', '45')
+        try:
+            return max(5.0, float(raw))
+        except (TypeError, ValueError):
+            return 45.0
 
     def _calculate_cost(self, usage: dict, client=None) -> float:
         """
@@ -1114,28 +2040,58 @@ class ClawAgent:
         only SAFE tools are exposed — no file edits, no commands.
         """
         all_tools = self.tools.describe_for_model(self.config)
-        if not read_only:
-            return all_tools
-        safe_names = {
-            name for name, t in self.tools._tools.items()
-            if t.risk_level == RiskLevel.SAFE
-        }
-        return [t for t in all_tools if t['name'] in safe_names]
+        if read_only or self._should_limit_to_safe_tools(task):
+            safe_names = {
+                name for name, t in self.tools._tools.items()
+                if t.risk_level == RiskLevel.SAFE
+            }
+            return [t for t in all_tools if t['name'] in safe_names]
+        return all_tools
 
-    def _should_use_opus(self, task: str) -> bool:
+    def _should_limit_to_safe_tools(self, task: str) -> bool:
         """
-        Escalate to Opus for tasks where quality matters most.
-        Sonnet handles the majority of coding tasks well.
-        Opus reserved for architecture decisions and complex debugging.
+        Keep architecture / explanation prompts in a read-only tool posture even
+        during normal chat. These requests should answer from retrieved context
+        rather than escalating into edits or shell commands.
         """
-        opus_keywords = {
-            'architect', 'architecture', 'design decision',
-            'security review', 'performance review', 'why is this',
-            'root cause', 'fundamentally', 'approach to',
-            'best way to structure', 'trade off', 'trade-off',
-        }
-        task_lower = task.lower()
-        return any(kw in task_lower for kw in opus_keywords)
+        text = task.lower()
+        action_keywords = (
+            'fix ', 'implement ', 'change ', 'edit ', 'update ', 'create ',
+            'write ', 'delete ', 'rename ', 'refactor ', 'run ', 'execute ',
+            'commit ', 'apply ', 'add ', 'remove ', 'patch ',
+        )
+        if any(keyword in text for keyword in action_keywords):
+            return False
+
+        explanation_keywords = (
+            'explain', 'describe', 'tell me about', 'how does', 'how do',
+            'what is', 'walk me through', 'flow', 'overview', 'architecture',
+            'which files', 'name the main files', 'where does', 'read the',
+        )
+        return any(keyword in text for keyword in explanation_keywords)
+
+    def _effective_max_tool_rounds(self, envelope: MessageEnvelope) -> int:
+        if getattr(envelope, 'max_tool_rounds', None):
+            return int(envelope.max_tool_rounds)
+        if envelope.read_only or self._should_limit_to_safe_tools(envelope.content):
+            return self.EXPLANATION_MAX_TOOL_ROUNDS
+        return self.MAX_TOOL_ROUNDS
+
+    def _queued_tool_fallback_response(
+        self,
+        original_request: str,
+        tool_call: dict,
+        executed_tool_calls: list[dict],
+    ) -> str:
+        response = (
+            "I gathered some context, but the next step requested approval for "
+            f"`{tool_call.get('name', 'a tool')}` and I have not executed it."
+        )
+        summary = self._tool_results_summary(executed_tool_calls)
+        if summary:
+            response += f"\n\nContext gathered so far:\n{summary}"
+        response += f"\n\nOriginal request: {original_request}"
+        return response
 
     def _register_tools(self):
         from .tools.file_tools import (

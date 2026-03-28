@@ -8,8 +8,11 @@ CLAW test suite — ~20 tests covering:
   - Agent: provider selection logic
   - Indexer: chunk-size cap
 """
+import asyncio
 import json
 import os
+from contextlib import asynccontextmanager
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -29,10 +32,56 @@ def client(auth_headers):
     })
 
     with patch("core.models.claude_client.ClaudeClient.chat", new_callable=AsyncMock) as mock_chat, \
-         patch("core.context.engine.ContextEngine.build_context_prompt", return_value="mock system prompt"):
+         patch(
+             "core.context.engine.ContextEngine.build_context_prompt",
+             return_value=("mock system prompt", {"context_files": [], "context_file_count": 0}),
+         ):
         mock_chat.return_value = fake_response
-        from api.main import app
-        yield TestClient(app), auth_headers
+        import api.main as main
+        from core.agent import ClawAgent
+
+        @asynccontextmanager
+        async def _noop_lifespan(_app):
+            yield
+
+        main.app.router.lifespan_context = _noop_lifespan
+        main._agents.clear()
+
+        projects_root = Path("projects")
+        for project_dir in sorted(projects_root.iterdir()):
+            if not project_dir.is_dir() or project_dir.name.startswith('_'):
+                continue
+            config_path = project_dir / "config.json"
+            if not config_path.exists():
+                continue
+            config = json.loads(config_path.read_text())
+            agent = ClawAgent(project_dir.name, config)
+            if 'subprojects' in config:
+                for sp in config['subprojects']:
+                    try:
+                        agent.memory.create_subproject(
+                            project_id=project_dir.name,
+                            name=sp['name'],
+                            display_name=sp['display_name'],
+                            description=sp.get('description', ''),
+                        )
+                    except Exception:
+                        pass
+            main._agents[project_dir.name] = agent
+
+        main._ollama_status_fast = AsyncMock(return_value={
+            'available': False,
+            'active_model': None,
+            'installed_models': [],
+            'vram_warning': False,
+        })
+        main._project_index_count = AsyncMock(return_value=42)
+
+        tc = TestClient(main.app)
+        try:
+            yield tc, auth_headers
+        finally:
+            pass
 
 
 # ─── /health ─────────────────────────────────────────────────────────────────
@@ -58,6 +107,12 @@ class TestHealth:
         tc, _ = client
         # conftest sets ANTHROPIC_API_KEY=test-key, so this must be True
         assert tc.get("/health").json()["anthropic_key_set"] is True
+
+    def test_health_reports_retrieval_mode(self, client):
+        tc, _ = client
+        data = tc.get("/health").json()
+        assert data["retrieval_mode"] == "hybrid"
+        assert data["bm25_available"] is True
 
 
 # ─── /projects ───────────────────────────────────────────────────────────────
@@ -133,6 +188,15 @@ class TestChatValidation:
         for key in ("content", "session_id", "model_used", "tokens_used"):
             assert key in data, f"Missing key: {key}"
 
+    def test_chat_stop_endpoint_accepts_session(self, client):
+        tc, headers = client
+        r = tc.post('/chat/stop', headers=headers, json={
+            'project_id': 'claw',
+            'session_id': 'stop-test-session',
+        })
+        assert r.status_code == 200
+        assert r.json()['status'] == 'stopping'
+
 
 # ─── /debug/tools ────────────────────────────────────────────────────────────
 
@@ -203,6 +267,21 @@ class TestModelRouter:
         result = router.route("fix a typo", context_tokens=10, project_config={})
         assert result == router.ModelChoice.LOCAL
         os.environ["CLAW_FORCE_API"] = "true"  # restore
+
+    def test_route_decision_marks_tier4_project_as_opus(self):
+        os.environ["CLAW_TIER4_PROJECTS"] = "phloe"
+        try:
+            from core.models.router import route_decision, TaskTier
+            decision = route_decision(
+                "fix a typo",
+                context_tokens=10,
+                project_config={},
+                project="phloe",
+            )
+            assert decision.use_opus is True
+            assert decision.actual_tier == TaskTier.OPUS
+        finally:
+            del os.environ["CLAW_TIER4_PROJECTS"]
 
 
 # ─── OpenAI client ───────────────────────────────────────────────────────────
@@ -369,6 +448,40 @@ class TestWiggum:
             tool = agent.tools.get(name)
             assert tool.risk_level == RiskLevel.SAFE, \
                 f"{name} is not SAFE but appeared in read_only tools"
+
+    def test_explanation_prompt_limits_tools_to_safe(self):
+        import json as _json
+        from pathlib import Path
+        from core.agent import ClawAgent
+        from core.tools.registry import RiskLevel
+
+        config = _json.loads(Path('projects/claw/config.json').read_text())
+        agent = ClawAgent('claw', config)
+        tools = agent._get_tools_for_task(
+            'Read the CLAW codebase and explain how chat requests flow from the web UI to the model response.',
+            read_only=False,
+        )
+
+        for tool_desc in tools:
+            tool = agent.tools.get(tool_desc['name'])
+            assert tool.risk_level == RiskLevel.SAFE
+
+    def test_queued_tool_fallback_response_is_not_blank(self):
+        import json as _json
+        from pathlib import Path
+        from core.agent import ClawAgent
+
+        config = _json.loads(Path('projects/claw/config.json').read_text())
+        agent = ClawAgent('claw', config)
+        text = agent._queued_tool_fallback_response(
+            'tell me about claw',
+            {'name': 'run_command'},
+            [{'tool_name': 'read_file', 'input': {'file_path': 'core/agent.py'}, 'result': 'ok'}],
+        )
+
+        assert 'run_command' in text
+        assert 'tell me about claw' in text
+        assert len(text.strip()) > 20
 
 
 # ─── DeepSeek client ─────────────────────────────────────────────────────────
@@ -702,11 +815,49 @@ class TestOutputValidator:
         assert not r.passed
         assert any('CHECK 2' in f for f in r.failures)
 
+    def test_check2_does_not_flag_missing_file_explanation(self):
+        from core.models.output_validator import validate
+        r = validate(
+            "I cannot find web/app/page.tsx, but the current route lives under web/src/app/page.tsx.",
+            project_root='D:/claw',
+        )
+        assert not any('CHECK 2' in f for f in r.failures)
+
     def test_check3_hallucinated_file_fails(self):
         from core.models.output_validator import validate
         r = validate("See core/nonexistent_module.py for details.",
                      files_in_context=[], project_root='D:/claw')
         assert any('CHECK 3' in f for f in r.failures)
+
+    def test_check3_ignores_framework_names(self):
+        from core.models.output_validator import validate
+        r = validate("CLAW uses Next.js for the web UI and FastAPI for the API.",
+                     files_in_context=[], project_root='D:/claw')
+        assert not any('CHECK 3' in f for f in r.failures)
+
+    def test_check3_does_not_match_inside_capitalized_tokens(self):
+        from core.models.output_validator import validate
+        r = validate("The web layer is configured through Config.js conventions.",
+                     files_in_context=[], project_root='D:/claw')
+        assert not any('CHECK 3' in f for f in r.failures)
+
+    def test_check3_ignores_bare_config_filenames(self):
+        from core.models.output_validator import validate
+        r = validate("Project metadata lives in config.json and core.md.",
+                     files_in_context=[], project_root='D:/claw')
+        assert not any('CHECK 3' in f for f in r.failures)
+
+    def test_check3_accepts_context_file_basenames(self):
+        from core.models.output_validator import validate
+        r = validate(
+            "Model routing is described in router.py and task_classifier.py.",
+            files_in_context=[
+                'core/models/router.py',
+                'core/models/task_classifier.py',
+            ],
+            project_root='D:/claw',
+        )
+        assert not any('CHECK 3' in f for f in r.failures)
 
     def test_check4_phloe_tenant_isolation_fails(self):
         from core.models.output_validator import validate
@@ -750,6 +901,436 @@ class TestOutputValidator:
                      project='phloe')
         elapsed_ms = (time.perf_counter() - start) * 1000
         assert elapsed_ms < 5000  # 100 calls < 50ms each
+
+
+class TestAgentHardening:
+    def test_build_memory_metadata_summarises_context(self):
+        import json as _json
+        from pathlib import Path
+
+        from core.agent import ClawAgent
+
+        config = _json.loads((Path("projects/claw/config.json")).read_text())
+        agent = ClawAgent("claw", config)
+
+        memory = agent._build_memory_metadata(
+            {
+                'retrieval_mode': 'hybrid',
+                'retrieved_chunk_count': 8,
+                'context_file_count': 5,
+                'resolved_mention_count': 2,
+                'match_quality_counts': {
+                    'exact': 1,
+                    'semantic': 4,
+                    'exact+semantic': 3,
+                },
+                'retrieved_files': ['core/agent.py', 'api/main.py'],
+            },
+            context_tokens=6_200,
+        )
+
+        assert memory['retrieval_mode'] == 'hybrid'
+        assert memory['chunks'] == 8
+        assert memory['files'] == 5
+        assert memory['mentions'] == 2
+        assert memory['both_hits'] == 3
+        assert memory['budget_pct'] > 0
+
+    def test_process_includes_memory_metadata(self):
+        import json as _json
+        from pathlib import Path
+        from unittest.mock import AsyncMock, patch
+
+        from core.agent import ClawAgent
+        from core.channels.envelope import Channel, MessageEnvelope
+
+        config = _json.loads((Path("projects/claw/config.json")).read_text())
+        agent = ClawAgent("claw", config)
+        agent.claude.chat = AsyncMock(return_value=(
+            "CLAW is a sovereign coding agent.",
+            None,
+            {"input_tokens": 100, "output_tokens": 20, "total_tokens": 120},
+        ))
+
+        fake_context_meta = {
+            'context_files': ['core/agent.py', 'api/main.py'],
+            'context_file_count': 2,
+            'retrieved_chunk_count': 6,
+            'retrieval_mode': 'hybrid',
+            'resolved_mention_count': 1,
+            'match_quality_counts': {
+                'exact': 1,
+                'semantic': 3,
+                'exact+semantic': 2,
+            },
+            'retrieved_files': ['core/agent.py', 'api/main.py'],
+        }
+
+        with patch.object(
+            agent.context,
+            'build_context_prompt',
+            return_value=('mock system prompt', fake_context_meta),
+        ):
+            response = asyncio.run(
+                agent.process(
+                    MessageEnvelope(
+                        content='tell me about claw',
+                        channel=Channel.WEB,
+                        project_id='claw',
+                        session_id='memory-meta-session',
+                    )
+                )
+            )
+
+        assert response.metadata['memory']['retrieval_mode'] == 'hybrid'
+        assert response.metadata['memory']['chunks'] == 6
+        assert response.metadata['memory']['both_hits'] == 2
+        assert response.metadata['memory']['retrieved_files'] == ['core/agent.py', 'api/main.py']
+
+    def test_chat_with_fallback_uses_deepseek_after_retryable_error(self):
+        import json as _json
+        from pathlib import Path
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        from core.agent import ClawAgent
+
+        config = _json.loads((Path("projects/claw/config.json")).read_text())
+        agent = ClawAgent("claw", config)
+        agent.deepseek = SimpleNamespace(
+            model="deepseek-chat",
+            chat=AsyncMock(return_value=(
+                "Recovered answer",
+                None,
+                {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+            )),
+        )
+
+        class RetryableError(Exception):
+            status_code = 429
+
+        agent.claude.chat = AsyncMock(side_effect=RetryableError("rate limited"))
+
+        text, tool_call, usage, used_client, model_used = asyncio.run(
+            agent._chat_with_fallback(
+                agent.claude,
+                system="sys",
+                history=[],
+                message="hello",
+                tools=None,
+                use_opus=False,
+            )
+        )
+
+        assert text == "Recovered answer"
+        assert tool_call is None
+        assert usage["total_tokens"] == 2
+        assert used_client is agent.deepseek
+        assert model_used == "deepseek-chat"
+
+    def test_chat_with_fallback_uses_deepseek_after_timeout(self):
+        import json as _json
+        from pathlib import Path
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        from core.agent import ClawAgent
+
+        config = _json.loads((Path("projects/claw/config.json")).read_text())
+        agent = ClawAgent("claw", config)
+        agent.deepseek = SimpleNamespace(
+            model="deepseek-chat",
+            chat=AsyncMock(return_value=(
+                "Recovered after timeout",
+                None,
+                {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+            )),
+        )
+
+        agent.claude.chat = AsyncMock(side_effect=asyncio.TimeoutError())
+
+        text, tool_call, usage, used_client, model_used = asyncio.run(
+            agent._chat_with_fallback(
+                agent.claude,
+                system="sys",
+                history=[],
+                message="hello",
+                tools=None,
+                use_opus=False,
+            )
+        )
+
+        assert text == "Recovered after timeout"
+        assert tool_call is None
+        assert usage["total_tokens"] == 2
+        assert used_client is agent.deepseek
+        assert model_used == "deepseek-chat"
+
+    def test_manual_sonnet_override_beats_deepseek_provider(self):
+        import json as _json
+        from pathlib import Path
+
+        from core.agent import ClawAgent
+        from core.models.deepseek_client import DeepSeekClient
+
+        config = _json.loads((Path("projects/claw/config.json")).read_text())
+        agent = ClawAgent("claw", config)
+        agent._api_provider = 'deepseek'
+        agent.deepseek = DeepSeekClient(api_key="sk-test-deepseek")
+
+        client, model = asyncio.run(
+            agent._get_api_client(
+                provider_override='sonnet',
+                requires_vision=True,
+            )
+        )
+
+        assert client is agent.claude
+        assert model == agent.claude.model
+
+    def test_explanation_prompts_use_lower_tool_round_cap(self):
+        import json as _json
+        from pathlib import Path
+
+        from core.agent import ClawAgent
+        from core.channels.envelope import Channel, MessageEnvelope
+
+        config = _json.loads((Path("projects/claw/config.json")).read_text())
+        agent = ClawAgent("claw", config)
+        envelope = MessageEnvelope(
+            content="Read the CLAW codebase and explain how chat requests flow from the web UI to the model response.",
+            channel=Channel.WEB,
+            project_id="claw",
+            session_id="round-cap-test",
+        )
+
+        assert agent._effective_max_tool_rounds(envelope) == agent.EXPLANATION_MAX_TOOL_ROUNDS
+
+    def test_chat_with_fallback_skips_deepseek_for_images(self):
+        import json as _json
+        from pathlib import Path
+        from unittest.mock import AsyncMock
+
+        from core.agent import ClawAgent
+        from core.models.deepseek_client import DeepSeekClient
+        from core.models.openai_client import OpenAIClient
+
+        config = _json.loads((Path("projects/claw/config.json")).read_text())
+        agent = ClawAgent("claw", config)
+        agent.deepseek = DeepSeekClient(api_key="sk-test-deepseek")
+        agent.openai = OpenAIClient(api_key="sk-test-openai")
+        agent.openai.chat = AsyncMock(return_value=(
+            "Vision fallback answer",
+            None,
+            {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+        ))
+
+        class RetryableError(Exception):
+            status_code = 429
+
+        agent.claude.chat = AsyncMock(side_effect=RetryableError("rate limited"))
+
+        text, _, _, used_client, model_used = asyncio.run(
+            agent._chat_with_fallback(
+                agent.claude,
+                system="sys",
+                history=[],
+                message="describe this image",
+                tools=None,
+                image_base64="abc123",
+                image_media_type="image/png",
+                provider_override='sonnet',
+                requires_vision=True,
+            )
+        )
+
+        assert text == "Vision fallback answer"
+        assert used_client is agent.openai
+        assert model_used == agent.openai.model
+
+    def test_validate_final_response_recovers_from_tool_description(self):
+        import json as _json
+        from pathlib import Path
+        from unittest.mock import AsyncMock
+
+        from core.agent import ClawAgent
+        from core.channels.envelope import Channel, MessageEnvelope
+        from core.models.router import ModelChoice
+
+        config = _json.loads((Path("projects/claw/config.json")).read_text())
+        agent = ClawAgent("claw", config)
+        envelope = MessageEnvelope(
+            content="hello",
+            channel=Channel.WEB,
+            project_id="claw",
+            session_id="validation-recovery",
+        )
+
+        agent._get_api_client = AsyncMock(return_value=(agent.claude, agent.claude.model))
+        agent._chat_with_fallback = AsyncMock(return_value=(
+            "Recovered final answer",
+            None,
+            {"input_tokens": 2, "output_tokens": 3, "total_tokens": 5},
+            agent.claude,
+            agent.claude.model,
+        ))
+
+        text, _, model_used, _, metadata = asyncio.run(
+            agent._validate_final_response(
+                response_text="I would call read_file to inspect that.",
+                envelope=envelope,
+                context_prompt="sys",
+                history=[],
+                model_choice=ModelChoice.LOCAL,
+                use_opus=False,
+                available_tools=[],
+                context_files=[],
+                executed_tool_calls=[],
+                current_client=None,
+                current_model_used="qwen2.5-coder:7b",
+                current_cost=0.0,
+            )
+        )
+
+        assert text == "Recovered final answer"
+        assert model_used == agent.claude.model
+        assert metadata["validation_recovered"] is True
+
+    def test_validate_final_response_retries_empty_response_with_current_client(self):
+        import json as _json
+        from pathlib import Path
+        from unittest.mock import AsyncMock
+
+        from core.agent import ClawAgent
+        from core.channels.envelope import Channel, MessageEnvelope
+        from core.models.router import ModelChoice
+
+        config = _json.loads((Path("projects/claw/config.json")).read_text())
+        agent = ClawAgent("claw", config)
+        envelope = MessageEnvelope(
+            content="Explain the CLAW request flow.",
+            channel=Channel.WEB,
+            project_id="claw",
+            session_id="validation-empty-retry",
+        )
+
+        agent._chat_with_fallback = AsyncMock(return_value=(
+            "Chat requests start in the Next.js web route and then flow into FastAPI.",
+            None,
+            {"input_tokens": 2, "output_tokens": 8, "total_tokens": 10},
+            agent.claude,
+            agent.claude.model,
+        ))
+
+        text, _, model_used, _, metadata = asyncio.run(
+            agent._validate_final_response(
+                response_text="",
+                envelope=envelope,
+                context_prompt="sys",
+                history=[],
+                model_choice=ModelChoice.API,
+                use_opus=False,
+                available_tools=[],
+                context_files=["core/agent.py"],
+                executed_tool_calls=[
+                    {
+                        "tool_name": "read_file",
+                        "input": {"file_path": "core/agent.py"},
+                        "result": "agent source here",
+                    }
+                ],
+                current_client=agent.claude,
+                current_model_used=agent.claude.model,
+                current_cost=0.0,
+            )
+        )
+
+        assert text.startswith("Chat requests start")
+        assert model_used == agent.claude.model
+        assert metadata == {}
+        agent._chat_with_fallback.assert_awaited_once()
+
+    def test_build_validation_retry_prompt_includes_context_allowlist(self):
+        import json as _json
+        from pathlib import Path
+
+        from core.agent import ClawAgent
+
+        config = _json.loads((Path("projects/claw/config.json")).read_text())
+        agent = ClawAgent("claw", config)
+
+        prompt = agent._build_validation_retry_prompt(
+            original_message="Explain how stop works.",
+            failures=['CHECK 3: hallucinated file path "pages/api/stop.ts"'],
+            executed_tool_calls=[],
+            context_files=[
+                'web/src/components/ChatWindow.tsx',
+                'web/src/app/api/chat/stop/route.ts',
+                'api/main.py',
+                'core/agent.py',
+            ],
+        )
+
+        assert 'ONLY use files from this allowlist' in prompt
+        assert 'web/src/app/api/chat/stop/route.ts' in prompt
+
+    def test_validate_final_response_uses_tool_summary_fallback_after_empty_failures(self):
+        import json as _json
+        from pathlib import Path
+        from unittest.mock import AsyncMock
+
+        from core.agent import ClawAgent
+        from core.channels.envelope import Channel, MessageEnvelope
+        from core.models.router import ModelChoice
+
+        config = _json.loads((Path("projects/claw/config.json")).read_text())
+        agent = ClawAgent("claw", config)
+        envelope = MessageEnvelope(
+            content="Read the CLAW codebase and explain the chat flow.",
+            channel=Channel.WEB,
+            project_id="claw",
+            session_id="validation-empty-fallback",
+        )
+
+        agent._chat_with_fallback = AsyncMock(return_value=(
+            "",
+            None,
+            {"input_tokens": 2, "output_tokens": 0, "total_tokens": 2},
+            agent.claude,
+            agent.claude.model,
+        ))
+
+        text, _, _, _, metadata = asyncio.run(
+            agent._validate_final_response(
+                response_text="",
+                envelope=envelope,
+                context_prompt="sys",
+                history=[],
+                model_choice=ModelChoice.API,
+                use_opus=False,
+                available_tools=[],
+                context_files=["core/agent.py", "api/main.py"],
+                executed_tool_calls=[
+                    {
+                        "tool_name": "read_file",
+                        "input": {"file_path": "core/agent.py"},
+                        "result": "agent source here",
+                    },
+                    {
+                        "tool_name": "read_file",
+                        "input": {"file_path": "api/main.py"},
+                        "result": "api source here",
+                    },
+                ],
+                current_client=agent.claude,
+                current_model_used=agent.claude.model,
+                current_cost=0.0,
+            )
+        )
+
+        assert "Here are the main sources CLAW inspected" in text
+        assert "`core/agent.py`" in text
+        assert metadata["validation_fallback_used"] == "tool_results_summary"
 
 
 # ─── Session Summariser ───────────────────────────────────────────────────────
@@ -913,6 +1494,15 @@ class TestSessionList:
         assert 'sess-1' in ids
         assert 'sess-2' in ids
 
+    def test_get_session_list_includes_title_and_preview(self, tmp_store):
+        tmp_store.add_message('sess-title', 'user', 'Investigate tenant routing bug in chat stream', 'web')
+        tmp_store.add_message('sess-title', 'assistant', 'I traced it to the stream fallback path.', 'web')
+
+        sessions = tmp_store.get_session_list('testproj')
+        entry = next(s for s in sessions if s['session_id'] == 'sess-title')
+        assert entry['title'].startswith('Investigate tenant routing bug')
+        assert 'stream fallback path' in entry['preview']
+
     def test_get_session_list_scoped_to_subproject(self, tmp_store):
         sp = tmp_store.create_subproject('testproj', 'client-x', 'Client X')
         tmp_store.add_message('sess-sp', 'user', 'hi', 'web')
@@ -924,6 +1514,32 @@ class TestSessionList:
         assert 'sess-sp' in ids
         assert 'sess-other' not in ids
 
+    def test_get_session_list_unscoped_filters_to_requested_project(self, tmp_store, tmp_path):
+        from core.memory.store import MemoryStore
+
+        other_store = MemoryStore(project_id='otherproj', data_dir=str(tmp_path))
+        tmp_store.add_message('sess-own', 'user', 'own', 'web')
+        other_store.add_message('sess-other-project', 'user', 'other', 'web')
+
+        sessions = tmp_store.get_session_list('testproj')
+        ids = [s['session_id'] for s in sessions]
+        assert 'sess-own' in ids
+        assert 'sess-other-project' not in ids
+
+    def test_add_message_persists_subproject_on_first_write(self, tmp_store):
+        sp = tmp_store.create_subproject('testproj', 'first-write', 'First Write')
+        tmp_store.add_message(
+            'sess-first-subproject',
+            'user',
+            'hello',
+            'web',
+            subproject_id=sp['id'],
+        )
+
+        sess = tmp_store.get_session('sess-first-subproject', project_id='testproj')
+        assert sess is not None
+        assert sess['subproject_id'] == sp['id']
+
     def test_get_session_returns_messages(self, tmp_store):
         tmp_store.add_message('sess-get', 'user', 'msg 1', 'web')
         tmp_store.add_message('sess-get', 'assistant', 'reply', 'web')
@@ -932,8 +1548,29 @@ class TestSessionList:
         assert len(sess['messages']) == 2
         assert sess['archived'] is False
 
+    def test_get_session_honors_project_scope(self, tmp_store, tmp_path):
+        from core.memory.store import MemoryStore
+
+        other_store = MemoryStore(project_id='otherproj', data_dir=str(tmp_path))
+        other_store.add_message('sess-cross-project', 'user', 'other', 'web')
+
+        assert (
+            tmp_store.get_session('sess-cross-project', project_id='testproj')
+            is None
+        )
+
     def test_get_session_not_found_returns_none(self, tmp_store):
         assert tmp_store.get_session('nonexistent-session-xyz') is None
+
+    def test_archived_session_list_includes_summary_title(self, tmp_store):
+        tmp_store.add_message('sess-archived-title', 'user', 'Need to review payment retry flow', 'web')
+        tmp_store.add_message('sess-archived-title', 'assistant', 'I summarised the retry logic.', 'web')
+        tmp_store.archive_session('sess-archived-title', '- Review payment retry flow\n- Retry path confirmed')
+
+        sessions = tmp_store.get_session_list('testproj')
+        entry = next(s for s in sessions if s['session_id'] == 'sess-archived-title')
+        assert entry['archived'] is True
+        assert entry['title'].startswith('Need to review payment retry flow')
 
 
 class TestTokenTrackingAndArchiving:
@@ -1147,7 +1784,7 @@ class TestMentionResolution:
         engine = ContextEngine(project_id='test', db_url='')
         config = {'codebase_path': str(tmp_path)}
 
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             engine.resolve_mentions(
                 mentions=[{'type': 'file', 'value': 'hello.py', 'display': 'hello.py'}],
                 project_id='test',
@@ -1171,7 +1808,7 @@ class TestMentionResolution:
         engine = ContextEngine(project_id='test', db_url='')
         config = {'codebase_path': str(tmp_path)}
 
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             engine.resolve_mentions(
                 mentions=[{'type': 'folder', 'value': 'mydir', 'display': 'mydir/'}],
                 project_id='test',
@@ -1194,7 +1831,7 @@ class TestMentionResolution:
         engine.core_md_path = proj_dir / 'core.md'
         config = {'codebase_path': str(tmp_path)}
 
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             engine.resolve_mentions(
                 mentions=[{'type': 'core', 'value': '', 'display': 'core.md'}],
                 project_id='test',
@@ -1235,7 +1872,7 @@ class TestMentionResolution:
         engine = ContextEngine(project_id='test', db_url='')
         config = {'codebase_path': str(tmp_path)}
 
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             engine.resolve_mentions(
                 mentions=[{'type': 'unknown_type', 'value': 'x', 'display': 'x'}],
                 project_id='test',
@@ -1244,6 +1881,158 @@ class TestMentionResolution:
         )
         # Unknown type should produce an empty result (no exception)
         assert isinstance(result, list)
+
+
+class TestHybridRetriever:
+    def test_cache_key_includes_subproject(self):
+        from core.memory.retriever import HybridRetriever
+
+        class FakeEngine:
+            project_id = 'claw'
+            db_url = 'postgresql://example'
+            MAX_TIER2_CHUNKS = 20
+
+        retriever = HybridRetriever(FakeEngine())
+        assert retriever._cache_key(None) == 'claw:global'
+        assert retriever._cache_key('claw:demnurse') == 'claw:demnurse'
+
+    def test_bm25_finds_exact_match(self):
+        from core.memory.retriever import HybridRetriever
+
+        class FakeEngine:
+            project_id = 'claw'
+            db_url = 'postgresql://example'
+            MAX_TIER2_CHUNKS = 20
+
+            def get_all_chunks(self, subproject_id=None):
+                assert subproject_id == 'claw:demnurse'
+                return [
+                    {
+                        'file': 'stock.py',
+                        'content': 'M-4471 is waiting for stock review.',
+                        'chunk_type': 'window',
+                        'chunk_name': None,
+                    },
+                    {
+                        'file': 'other.py',
+                        'content': 'Completely unrelated content.',
+                        'chunk_type': 'window',
+                        'chunk_name': None,
+                    },
+                ]
+
+            def _retrieve_by_embedding(
+                self,
+                task,
+                embedding_fn,
+                subproject_id=None,
+                limit=None,
+            ):
+                return []
+
+            def _retrieve_by_keyword(self, task, subproject_id=None):
+                return []
+
+        retriever = HybridRetriever(FakeEngine())
+        results = retriever.retrieve(
+            'Check M-4471',
+            embedding_fn=lambda _: [0.0],
+            subproject_id='claw:demnurse',
+        )
+        assert results[0]['file'] == 'stock.py'
+        assert results[0]['match_quality'] == 'exact'
+
+    def test_rrf_boosts_chunk_present_in_both(self):
+        from core.memory.retriever import HybridRetriever
+
+        shared = {
+            'file': 'booking.py',
+            'content': 'def get_booking_queryset(): return Booking.objects.filter(tenant=request.tenant)',
+            'chunk_type': 'function',
+            'chunk_name': 'get_booking_queryset',
+        }
+
+        class FakeEngine:
+            project_id = 'phloe'
+            db_url = 'postgresql://example'
+            MAX_TIER2_CHUNKS = 20
+
+            def get_all_chunks(self, subproject_id=None):
+                return [
+                    shared,
+                    {
+                        'file': 'calendar.py',
+                        'content': 'calendar rendering logic',
+                        'chunk_type': 'window',
+                        'chunk_name': None,
+                    },
+                ]
+
+            def _retrieve_by_embedding(
+                self,
+                task,
+                embedding_fn,
+                subproject_id=None,
+                limit=None,
+            ):
+                return [
+                    {**shared, 'score': 0.91},
+                    {
+                        'file': 'views.py',
+                        'content': 'generic booking view',
+                        'chunk_type': 'window',
+                        'chunk_name': None,
+                        'score': 0.89,
+                    },
+                ]
+
+            def _retrieve_by_keyword(self, task, subproject_id=None):
+                return []
+
+        retriever = HybridRetriever(FakeEngine())
+        results = retriever.retrieve(
+            'Investigate get_booking_queryset tenant filtering',
+            embedding_fn=lambda _: [0.0],
+        )
+        assert results[0]['file'] == 'booking.py'
+        assert results[0]['match_quality'] == 'exact+semantic'
+
+    def test_context_engine_retrieval_mode_hybrid(self):
+        from core.context.engine import ContextEngine
+
+        engine = ContextEngine(project_id='test', db_url='postgresql://example')
+        assert engine.retrieval_mode == 'hybrid'
+
+
+class TestFileWatcher:
+    def test_successful_reindex_invalidates_hybrid_cache(self):
+        from core.context.watcher import FileWatcher
+
+        class FakeRetriever:
+            def __init__(self):
+                self.invalidated = False
+
+            def invalidate_cache(self):
+                self.invalidated = True
+
+        class FakeContext:
+            def __init__(self):
+                self.hybrid_retriever = FakeRetriever()
+
+        watcher = FileWatcher(
+            path='D:/claw',
+            indexer=MagicMock(),
+            loop=MagicMock(),
+            context_engine=FakeContext(),
+        )
+
+        watcher._handle_index_result(
+            'core/agent.py',
+            {'status': 'indexed', 'chunks': 4},
+        )
+
+        assert watcher.context_engine.hybrid_retriever.invalidated is True
+        assert watcher.last_reindex_at is not None
 
 
 # ─── /projects/{project}/files endpoint ──────────────────────────────────────
@@ -1279,6 +2068,16 @@ class TestFilesEndpoint:
         assert r.status_code == 200
         assert r.json()['files'] == []
 
+    def test_get_files_pg_connect_uses_short_timeout(self, client):
+        from unittest.mock import patch
+
+        tc, headers = client
+        with patch('psycopg2.connect', side_effect=RuntimeError('db down')) as mock_connect:
+            r = tc.get('/projects/claw/files', headers=headers)
+
+        assert r.status_code == 200
+        assert mock_connect.call_args.kwargs.get('connect_timeout') == 1
+
 
 # ─── /projects/{project}/symbols endpoint ────────────────────────────────────
 
@@ -1298,6 +2097,16 @@ class TestSymbolsEndpoint:
         tc, _ = client
         r = tc.get('/projects/claw/symbols?q=foo')
         assert r.status_code == 401
+
+    def test_get_symbols_pg_connect_uses_short_timeout(self, client):
+        from unittest.mock import patch
+
+        tc, headers = client
+        with patch('psycopg2.connect', side_effect=RuntimeError('db down')) as mock_connect:
+            r = tc.get('/projects/claw/symbols?q=agent', headers=headers)
+
+        assert r.status_code == 200
+        assert mock_connect.call_args.kwargs.get('connect_timeout') == 1
 
 
 # ─── model_override routing ───────────────────────────────────────────────────
@@ -1402,7 +2211,10 @@ class TestProcessStreaming:
         })
 
         with patch("core.models.claude_client.ClaudeClient.chat", new_callable=AsyncMock) as mock_chat, \
-             patch("core.context.engine.ContextEngine.build_context_prompt", return_value="mock ctx"):
+             patch(
+                 "core.context.engine.ContextEngine.build_context_prompt",
+                 return_value=("mock ctx", {"context_files": [], "context_file_count": 0}),
+             ):
             mock_chat.return_value = fake_response
             config_path = tmp_path / "config.json"
             config_path.write_text('{"name":"test","force_model":"api","permissions":["read_file"]}')
@@ -1422,7 +2234,7 @@ class TestProcessStreaming:
                     events.append(ev)
                 return events
 
-            events = asyncio.get_event_loop().run_until_complete(collect())
+            events = asyncio.run(collect())
 
         types = [e["type"] for e in events]
         assert "routing" in types
@@ -1435,12 +2247,15 @@ class TestProcessStreaming:
         from core.agent import ClawAgent
         from core.channels.envelope import MessageEnvelope, Channel
 
-        fake_response = ("My answer", None, {
+        fake_response = ("This is my streaming answer.", None, {
             "input_tokens": 5, "output_tokens": 10, "total_tokens": 15,
         })
 
         with patch("core.models.claude_client.ClaudeClient.chat", new_callable=AsyncMock) as mock_chat, \
-             patch("core.context.engine.ContextEngine.build_context_prompt", return_value="mock ctx"):
+             patch(
+                 "core.context.engine.ContextEngine.build_context_prompt",
+                 return_value=("mock ctx", {"context_files": [], "context_file_count": 0}),
+             ):
             mock_chat.return_value = fake_response
             agent = ClawAgent(project_id="test", config={"name": "test", "force_model": "api", "permissions": ["read_file"]})
 
@@ -1457,11 +2272,11 @@ class TestProcessStreaming:
                         return ev
                 return None
 
-            complete = asyncio.get_event_loop().run_until_complete(collect())
+            complete = asyncio.run(collect())
 
         assert complete is not None
         assert "response" in complete
-        assert complete["response"] == "My answer"
+        assert complete["response"] == "This is my streaming answer."
 
     def test_process_streaming_emits_tool_events_for_safe_tool(self, tmp_path):
         """SAFE tool calls produce tool_start and tool_end events."""
@@ -1475,7 +2290,10 @@ class TestProcessStreaming:
         final_response = ("Here is what I found.", None, {"input_tokens": 5, "output_tokens": 5, "total_tokens": 10})
 
         with patch("core.models.claude_client.ClaudeClient.chat", new_callable=AsyncMock) as mock_chat, \
-             patch("core.context.engine.ContextEngine.build_context_prompt", return_value="mock ctx"), \
+             patch(
+                 "core.context.engine.ContextEngine.build_context_prompt",
+                 return_value=("mock ctx", {"context_files": [], "context_file_count": 0}),
+             ), \
              patch("core.agent.ClawAgent._execute_tool", new_callable=AsyncMock) as mock_exec:
             mock_chat.side_effect = [first_response, final_response]
             mock_exec.return_value = "file content here"
@@ -1494,7 +2312,7 @@ class TestProcessStreaming:
                     events.append(ev)
                 return events
 
-            events = asyncio.get_event_loop().run_until_complete(collect())
+            events = asyncio.run(collect())
 
         types = [e["type"] for e in events]
         assert "tool_start" in types
@@ -1513,7 +2331,10 @@ class TestProcessStreaming:
         first_response = ("", tool_call, {"input_tokens": 5, "output_tokens": 5, "total_tokens": 10})
 
         with patch("core.models.claude_client.ClaudeClient.chat", new_callable=AsyncMock) as mock_chat, \
-             patch("core.context.engine.ContextEngine.build_context_prompt", return_value="mock ctx"), \
+             patch(
+                 "core.context.engine.ContextEngine.build_context_prompt",
+                 return_value=("mock ctx", {"context_files": [], "context_file_count": 0}),
+             ), \
              patch("core.agent.ClawAgent._execute_tool", new_callable=AsyncMock) as mock_exec:
             mock_chat.return_value = first_response
             mock_exec.return_value = "edited"
@@ -1532,7 +2353,7 @@ class TestProcessStreaming:
                     events.append(ev)
                 return events
 
-            events = asyncio.get_event_loop().run_until_complete(collect())
+            events = asyncio.run(collect())
 
         types = [e["type"] for e in events]
         assert "tool_queued" in types
@@ -1588,6 +2409,23 @@ class TestChatStreamEndpoint:
         )
         assert '"complete"' in r.text
 
+    def test_chat_stream_accepts_image_params(self, client):
+        tc, headers = client
+        r = tc.get(
+            '/chat/stream',
+            headers=headers,
+            params={
+                "project": "claw",
+                "session_id": "stream-image-test",
+                "message": "describe this image",
+                "image_b64": "abc123",
+                "image_media_type": "image/png",
+                "model_override": "sonnet",
+            },
+        )
+        assert r.status_code == 200
+        assert '"complete"' in r.text
+
     def test_chat_stream_requires_auth(self, client):
         tc, _ = client
         r = tc.get(
@@ -1617,3 +2455,309 @@ class TestChatStreamEndpoint:
         assert r.status_code == 200
         data = r.json()
         assert 'content' in data
+
+
+# ── Layer 2: Memory Assembler tests ──────────────────────────────────────────
+
+
+class TestMemoryAssembler:
+    """Tests for the Layer 2 memory assembler."""
+
+    def _make_assembler(self, retriever=None, store=None):
+        from core.memory.assembler import MemoryAssembler
+        return MemoryAssembler(
+            retriever=retriever,
+            store=store,
+            project_configs={},
+        )
+
+    def _make_retriever(self, chunks=None):
+        class FakeRetriever:
+            is_available = True
+            def retrieve(self, task, embedding_fn, subproject_id=None):
+                return chunks or []
+        return FakeRetriever()
+
+    def _make_store(self, messages=None):
+        class FakeStore:
+            conn = MagicMock()
+            def get_recent_history(self, session_id, limit=20):
+                return messages or []
+        return FakeStore()
+
+    def _make_chunks(self, n, tokens_per_chunk=100):
+        """Create n fake retrieved chunks with ~tokens_per_chunk words each."""
+        word = 'code '
+        content = word * tokens_per_chunk
+        return [
+            {
+                'file': f'file{i}.py',
+                'content': content,
+                'chunk_type': 'code',
+                'chunk_name': f'func{i}',
+                'score': 0.9 - i * 0.01,
+                'match_quality': ['exact+semantic', 'semantic', 'exact'][i % 3],
+                'bm25_rank': i if i % 2 == 0 else None,
+                'cosine_rank': i if i % 2 == 1 else None,
+            }
+            for i in range(n)
+        ]
+
+    def test_assembler_respects_ollama_4000_token_budget(self):
+        chunks = self._make_chunks(50, tokens_per_chunk=200)
+        retriever = self._make_retriever(chunks)
+        assembler = self._make_assembler(retriever=retriever)
+        packet = asyncio.run(assembler.assemble(
+            query='test query', project_id='claw', session_id='s1', provider='ollama',
+        ))
+        assert packet.total_tokens_estimated <= 4_000
+
+    def test_assembler_respects_deepseek_32000_token_budget(self):
+        chunks = self._make_chunks(100, tokens_per_chunk=500)
+        retriever = self._make_retriever(chunks)
+        assembler = self._make_assembler(retriever=retriever)
+        packet = asyncio.run(assembler.assemble(
+            query='test query', project_id='claw', session_id='s1', provider='deepseek',
+        ))
+        assert packet.total_tokens_estimated <= 32_000
+
+    def test_assembler_always_includes_core_rules(self):
+        assembler = self._make_assembler()
+        packet = asyncio.run(assembler.assemble(
+            query='test', project_id='claw', session_id='s1', provider='sonnet',
+        ))
+        # core_rules should be populated (claw project has core.md)
+        assert isinstance(packet.core_rules, str)
+
+    def test_assembler_always_includes_recent_messages(self):
+        messages = [
+            {'role': 'user', 'content': 'hello', 'timestamp': '2026-01-01'},
+            {'role': 'assistant', 'content': 'hi', 'timestamp': '2026-01-01'},
+        ]
+        store = self._make_store(messages)
+        assembler = self._make_assembler(store=store)
+        packet = asyncio.run(assembler.assemble(
+            query='test', project_id='claw', session_id='s1', provider='sonnet',
+        ))
+        assert len(packet.recent_messages) == 2
+
+    def test_assembler_mentions_before_retrieved(self):
+        """Mentions should be included before retrieved chunks in budget allocation."""
+        mentions = [{'content': 'pinned context', 'label': 'test.py'}]
+        chunks = self._make_chunks(5)
+        retriever = self._make_retriever(chunks)
+        assembler = self._make_assembler(retriever=retriever)
+        packet = asyncio.run(assembler.assemble(
+            query='test', project_id='claw', session_id='s1', provider='sonnet',
+            mentions=mentions,
+        ))
+        assert len(packet.mentioned_context) == 1
+        assert len(packet.retrieved_chunks) > 0
+
+    def test_assembler_trims_retrieved_when_over_budget(self):
+        # Each chunk ~650 tokens (500 words * 1.3), ollama budget for retrieved is 1800
+        # So only ~2-3 chunks should fit (plus min 3 guarantee)
+        chunks = self._make_chunks(20, tokens_per_chunk=500)
+        retriever = self._make_retriever(chunks)
+        assembler = self._make_assembler(retriever=retriever)
+        packet = asyncio.run(assembler.assemble(
+            query='test', project_id='claw', session_id='s1', provider='ollama',
+        ))
+        assert len(packet.retrieved_chunks) < 20
+
+    def test_assembler_preserves_min_3_retrieved_chunks(self):
+        # Even if over budget, at least 3 chunks should be kept
+        chunks = self._make_chunks(5, tokens_per_chunk=2000)
+        retriever = self._make_retriever(chunks)
+        assembler = self._make_assembler(retriever=retriever)
+        packet = asyncio.run(assembler.assemble(
+            query='test', project_id='claw', session_id='s1', provider='ollama',
+        ))
+        assert len(packet.retrieved_chunks) >= 3
+
+    def test_format_for_provider_adds_cache_control_anthropic(self):
+        assembler = self._make_assembler()
+        packet = asyncio.run(assembler.assemble(
+            query='test', project_id='claw', session_id='s1', provider='sonnet',
+        ))
+        messages = assembler.format_for_provider(packet, 'sonnet')
+        # Find system message with cache_control
+        system_msgs = [m for m in messages if m.get('role') == 'system']
+        assert len(system_msgs) > 0
+        first_sys = system_msgs[0]
+        content = first_sys.get('content', '')
+        if isinstance(content, list):
+            has_cache = any(
+                block.get('cache_control', {}).get('type') == 'ephemeral'
+                for block in content
+                if isinstance(block, dict)
+            )
+            assert has_cache, 'Anthropic format should have cache_control: ephemeral'
+
+    def test_format_for_provider_no_cache_control_deepseek(self):
+        assembler = self._make_assembler()
+        packet = asyncio.run(assembler.assemble(
+            query='test', project_id='claw', session_id='s1', provider='deepseek',
+        ))
+        messages = assembler.format_for_provider(packet, 'deepseek')
+        for msg in messages:
+            content = msg.get('content', '')
+            if isinstance(content, list):
+                for block in content:
+                    assert 'cache_control' not in block, 'DeepSeek should not have cache_control'
+            assert 'cache_control' not in msg
+
+    def test_distill_core_rules_finds_rules_section(self):
+        assembler = self._make_assembler()
+        text = '# Intro\nSome intro text\n\n## Rules\n- Rule 1\n- Rule 2\n\n## Other\nStuff'
+        result = assembler.distill_core_rules(text)
+        assert 'Rule 1' in result
+        assert 'Rule 2' in result
+
+    def test_distill_core_rules_falls_back_to_first_400_words(self):
+        assembler = self._make_assembler()
+        words = ['word'] * 500
+        text = ' '.join(words)
+        result = assembler.distill_core_rules(text)
+        assert len(result.split()) <= 410  # ~400 words with some tolerance
+
+    def test_distill_core_rules_hard_cap_500_words(self):
+        assembler = self._make_assembler()
+        # Create a huge Rules section
+        words = ['ruleword'] * 1000
+        text = '## Rules\n' + ' '.join(words)
+        result = assembler.distill_core_rules(text)
+        assert len(result.split()) <= 510  # 500 word hard cap with tolerance
+
+
+class TestModelClientPreAssembled:
+    """Tests for pre_assembled parameter on model clients."""
+
+    def test_claude_client_accepts_pre_assembled(self):
+        from pathlib import Path
+        source = (Path('core/models/claude_client.py')).read_text()
+        assert 'pre_assembled: list[dict] | None = None' in source
+
+    def test_deepseek_client_accepts_pre_assembled(self):
+        from core.models.deepseek_client import DeepSeekClient
+        client = DeepSeekClient(api_key='test-key')
+        import inspect
+        sig = inspect.signature(client.chat)
+        assert 'pre_assembled' in sig.parameters
+
+    def test_openai_client_accepts_pre_assembled(self):
+        from core.models.openai_client import OpenAIClient
+        client = OpenAIClient(api_key='test-key')
+        import inspect
+        sig = inspect.signature(client.chat)
+        assert 'pre_assembled' in sig.parameters
+
+    def test_pre_assembled_none_uses_existing_path(self):
+        """When pre_assembled is None, the client should use its normal message building."""
+        from core.models.claude_client import ClaudeClient
+        client = ClaudeClient(api_key='test-key')
+        # Build messages normally to verify the path works
+        msgs = client.build_messages(
+            system='test',
+            history=[],
+            message='hello',
+        )
+        assert len(msgs) > 0
+        assert msgs[-1]['role'] == 'user'
+
+
+class TestCacheManager:
+    """Tests for the cache statistics tracker."""
+
+    def _make_cache_manager(self):
+        import sqlite3
+        from core.memory.cache_manager import CacheManager
+
+        class FakeStore:
+            def __init__(self):
+                self.conn = sqlite3.connect(':memory:')
+
+        store = FakeStore()
+        return CacheManager(store)
+
+    def test_cache_manager_records_request(self):
+        cm = self._make_cache_manager()
+        cm.record_request(provider='sonnet', input_tokens=1000, cached_tokens=500)
+        stats = cm.get_stats('sonnet', days=1)
+        assert stats['requests'] == 1
+        assert stats['tokens_saved'] == 500
+
+    def test_cache_manager_hit_rate_calculation(self):
+        cm = self._make_cache_manager()
+        cm.record_request(provider='sonnet', input_tokens=1000, cached_tokens=700)
+        cm.record_request(provider='sonnet', input_tokens=1000, cached_tokens=800)
+        stats = cm.get_stats('sonnet', days=1)
+        assert stats['requests'] == 2
+        assert stats['hit_rate'] > 0
+        assert stats['tokens_saved'] == 1500
+
+    def test_cache_manager_cost_saved_usd(self):
+        cm = self._make_cache_manager()
+        # 100k cached tokens on sonnet: ($3.00 - $0.30) / 1M * 100k = $0.27
+        cm.record_request(provider='sonnet', input_tokens=100_000, cached_tokens=100_000)
+        stats = cm.get_stats('sonnet', days=1)
+        assert stats['cost_saved_usd'] > 0
+        assert abs(stats['cost_saved_usd'] - 0.27) < 0.01
+
+
+class TestAgentMemoryDiagnostics:
+    """Tests for memory diagnostics in agent metadata."""
+
+    def test_agent_metadata_includes_memory_diagnostics(self):
+        import json as _json
+        from pathlib import Path
+        from unittest.mock import AsyncMock, patch
+
+        from core.agent import ClawAgent
+        from core.channels.envelope import Channel, MessageEnvelope
+
+        config = _json.loads((Path('projects/claw/config.json')).read_text())
+        agent = ClawAgent('claw', config)
+        agent.claude.chat = AsyncMock(return_value=(
+            'Test response.',
+            None,
+            {'input_tokens': 100, 'output_tokens': 20, 'total_tokens': 120},
+        ))
+
+        with patch.object(
+            agent.context,
+            'build_context_prompt',
+            return_value=('mock prompt', {
+                'context_files': [],
+                'context_file_count': 0,
+                'retrieved_chunk_count': 0,
+                'retrieval_mode': 'keyword',
+            }),
+        ):
+            response = asyncio.run(
+                agent.process(
+                    MessageEnvelope(
+                        content='hello',
+                        channel=Channel.WEB,
+                        project_id='claw',
+                        session_id='mem-diag-test',
+                    )
+                )
+            )
+
+        memory = response.metadata.get('memory', {})
+        assert 'provider' in memory
+        assert 'budget_pct' in memory
+        assert 'budget_total' in memory
+        assert 'budget_used' in memory
+        assert 'active_skills' in memory
+        assert isinstance(memory['active_skills'], list)
+        assert memory['budget_pct'] <= 100
+
+    def test_switching_tier_changes_provider_budget(self):
+        from core.memory.assembler import PROVIDER_BUDGETS
+        # Verify budgets differ between providers
+        assert PROVIDER_BUDGETS['ollama']['total'] == 4_000
+        assert PROVIDER_BUDGETS['deepseek']['total'] == 32_000
+        assert PROVIDER_BUDGETS['sonnet']['total'] == 64_000
+        assert PROVIDER_BUDGETS['opus']['total'] == 100_000

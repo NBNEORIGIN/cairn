@@ -18,6 +18,8 @@ export interface SessionEntry {
   message_count: number
   subproject_id: string | null
   archived: boolean
+  title?: string
+  preview?: string
 }
 
 export interface SessionSidebarProps {
@@ -39,9 +41,18 @@ function formatSessionTime(ts: string | null): string {
   return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
 }
 
-function sessionLabel(s: SessionEntry): string {
+function sessionMeta(s: SessionEntry): string {
   const time = formatSessionTime(s.last_message_at)
   return `${time} · ${s.message_count} msg${s.message_count !== 1 ? 's' : ''}`
+}
+
+function sessionTitle(s: SessionEntry): string {
+  return s.title || s.preview || 'New chat'
+}
+
+function isInternalTestSubproject(subproject: Subproject): boolean {
+  const haystack = `${subproject.name} ${subproject.display_name} ${subproject.description}`.toLowerCase()
+  return haystack.includes('example.com') || haystack.includes('created in test')
 }
 
 interface NewSubprojectFormProps {
@@ -83,39 +94,39 @@ function NewSubprojectForm({ projectId, onCreated, onCancel }: NewSubprojectForm
   return (
     <form
       onSubmit={handleSubmit}
-      className="mx-2 my-1 p-2 rounded bg-zinc-900 border border-zinc-700 text-xs"
+      className="mx-3 my-2 rounded-2xl border border-slate-200 bg-white p-3 text-xs shadow-sm"
     >
       <input
         autoFocus
         placeholder="name (e.g. demnurse.nbne.uk)"
         value={name}
         onChange={e => setName(e.target.value)}
-        className="w-full bg-zinc-800 border border-zinc-700 text-zinc-200 rounded px-2 py-1 mb-1 text-xs"
+        className="mb-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700"
       />
       <input
         placeholder="display name (e.g. DemNurse)"
         value={displayName}
         onChange={e => setDisplayName(e.target.value)}
-        className="w-full bg-zinc-800 border border-zinc-700 text-zinc-200 rounded px-2 py-1 mb-1 text-xs"
+        className="mb-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700"
       />
       <input
         placeholder="description (optional)"
         value={description}
         onChange={e => setDescription(e.target.value)}
-        className="w-full bg-zinc-800 border border-zinc-700 text-zinc-200 rounded px-2 py-1 mb-2 text-xs"
+        className="mb-3 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700"
       />
       <div className="flex gap-1">
         <button
           type="submit"
           disabled={saving || !name.trim() || !displayName.trim()}
-          className="flex-1 py-1 rounded bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40 text-zinc-200 text-xs"
+          className="flex-1 rounded-xl bg-sky-600 py-2 text-xs font-medium text-white hover:bg-sky-700 disabled:opacity-40"
         >
           {saving ? 'Saving…' : 'Create'}
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400 text-xs"
+          className="rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-500 hover:bg-slate-50"
         >
           ✕
         </button>
@@ -154,36 +165,44 @@ function SubprojectFolder({
           setExpanded(e => !e)
           onSelect()
         }}
-        className={`w-full flex items-center gap-1.5 px-2 py-1.5 text-xs rounded hover:bg-zinc-800 transition-colors text-left ${
-          isSelected ? 'text-zinc-200' : 'text-zinc-400'
+        className={`w-full rounded-2xl px-3 py-2.5 text-left text-xs transition-colors hover:bg-slate-100 ${
+          isSelected ? 'bg-sky-50 text-slate-800' : 'text-slate-600'
         }`}
       >
-        <span className="text-zinc-600 text-[10px]">{expanded ? '▼' : '▶'}</span>
-        <span className="font-medium truncate">{subproject.display_name}</span>
+        <span className="text-[10px] text-slate-400">{expanded ? '▼' : '▶'}</span>
+        <div className="min-w-0">
+          <div className="truncate font-semibold">{subproject.display_name}</div>
+          {subproject.description && (
+            <div className="truncate text-[10px] text-slate-500">{subproject.description}</div>
+          )}
+        </div>
         {sessions.length > 0 && (
-          <span className="ml-auto text-zinc-600 text-[10px]">{sessions.length}</span>
+          <span className="ml-auto rounded-full bg-white px-2 py-0.5 text-[10px] text-slate-500 shadow-sm">{sessions.length}</span>
         )}
       </button>
 
       {expanded && (
-        <div className="ml-4 border-l border-zinc-800 pl-1">
+        <div className="ml-5 border-l border-slate-200 pl-2">
           {sessions.length === 0 && (
-            <p className="text-[10px] text-zinc-700 px-2 py-1">No sessions yet</p>
+            <p className="px-2 py-1 text-[10px] text-slate-400">No chats yet</p>
           )}
           {sessions.map(s => (
             <button
               key={s.session_id}
               onClick={() => onSessionSelect(s.session_id)}
-              className={`w-full text-left px-2 py-1 text-[11px] rounded hover:bg-zinc-800 transition-colors flex items-center gap-1.5 ${
+              className={`flex w-full items-start gap-2 rounded-2xl px-3 py-2 text-left text-[11px] transition-colors hover:bg-slate-100 ${
                 s.session_id === activeSessionId
-                  ? 'bg-zinc-800 text-zinc-200'
-                  : 'text-zinc-500'
+                  ? 'bg-white text-slate-800 shadow-sm ring-1 ring-sky-100'
+                  : 'text-slate-500'
               }`}
             >
               {s.archived && (
-                <span className="text-[9px] text-zinc-600 font-mono">[A]</span>
+                <span className="font-mono text-[9px] text-slate-400">[A]</span>
               )}
-              <span className="truncate">{sessionLabel(s)}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-medium text-slate-700">{sessionTitle(s)}</span>
+                <span className="block truncate text-[10px] text-slate-400">{sessionMeta(s)}</span>
+              </span>
             </button>
           ))}
         </div>
@@ -240,13 +259,17 @@ export function SessionSidebar({
     sessions.filter(s => s.subproject_id === spId)
 
   const unscopedSessions = sessions.filter(s => !s.subproject_id)
+  const visibleSubprojects = subprojects.filter(sp => {
+    if (!isInternalTestSubproject(sp)) return true
+    return sessionsForSubproject(sp.id).length > 0 || activeSubprojectId === sp.id
+  })
 
   if (collapsed) {
     return (
-      <div className="w-8 flex-shrink-0 border-r border-zinc-800 flex flex-col items-center py-3 bg-zinc-950">
+      <div className="flex w-10 flex-shrink-0 flex-col items-center border-r border-slate-200 bg-[#f7f9fc] py-3">
         <button
           onClick={() => setCollapsed(false)}
-          className="text-zinc-600 hover:text-zinc-400 text-xs"
+          className="text-xs text-slate-400 hover:text-slate-700"
           title="Expand sidebar"
         >
           ›
@@ -256,25 +279,30 @@ export function SessionSidebar({
   }
 
   return (
-    <aside className="w-64 flex-shrink-0 border-r border-zinc-800 flex flex-col bg-zinc-950 overflow-hidden">
+    <aside className="flex w-72 flex-shrink-0 flex-col overflow-hidden border-r border-slate-200 bg-[#f7f9fc]">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2.5 border-b border-zinc-800">
-        <span className="text-[10px] font-bold tracking-widest text-zinc-500 uppercase">
-          {projectId}
-        </span>
+      <div className="border-b border-slate-200 px-4 py-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">
+              Workspaces
+            </div>
+            <div className="mt-1 text-sm font-semibold text-slate-800">{projectId || 'No project selected'}</div>
+          </div>
         <button
           onClick={() => setCollapsed(true)}
-          className="text-zinc-600 hover:text-zinc-400 text-xs leading-none"
+          className="text-xs leading-none text-slate-400 hover:text-slate-700"
           title="Collapse sidebar"
         >
           ‹
         </button>
+        </div>
       </div>
 
       {/* Session tree */}
-      <div className="flex-1 overflow-y-auto py-1">
+      <div className="flex-1 overflow-y-auto px-2 py-2">
         {/* Subproject folders */}
-        {subprojects.map(sp => (
+        {visibleSubprojects.map(sp => (
           <SubprojectFolder
             key={sp.id}
             subproject={sp}
@@ -296,32 +324,35 @@ export function SessionSidebar({
         ) : (
           <button
             onClick={() => setShowNewForm(true)}
-            className="w-full text-left px-3 py-1 text-[11px] text-zinc-600 hover:text-zinc-400 hover:bg-zinc-900 rounded transition-colors"
+            className="mx-1 mt-2 w-[calc(100%-0.5rem)] rounded-2xl border border-dashed border-slate-300 px-3 py-2 text-left text-[11px] font-medium text-slate-500 transition-colors hover:border-sky-300 hover:bg-white hover:text-sky-700"
           >
-            + New subproject
+            + New client workspace
           </button>
         )}
 
         {/* Unscoped sessions */}
         {unscopedSessions.length > 0 && (
-          <div className="mt-2 border-t border-zinc-800 pt-1">
-            <p className="px-3 py-1 text-[10px] text-zinc-600 uppercase tracking-wide">
-              Unscoped sessions
+          <div className="mt-3 border-t border-slate-200 pt-3">
+            <p className="px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+              Recent chats
             </p>
             {unscopedSessions.map(s => (
               <button
                 key={s.session_id}
                 onClick={() => onSessionSelect(s.session_id)}
-                className={`w-full text-left px-3 py-1 text-[11px] rounded hover:bg-zinc-800 transition-colors flex items-center gap-1.5 ${
+                className={`mx-1 flex w-[calc(100%-0.5rem)] items-start gap-2 rounded-2xl px-3 py-2 text-left text-[11px] transition-colors hover:bg-white ${
                   s.session_id === activeSessionId
-                    ? 'bg-zinc-800 text-zinc-200'
-                    : 'text-zinc-500'
+                    ? 'bg-white text-slate-800 shadow-sm ring-1 ring-sky-100'
+                    : 'text-slate-500'
                 }`}
               >
                 {s.archived && (
-                  <span className="text-[9px] text-zinc-600 font-mono">[A]</span>
+                  <span className="font-mono text-[9px] text-slate-400">[A]</span>
                 )}
-                <span className="truncate">{sessionLabel(s)}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium text-slate-700">{sessionTitle(s)}</span>
+                  <span className="block truncate text-[10px] text-slate-400">{sessionMeta(s)}</span>
+                </span>
               </button>
             ))}
           </div>

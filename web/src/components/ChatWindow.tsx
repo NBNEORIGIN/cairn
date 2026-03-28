@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback, KeyboardEvent } from 'react'
-import { MessageBubble, Message, ToolCallRecord } from './MessageBubble'
+import { MessageBubble, Message, MessageMetadata, ToolCallRecord } from './MessageBubble'
 import { PendingToolCall } from './ToolApproval'
 import { SessionSidebar, Subproject } from './SessionSidebar'
 
@@ -26,8 +26,17 @@ interface DropdownItem {
   detail?: string
 }
 
+interface SkillOption {
+  skill_id: string
+  display_name: string
+  description: string
+  subproject_id?: string | null
+  has_decisions?: boolean
+}
+
 export interface ActivityEvent {
   type: string
+  message?: string
   tool?: string
   params?: Record<string, unknown>
   risk?: string
@@ -44,14 +53,20 @@ export interface ActivityEvent {
   reason?: string
   iteration?: number
   phase?: string
+  text?: string
+}
+
+function isInternalTestSubproject(subproject: Subproject): boolean {
+  const haystack = `${subproject.name} ${subproject.display_name} ${subproject.description}`.toLowerCase()
+  return haystack.includes('example.com') || haystack.includes('created in test')
 }
 
 const MODEL_OPTIONS = [
   { value: 'auto',     label: 'Auto',       detail: 'recommended',   cost: '' },
-  { value: 'local',    label: '⚡ Local',   detail: 'qwen2.5-coder', cost: 'free' },
-  { value: 'deepseek', label: '🌊 DeepSeek', detail: 'deepseek-chat', cost: '~$0.001' },
-  { value: 'sonnet',   label: '☁ Sonnet',  detail: 'claude-sonnet', cost: '~$0.005' },
-  { value: 'opus',     label: '🧠 Opus',    detail: 'claude-opus',  cost: '~$0.015' },
+  { value: 'local',    label: 'Local',    detail: 'qwen2.5-coder', cost: 'free' },
+  { value: 'deepseek', label: 'DeepSeek', detail: 'deepseek-chat', cost: '~$0.001' },
+  { value: 'sonnet',   label: 'Sonnet',   detail: 'claude-sonnet', cost: '~$0.005' },
+  { value: 'opus',     label: 'Opus',     detail: 'claude-opus',  cost: '~$0.015' },
 ]
 
 function generateId() {
@@ -64,14 +79,18 @@ const TOKEN_TRIM_THRESHOLD = 40_000
 
 function TokenBar({ tokens }: { tokens: number }) {
   const pct = Math.min(100, (tokens / TOKEN_TRIM_THRESHOLD) * 100)
-  const filled = Math.round(pct / 5)
-  const empty = 20 - filled
-  const bar = '█'.repeat(filled) + '░'.repeat(empty)
   return (
-    <div className="flex items-center gap-2 px-4 py-1.5 border-b border-zinc-800 bg-zinc-950 text-[11px] text-zinc-500 font-mono">
-      <span>Context:</span>
-      <span className={tokens >= TOKEN_TRIM_THRESHOLD ? 'text-red-400' : 'text-zinc-600'}>{bar}</span>
-      <span>{tokens.toLocaleString()} / {TOKEN_TRIM_THRESHOLD.toLocaleString()} tokens</span>
+    <div className="border-b border-slate-200 bg-white/70 px-5 py-3 text-[11px] text-slate-600">
+      <div className="flex items-center gap-3">
+        <span className="font-semibold uppercase tracking-[0.18em] text-slate-500">Context</span>
+        <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-200">
+          <div
+            className={`h-full rounded-full transition-all ${tokens >= TOKEN_TRIM_THRESHOLD ? 'bg-rose-500' : 'bg-sky-500'}`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        <span className="font-medium text-slate-700">{tokens.toLocaleString()} / {TOKEN_TRIM_THRESHOLD.toLocaleString()} tokens</span>
+      </div>
     </div>
   )
 }
@@ -81,14 +100,15 @@ function MentionPill({ mention, onRemove }: { mention: Mention; onRemove: () => 
     mention.type === 'symbol' ? '⚙' : mention.type === 'session' ? '💬' :
     mention.type === 'core' ? '📌' : '🌐'
   return (
-    <span className="inline-flex items-center gap-1 bg-zinc-800 border border-zinc-600 rounded px-2 py-0.5 text-xs text-zinc-300 font-mono">
+    <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700">
       {icon} {mention.display}
-      <button onClick={onRemove} className="ml-1 text-zinc-500 hover:text-zinc-200 leading-none" aria-label="Remove mention">✕</button>
+      <button onClick={onRemove} className="ml-1 leading-none text-sky-400 hover:text-sky-700" aria-label="Remove mention">✕</button>
     </span>
   )
 }
 
 function activityIcon(event: ActivityEvent): string {
+  if (event.type === 'status') return '·'
   if (event.type === 'routing') return '→'
   if (event.type === 'tokens') return '📊'
   if (event.type === 'tool_start' || event.type === 'tool_end') {
@@ -106,6 +126,9 @@ function activityIcon(event: ActivityEvent): string {
 }
 
 function activityText(event: ActivityEvent): string {
+  if (event.type === 'status') {
+    return event.message || 'Working…'
+  }
   if (event.type === 'routing') {
     const tierLabels: Record<number, string> = { 1: 'Local', 2: 'DeepSeek', 3: 'Claude', 4: 'Opus' }
     const tierStr = event.tier ? `Tier ${event.tier} (${tierLabels[event.tier] || '?'})` : ''
@@ -140,6 +163,15 @@ function activityText(event: ActivityEvent): string {
   return JSON.stringify(event)
 }
 
+function latestStatus(events: ActivityEvent[]): string {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const ev = events[i]
+    if (ev.type === 'status') return ev.message || 'Working…'
+    if (ev.type === 'tool_start') return activityText(ev)
+  }
+  return 'Working…'
+}
+
 function ActivityLog({
   events,
   live,
@@ -154,23 +186,23 @@ function ActivityLog({
   if (events.length === 0 && !live) return null
 
   return (
-    <div className="my-2 rounded-lg border border-zinc-800 bg-zinc-950 overflow-hidden text-xs">
+    <div className="my-3 overflow-hidden rounded-[22px] border border-slate-200 bg-white text-xs shadow-sm">
       {/* Header */}
       <button
         onClick={onToggle}
-        className="w-full flex items-center justify-between px-3 py-1.5 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900 transition-colors"
+        className="flex w-full items-center justify-between bg-slate-50/90 px-4 py-3 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
       >
-        <span className="font-mono font-medium tracking-wide uppercase text-[10px]">Activity</span>
+        <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Activity</span>
         <span className="flex items-center gap-2">
           {live && (
-            <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse" title="Streaming" />
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-emerald-500" title="Streaming" />
           )}
-          <span className="text-zinc-600">{collapsed ? '▸' : '▾'}</span>
+          <span className="text-slate-400">{collapsed ? '▸' : '▾'}</span>
         </span>
       </button>
 
       {!collapsed && (
-        <div className="border-t border-zinc-800 divide-y divide-zinc-900">
+        <div className="divide-y divide-slate-100 border-t border-slate-200">
           {events.map((ev, i) => {
             const icon = activityIcon(ev)
             const text = activityText(ev)
@@ -181,23 +213,24 @@ function ActivityLog({
             return (
               <div
                 key={i}
-                className={`flex items-start gap-2 px-3 py-1 font-mono
-                  ${isError ? 'text-red-400' : isQueued ? 'text-amber-400' : 'text-zinc-400'}`}
+                className={`flex items-start gap-3 px-4 py-2.5 ${
+                  isError ? 'text-rose-600' : isQueued ? 'text-amber-700' : 'text-slate-600'
+                }`}
               >
-                <span className="shrink-0 w-4 text-center">{icon}</span>
+                <span className="w-4 shrink-0 text-center">{icon}</span>
                 <span className={`flex-1 truncate ${isRunning ? 'animate-pulse' : ''}`}>
                   {text}
                 </span>
                 {isRunning && (
-                  <span className="shrink-0 text-zinc-600">⟳</span>
+                  <span className="shrink-0 text-slate-400">⟳</span>
                 )}
               </div>
             )
           })}
 
           {live && (
-            <div className="flex items-center gap-2 px-3 py-1 font-mono text-zinc-600 animate-pulse">
-              <span className="shrink-0 w-4 text-center">⟳</span>
+            <div className="flex items-center gap-3 px-4 py-2.5 text-slate-400 animate-pulse">
+              <span className="w-4 shrink-0 text-center">⟳</span>
               <span>thinking…</span>
             </div>
           )}
@@ -225,6 +258,8 @@ export function ChatWindow() {
   // Subproject
   const [subprojects, setSubprojects] = useState<Subproject[]>([])
   const [activeSubprojectId, setActiveSubprojectId] = useState<string | null>(null)
+  const [availableSkills, setAvailableSkills] = useState<SkillOption[]>([])
+  const [activeSkillIds, setActiveSkillIds] = useState<string[]>([])
 
   // Tokens / archive
   const [sessionTokens, setSessionTokens] = useState(0)
@@ -244,12 +279,15 @@ export function ChatWindow() {
 
   // Live activity log (in-flight, before the final message arrives)
   const [liveActivity, setLiveActivity] = useState<ActivityEvent[]>([])
+  const [liveDraftText, setLiveDraftText] = useState('')
   const [activityCollapsed, setActivityCollapsed] = useState<Record<string, boolean>>({})
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const modelDropdownRef = useRef<HTMLDivElement>(null)
   const activeStreamRef = useRef<EventSource | null>(null)
+  const activeRequestControllerRef = useRef<AbortController | null>(null)
+  const stopRequestedRef = useRef(false)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -291,13 +329,36 @@ export function ChatWindow() {
   }, [projectId])
 
   useEffect(() => {
+    if (!projectId) { setAvailableSkills([]); return }
+    fetch(`/api/skills?project=${encodeURIComponent(projectId)}`)
+      .then(r => r.json())
+      .then(data => setAvailableSkills(data.skills || []))
+      .catch(() => setAvailableSkills([]))
+  }, [projectId])
+
+  useEffect(() => {
     if (projectId) {
       localStorage.setItem('claw_project', projectId)
+      const savedSkills = localStorage.getItem(`claw_skills_${projectId}`)
+      let parsedSkills: string[] = []
+      if (savedSkills) {
+        try {
+          parsedSkills = JSON.parse(savedSkills)
+        } catch {
+          parsedSkills = []
+        }
+      }
       setMessages([{ id: generateId(), role: 'system', content: `Project: ${projectId}` }])
       setActiveSubprojectId(null)
+      setActiveSkillIds(parsedSkills)
       setSessionTokens(0)
     }
   }, [projectId])
+
+  useEffect(() => {
+    if (!projectId) return
+    localStorage.setItem(`claw_skills_${projectId}`, JSON.stringify(activeSkillIds))
+  }, [projectId, activeSkillIds])
 
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
@@ -361,9 +422,11 @@ export function ChatWindow() {
         } else if (mentionTab === 'sessions') {
           const r = await fetch(`/api/sessions?project=${projectId}`, { signal: ctrl.signal })
           const data = await r.json()
-          setMentionItems((data.sessions || []).slice(0, 20).map((s: { session_id: string; first_message?: string; created_at?: string }) => ({
-            type: 'session', value: s.session_id, display: s.session_id.slice(0, 12),
-            detail: s.first_message?.slice(0, 50) || s.created_at || '',
+          setMentionItems((data.sessions || []).slice(0, 20).map((s: { session_id: string; title?: string; preview?: string; created_at?: string }) => ({
+            type: 'session',
+            value: s.session_id,
+            display: s.title || s.session_id.slice(0, 12),
+            detail: s.preview || s.session_id.slice(0, 12),
           })))
         }
         setMentionIndex(0)
@@ -410,11 +473,36 @@ export function ChatWindow() {
   const newSession = useCallback(() => {
     // Close any active stream
     if (activeStreamRef.current) { activeStreamRef.current.close(); activeStreamRef.current = null }
+    if (activeRequestControllerRef.current) {
+      activeRequestControllerRef.current.abort()
+      activeRequestControllerRef.current = null
+    }
+    stopRequestedRef.current = false
     setSessionId(generateId())
     setSessionCost(0); setLocalCalls(0); setApiCalls(0); setSessionTokens(0)
-    setArchiveBanner(null); setMentions([]); setLiveActivity([])
+    setArchiveBanner(null); setMentions([]); setLiveActivity([]); setLiveDraftText(''); setActiveSkillIds([])
     setMessages([{ id: generateId(), role: 'system', content: `New session — project: ${projectId}` }])
   }, [projectId])
+
+  const stopGeneration = useCallback(() => {
+    stopRequestedRef.current = true
+    void fetch('/api/chat/stop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: projectId, session_id: sessionId }),
+    }).catch(() => {})
+    if (activeStreamRef.current) {
+      activeStreamRef.current.close()
+      activeStreamRef.current = null
+    }
+    if (activeRequestControllerRef.current) {
+      activeRequestControllerRef.current.abort()
+      activeRequestControllerRef.current = null
+    }
+    setLoading(false)
+    setLiveActivity([])
+    setLiveDraftText('')
+  }, [projectId, sessionId])
 
   // ── Streaming send ──────────────────────────────────────────────────────────
 
@@ -423,8 +511,10 @@ export function ChatWindow() {
     toolApproval?: Record<string, unknown>,
   ) => {
     if (!projectId) return
+    stopRequestedRef.current = false
     setLoading(true)
-    setLiveActivity([])
+    setLiveActivity([{ type: 'status', message: 'Preparing request…' }])
+    setLiveDraftText('')
 
     const imgBase64 = pastedImage
     const imgType = pastedImageType
@@ -437,31 +527,59 @@ export function ChatWindow() {
 
     const currentMentions = mentions
     setMentions([])
+    const currentSubprojectId = activeSubprojectId || undefined
     const currentOverride = modelOverride === 'auto' ? undefined : modelOverride
-    setModelOverride('auto')
+    const currentSkillIds = activeSkillIds
 
     // Tool approvals use POST /chat (non-streaming — state machine)
     if (toolApproval) {
       try {
+        const controller = new AbortController()
+        activeRequestControllerRef.current = controller
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
           body: JSON.stringify({
             content: content || '',
             project_id: projectId, session_id: sessionId, channel: 'web',
+            subproject_id: currentSubprojectId,
+            skill_ids: currentSkillIds,
             tool_approval: toolApproval,
           }),
         })
         const data = await res.json()
         _handleChatResponse(data)
-      } catch { _handleNetworkError() }
-      finally { setLoading(false) }
+      } catch (err) {
+        if ((err as Error).name !== 'AbortError') _handleNetworkError()
+      } finally {
+        activeRequestControllerRef.current = null
+        setLoading(false)
+      }
+      return
+    }
+
+    if (imgBase64) {
+      setLiveActivity([{
+        type: 'status',
+        message: `Analysing image with ${(currentOverride || 'auto').replace(/^./, c => c.toUpperCase())}…`,
+      }])
+      await _fallbackPost(
+        content,
+        currentMentions,
+        currentOverride,
+        currentSubprojectId,
+        currentSkillIds,
+        imgBase64,
+        imgType,
+      )
       return
     }
 
     // Normal messages — use SSE stream
     const activityLog: ActivityEvent[] = []
     const msgId = generateId()
+    let streamCompleted = false
 
     const params = new URLSearchParams({
       project: projectId,
@@ -469,8 +587,9 @@ export function ChatWindow() {
       message: content || 'What do you see in this screenshot?',
     })
     if (currentMentions.length > 0) params.set('mentions', JSON.stringify(currentMentions))
+    if (currentSubprojectId) params.set('subproject_id', currentSubprojectId)
     if (currentOverride) params.set('model_override', currentOverride)
-    if (imgBase64) params.set('image_b64', imgBase64)
+    if (currentSkillIds.length > 0) params.set('skill_ids', JSON.stringify(currentSkillIds))
 
     // Close any existing stream
     if (activeStreamRef.current) activeStreamRef.current.close()
@@ -483,7 +602,12 @@ export function ChatWindow() {
       activeStreamRef.current = es
     } catch {
       // EventSource not available — fall back to POST /chat
-      await _fallbackPost(content, currentMentions, currentOverride)
+      await _fallbackPost(
+        content,
+        currentMentions,
+        currentOverride,
+        currentSubprojectId,
+      )
       return
     }
 
@@ -492,24 +616,33 @@ export function ChatWindow() {
       try { event = JSON.parse(e.data) } catch { return }
 
       if (event.type === 'done') {
+        streamCompleted = true
         es.close()
         activeStreamRef.current = null
         setLoading(false)
         setLiveActivity([])
+        setLiveDraftText('')
+        return
+      }
+
+      if (event.type === 'response_delta') {
+        setLiveDraftText(prev => prev + (event.text || ''))
         return
       }
 
       if (event.type === 'complete') {
+        streamCompleted = true
         es.close()
         activeStreamRef.current = null
         setLoading(false)
         setLiveActivity([])
+        setLiveDraftText('')
 
         const isLocal = (event.model_used || '').toLowerCase().includes('qwen')
         if (isLocal) setLocalCalls(c => c + 1)
         else if (event.model_used) { setApiCalls(c => c + 1); setSessionCost(c => c + (event.cost_usd || 0)) }
 
-        const meta = (event.metadata || {}) as Record<string, unknown>
+        const meta = (event.metadata || {}) as MessageMetadata & Record<string, unknown>
         if (meta.session_archived) {
           setArchiveBanner((meta.archive_summary as string) || 'Session archived')
           newSession()
@@ -522,6 +655,7 @@ export function ChatWindow() {
           modelUsed: event.model_used,
           costUsd: event.cost_usd,
           modelRouting: (meta.model_routing as string) || 'auto',
+          metadata: meta,
           pendingToolCall: event.pending_tool_call || null,
           toolCalls: (event.executed_tool_calls || []) as ToolCallRecord[],
           activityLog: activityLog.length > 0 ? ([...activityLog] as unknown[]) : undefined,
@@ -530,10 +664,12 @@ export function ChatWindow() {
       }
 
       if (event.type === 'error') {
+        streamCompleted = true
         es.close()
         activeStreamRef.current = null
         setLoading(false)
         setLiveActivity([])
+        setLiveDraftText('')
         setMessages(prev => [...prev, {
           id: generateId(), role: 'assistant',
           content: `⚠ ${event.message || 'Stream error'}`,
@@ -549,13 +685,19 @@ export function ChatWindow() {
     es.onerror = () => {
       es.close()
       activeStreamRef.current = null
-      // If we haven't received a complete event yet, fall back to POST
-      if (loading) {
+      if (!streamCompleted && !stopRequestedRef.current) {
         setLiveActivity([])
-        _fallbackPost(content, currentMentions, currentOverride)
+        setLiveDraftText('')
+        void _fallbackPost(
+          content,
+          currentMentions,
+          currentOverride,
+          currentSubprojectId,
+          currentSkillIds,
+        )
       }
     }
-  }, [projectId, sessionId, pastedImage, pastedImageType, mentions, modelOverride, newSession, loading])
+  }, [projectId, sessionId, pastedImage, pastedImageType, mentions, modelOverride, activeSubprojectId, activeSkillIds, newSession])
 
   const _handleChatResponse = useCallback((data: Record<string, unknown>) => {
     if (data.error) {
@@ -566,7 +708,7 @@ export function ChatWindow() {
     if (isLocal) setLocalCalls(c => c + 1)
     else if (data.model_used) { setApiCalls(c => c + 1); setSessionCost(c => c + ((data.cost_usd as number) || 0)) }
     if (data.tokens_used) setSessionTokens(t => t + (data.tokens_used as number))
-    const meta = (data.metadata as Record<string, unknown>) || {}
+    const meta = ((data.metadata as MessageMetadata & Record<string, unknown>) || {})
     if (meta.session_archived) {
       setArchiveBanner((meta.archive_summary as string) || 'Session archived')
       newSession()
@@ -577,6 +719,7 @@ export function ChatWindow() {
       modelUsed: data.model_used as string,
       costUsd: data.cost_usd as number,
       modelRouting: (meta.model_routing as string) || 'auto',
+      metadata: meta,
       pendingToolCall: (data.pending_tool_call as PendingToolCall) || null,
       toolCalls: ((data.tool_calls as ToolCallRecord[]) || []),
     }])
@@ -586,21 +729,38 @@ export function ChatWindow() {
     content: string,
     currentMentions: Mention[],
     currentOverride: string | undefined,
+    currentSubprojectId?: string,
+    currentSkillIds: string[] = [],
+    imageBase64?: string,
+    imageMediaType?: string,
   ) => {
+    const controller = new AbortController()
+    activeRequestControllerRef.current = controller
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           content: content || '',
           project_id: projectId, session_id: sessionId, channel: 'web',
-          mentions: currentMentions, model_override: currentOverride,
+          mentions: currentMentions,
+          model_override: currentOverride,
+          subproject_id: currentSubprojectId,
+          skill_ids: currentSkillIds,
+          image_base64: imageBase64,
+          image_media_type: imageMediaType,
         }),
       })
       const data = await res.json()
       _handleChatResponse(data)
-    } catch { _handleNetworkError() }
-    finally { setLoading(false) }
+    } catch (err) {
+      if ((err as Error).name !== 'AbortError') _handleNetworkError()
+    } finally {
+      activeRequestControllerRef.current = null
+      setLoading(false)
+      setLiveDraftText('')
+    }
   }, [projectId, sessionId, _handleChatResponse])
 
   const _handleNetworkError = useCallback(() => {
@@ -627,60 +787,143 @@ export function ChatWindow() {
   }, [sendMessage])
 
   const activeSubproject = subprojects.find(sp => sp.id === activeSubprojectId)
+  const visibleSubprojects = subprojects.filter(sp => !isInternalTestSubproject(sp))
   const selectedModel = MODEL_OPTIONS.find(m => m.value === modelOverride) || MODEL_OPTIONS[0]
+  const visibleSkills = availableSkills.filter(skill => !isInternalTestSubproject({
+    id: skill.skill_id,
+    name: skill.skill_id,
+    display_name: skill.display_name,
+    description: skill.description || '',
+  } as Subproject))
+  const loadSession = useCallback(async (sid: string) => {
+    setSessionId(sid)
+    setSessionTokens(0)
+    setArchiveBanner(null)
+    setLiveActivity([])
+
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}?project=${encodeURIComponent(projectId)}`)
+      const data = await res.json()
+      if (data.error) {
+        setMessages([{ id: generateId(), role: 'system', content: `Could not load session: ${sid}` }])
+        return
+      }
+      setActiveSubprojectId(data.subproject_id || null)
+      setActiveSkillIds((data.skill_ids || []) as string[])
+      setMessages((data.messages || []).map((msg: { role: 'user' | 'assistant' | 'system'; content: string; model_used?: string; cost_usd?: number }) => ({
+        id: generateId(),
+        role: msg.role,
+        content: msg.content,
+        modelUsed: msg.model_used,
+        costUsd: msg.cost_usd,
+      })))
+    } catch {
+      setMessages([{ id: generateId(), role: 'system', content: `Could not load session: ${sid}` }])
+    }
+  }, [projectId])
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full bg-transparent text-slate-900">
       <SessionSidebar
         projectId={projectId}
         activeSessionId={sessionId}
         activeSubprojectId={activeSubprojectId}
-        onSessionSelect={(sid) => {
-          setSessionId(sid); setSessionTokens(0); setArchiveBanner(null); setLiveActivity([])
-          setMessages([{ id: generateId(), role: 'system', content: `Resumed session: ${sid}` }])
-        }}
+        onSessionSelect={loadSession}
         onSubprojectChange={(spId) => setActiveSubprojectId(spId)}
       />
 
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex min-w-0 flex-1 flex-col bg-transparent">
         {/* Header */}
-        <div className="flex items-center gap-3 px-4 py-2 border-b border-zinc-800 bg-zinc-950">
-          <div className="flex items-center gap-2">
-            <label className="text-[10px] text-zinc-600 uppercase tracking-wide">Project</label>
-            <select value={projectId} onChange={e => setProjectId(e.target.value)} className="bg-zinc-900 border border-zinc-700 text-zinc-200 text-xs rounded px-2 py-1">
+        <div className="border-b border-slate-200 bg-white/80 px-5 py-4">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="min-w-[220px]">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-sky-700">CLAW Workbench</div>
+              <div className="text-sm text-slate-500">Sovereign coding agent with durable project memory</div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <label className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Project</label>
+              <select value={projectId} onChange={e => setProjectId(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-sky-300">
               {projects.length === 0 && <option value="">No projects</option>}
               {projects.map(p => <option key={p.id} value={p.id}>{p.id}</option>)}
             </select>
           </div>
 
-          {subprojects.length > 0 && (
+          {visibleSubprojects.length > 0 && (
             <div className="flex items-center gap-2">
-              <label className="text-[10px] text-zinc-600 uppercase tracking-wide">Client</label>
-              <select value={activeSubprojectId || ''} onChange={e => setActiveSubprojectId(e.target.value || null)} className="bg-zinc-900 border border-zinc-700 text-zinc-200 text-xs rounded px-2 py-1">
+              <label className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Client</label>
+              <select value={activeSubprojectId || ''} onChange={e => setActiveSubprojectId(e.target.value || null)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-sky-300">
                 <option value="">All clients</option>
-                {subprojects.map(sp => <option key={sp.id} value={sp.id}>{sp.display_name}</option>)}
+                {visibleSubprojects.map(sp => <option key={sp.id} value={sp.id}>{sp.display_name}</option>)}
               </select>
             </div>
           )}
 
-          <div className="ml-auto flex items-center gap-3">
-            <button onClick={newSession} className="text-xs py-1 px-2 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors">New session</button>
-            <div className="text-xs text-zinc-600">${sessionCost.toFixed(4)} · {localCalls}L/{apiCalls}A</div>
-            <div className="text-zinc-700 font-mono text-[10px]">{sessionId.slice(0, 10)}…</div>
+          {visibleSkills.length > 0 && (
+            <div className="flex min-w-[240px] flex-wrap items-center gap-2">
+              <label className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Skills</label>
+              <div className="flex flex-wrap gap-1.5">
+                {visibleSkills.slice(0, 6).map(skill => {
+                  const active = activeSkillIds.includes(skill.skill_id)
+                  return (
+                    <button
+                      key={skill.skill_id}
+                      type="button"
+                      onClick={() => setActiveSkillIds(prev => (
+                        prev.includes(skill.skill_id)
+                          ? prev.filter(id => id !== skill.skill_id)
+                          : [...prev, skill.skill_id].slice(0, 2)
+                      ))}
+                      className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
+                        active
+                          ? 'border-sky-300 bg-sky-50 text-sky-700'
+                          : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700'
+                      }`}
+                      title={skill.description}
+                    >
+                      {skill.display_name}
+                    </button>
+                  )
+                })}
+                {activeSkillIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveSkillIds([])}
+                    className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-500 transition hover:border-slate-300 hover:text-slate-700"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="ml-auto flex flex-wrap items-center gap-3">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 shadow-sm">
+              <span className="font-semibold text-slate-700">${sessionCost.toFixed(4)}</span> spend
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 shadow-sm">
+              <span className="font-semibold text-slate-700">{localCalls}</span> local / <span className="font-semibold text-slate-700">{apiCalls}</span> API
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 shadow-sm">
+              Session <span className="font-mono text-slate-700">{sessionId.slice(0, 8)}…</span>
+            </div>
+            <button onClick={newSession} className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-sky-700">New chat</button>
           </div>
+        </div>
         </div>
 
         {sessionTokens > 0 && <TokenBar tokens={sessionTokens} />}
 
         {archiveBanner && (
-          <div className="flex items-center justify-between px-4 py-2 bg-zinc-800 border-b border-zinc-700 text-xs text-zinc-300">
+          <div className="flex items-center justify-between border-b border-emerald-200 bg-emerald-50 px-5 py-3 text-sm text-emerald-800">
             <span>Session archived — summary added to context</span>
-            <button onClick={() => setArchiveBanner(null)} className="text-zinc-500 hover:text-zinc-300 ml-4">✕</button>
+            <button onClick={() => setArchiveBanner(null)} className="ml-4 text-emerald-500 hover:text-emerald-700">✕</button>
           </div>
         )}
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-6 py-4">
+        <div className="flex-1 overflow-y-auto bg-[linear-gradient(180deg,rgba(248,250,252,0.9),rgba(241,245,249,0.95))] px-8 py-6">
           {messages.map((msg, msgIdx) => (
             <div key={msg.id}>
               <MessageBubble
@@ -702,23 +945,32 @@ export function ChatWindow() {
 
           {/* Live activity log while streaming */}
           {loading && (
-            <ActivityLog
-              events={liveActivity}
-              live={true}
-              collapsed={false}
-              onToggle={() => {}}
-            />
+            <>
+              <MessageBubble
+                message={{
+                  id: 'pending-assistant',
+                  role: 'assistant',
+                  content: liveDraftText || latestStatus(liveActivity),
+                }}
+              />
+              <ActivityLog
+                events={liveActivity}
+                live={true}
+                collapsed={false}
+                onToggle={() => {}}
+              />
+            </>
           )}
 
           <div ref={messagesEndRef} />
         </div>
 
         {/* Input area */}
-        <div className="border-t border-zinc-800 bg-zinc-950 px-4 py-3">
+        <div className="border-t border-slate-200 bg-white/85 px-5 py-4">
           {pastedImage && (
             <div className="relative mb-2 inline-block">
-              <img src={`data:${pastedImageType};base64,${pastedImage}`} alt="Pasted screenshot" className="max-h-28 rounded border border-zinc-600" />
-              <button onClick={() => setPastedImage(null)} className="absolute -top-2 -right-2 bg-zinc-700 hover:bg-zinc-600 rounded-full w-5 h-5 text-xs flex items-center justify-center text-zinc-300 leading-none">×</button>
+              <img src={`data:${pastedImageType};base64,${pastedImage}`} alt="Pasted screenshot" className="max-h-28 rounded-2xl border border-slate-200 shadow-sm" />
+              <button onClick={() => setPastedImage(null)} className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-white text-sm leading-none text-slate-500 shadow-md hover:text-slate-700">×</button>
             </div>
           )}
 
@@ -733,36 +985,36 @@ export function ChatWindow() {
           {/* @ mention dropdown */}
           {mentionQuery !== null && (
             <div className="relative mb-2">
-              <div className="absolute bottom-0 left-0 right-0 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 overflow-hidden">
-                <div className="flex border-b border-zinc-800">
+              <div className="absolute bottom-0 left-0 right-0 z-50 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
+                <div className="flex border-b border-slate-200">
                   {(['files', 'folders', 'symbols', 'sessions'] as const).map(tab => (
                     <button key={tab} onClick={() => { setMentionTab(tab); setMentionIndex(0) }}
-                      className={`flex-1 py-1.5 text-[11px] font-medium transition-colors capitalize ${mentionTab === tab ? 'text-zinc-100 bg-zinc-800' : 'text-zinc-500 hover:text-zinc-300'}`}>
+                      className={`flex-1 py-2 text-[11px] font-semibold capitalize transition-colors ${mentionTab === tab ? 'bg-sky-50 text-sky-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'}`}>
                       {tab}
                     </button>
                   ))}
                 </div>
                 {mentionItems.length === 0 ? (
-                  <div className="px-3 py-2 text-xs text-zinc-600 italic">
+                  <div className="px-3 py-3 text-xs italic text-slate-500">
                     {mentionQuery ? `No ${mentionTab} matching "${mentionQuery}"` : `Type to search ${mentionTab}…`}
                   </div>
                 ) : (
                   <div className="max-h-48 overflow-y-auto">
                     {mentionItems.map((item, i) => (
                       <button key={`${item.type}:${item.value}`} onClick={() => selectMentionItem(item)}
-                        className={`w-full text-left px-3 py-1.5 flex items-center gap-2 text-xs transition-colors ${i === mentionIndex ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-300 hover:bg-zinc-800'}`}>
-                        <span className="font-mono text-zinc-200 truncate">{item.display}</span>
-                        {item.detail && <span className="text-zinc-600 truncate text-[10px] ml-auto shrink-0 max-w-[40%]">{item.detail}</span>}
+                        className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${i === mentionIndex ? 'bg-sky-50 text-slate-800' : 'text-slate-600 hover:bg-slate-50'}`}>
+                        <span className="truncate font-medium text-slate-700">{item.display}</span>
+                        {item.detail && <span className="ml-auto max-w-[40%] shrink-0 truncate text-[10px] text-slate-400">{item.detail}</span>}
                       </button>
                     ))}
                   </div>
                 )}
-                <div className="px-3 py-1 border-t border-zinc-800 text-[10px] text-zinc-700">↑↓ navigate · Enter to add · Esc to close</div>
+                <div className="border-t border-slate-200 px-3 py-2 text-[10px] text-slate-400">↑↓ navigate · Enter to add · Esc to close</div>
               </div>
             </div>
           )}
 
-          <div className="flex gap-2 items-end">
+          <div className="flex items-end gap-3 rounded-[26px] border border-slate-200 bg-slate-50/70 p-3 shadow-[0_10px_24px_-18px_rgba(15,23,42,0.35)]">
             <textarea
               ref={textareaRef}
               value={input}
@@ -771,27 +1023,27 @@ export function ChatWindow() {
               placeholder={projectId ? (activeSubproject ? `Ask CLAW about ${activeSubproject.display_name}… (@ to pin context)` : `Ask CLAW about ${projectId}… (@ to pin context)`) : 'Select a project first'}
               disabled={!projectId || loading}
               rows={1}
-              className="flex-1 bg-zinc-900 border border-zinc-700 text-zinc-100 text-sm rounded-lg px-3 py-2 resize-none min-h-[38px] max-h-[120px] focus:outline-none focus:border-zinc-500 placeholder:text-zinc-600 disabled:opacity-50"
+              className="min-h-[44px] max-h-[120px] flex-1 resize-none rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-sky-300 placeholder:text-slate-400 disabled:opacity-50"
             />
 
             {/* Model selector */}
             <div ref={modelDropdownRef} className="relative shrink-0">
               <button onClick={() => setModelDropdownOpen(o => !o)}
-                className={`h-[38px] px-2.5 text-xs rounded-lg border transition-colors flex items-center gap-1 ${modelOverride !== 'auto' ? 'bg-zinc-700 border-zinc-500 text-zinc-100' : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-zinc-500'}`}
+                className={`flex h-[44px] items-center gap-1 rounded-2xl border px-3 text-xs transition-colors ${modelOverride !== 'auto' ? 'border-sky-200 bg-sky-50 text-sky-700' : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'}`}
                 title="Select model for this message">
-                {selectedModel.label} <span className="text-zinc-600">▾</span>
+                {selectedModel.label} <span className="text-slate-400">▾</span>
               </button>
               {modelDropdownOpen && (
-                <div className="absolute bottom-full right-0 mb-1 w-52 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 overflow-hidden">
+                <div className="absolute bottom-full right-0 z-50 mb-2 w-56 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
                   {MODEL_OPTIONS.map(opt => (
                     <button key={opt.value} onClick={() => { setModelOverride(opt.value); setModelDropdownOpen(false) }}
-                      className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between transition-colors ${modelOverride === opt.value ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-300 hover:bg-zinc-800'}`}>
+                      className={`flex w-full items-center justify-between px-3 py-2.5 text-left text-xs transition-colors ${modelOverride === opt.value ? 'bg-sky-50 text-slate-800' : 'text-slate-600 hover:bg-slate-50'}`}>
                       <span className="flex items-center gap-2">
-                        <span className={modelOverride === opt.value ? 'text-zinc-400' : 'text-zinc-700'}>{modelOverride === opt.value ? '●' : '○'}</span>
+                        <span className={modelOverride === opt.value ? 'text-sky-600' : 'text-slate-300'}>{modelOverride === opt.value ? '●' : '○'}</span>
                         <span>{opt.label}</span>
-                        <span className="text-zinc-600 text-[10px]">{opt.detail}</span>
+                        <span className="text-[10px] text-slate-400">{opt.detail}</span>
                       </span>
-                      {opt.cost && <span className="text-zinc-600 text-[10px] ml-2 shrink-0">{opt.cost}</span>}
+                      {opt.cost && <span className="ml-2 shrink-0 text-[10px] text-slate-400">{opt.cost}</span>}
                     </button>
                   ))}
                 </div>
@@ -799,11 +1051,19 @@ export function ChatWindow() {
             </div>
 
             <button onClick={handleSubmit} disabled={(!input.trim() && !pastedImage) || loading || !projectId}
-              className="h-[38px] px-4 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40 text-white text-sm rounded-lg transition-colors shrink-0">
+              className="h-[44px] shrink-0 rounded-2xl bg-sky-600 px-5 text-sm font-medium text-white transition-colors hover:bg-sky-700 disabled:opacity-40">
               Send
             </button>
+            {loading && (
+              <button
+                onClick={stopGeneration}
+                className="h-[44px] shrink-0 rounded-2xl border border-rose-200 bg-white px-5 text-sm font-medium text-rose-600 transition-colors hover:border-rose-300 hover:bg-rose-50"
+              >
+                Stop
+              </button>
+            )}
           </div>
-          <p className="text-xs text-zinc-700 mt-1.5">Enter to send · Shift+Enter for newline · @ to pin context</p>
+          <p className="mt-2 px-1 text-xs text-slate-400">Enter to send · Shift+Enter for newline · @ to pin context</p>
         </div>
       </div>
     </div>

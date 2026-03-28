@@ -115,6 +115,10 @@ class MemoryStore:
             self.conn.execute(
                 "ALTER TABLE sessions ADD COLUMN estimated_tokens INTEGER DEFAULT 0"
             )
+        if 'active_skills_json' not in cols:
+            self.conn.execute(
+                "ALTER TABLE sessions ADD COLUMN active_skills_json TEXT DEFAULT '[]'"
+            )
         self.conn.commit()
 
     # ─── Core message storage ──────────────────────────────────────────────────
@@ -128,6 +132,7 @@ class MemoryStore:
         model_used: str = '',
         tokens_used: int = 0,
         cost_usd: float = 0.0,
+        subproject_id: str | None = None,
     ):
         now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
         self.conn.execute("""
@@ -139,10 +144,13 @@ class MemoryStore:
               model_used, tokens_used, cost_usd, now))
         # Keep sessions table in sync
         self.conn.execute("""
-            INSERT INTO sessions (session_id, project_id, started_at, last_message_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(session_id) DO UPDATE SET last_message_at = excluded.last_message_at
-        """, (session_id, self.project_id, now, now))
+            INSERT INTO sessions
+                (session_id, project_id, subproject_id, started_at, last_message_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(session_id) DO UPDATE SET
+                last_message_at = excluded.last_message_at,
+                subproject_id = COALESCE(excluded.subproject_id, sessions.subproject_id)
+        """, (session_id, self.project_id, subproject_id, now, now))
         self.conn.commit()
 
     def get_recent_history(
@@ -228,6 +236,19 @@ class MemoryStore:
         """Close the SQLite connection. Call when done (especially on Windows)."""
         self.conn.close()
 
+    def _compact_session_text(
+        self,
+        text: str | None,
+        fallback: str = 'New chat',
+        max_len: int = 72,
+    ) -> str:
+        compact = ' '.join((text or '').split())
+        if not compact:
+            return fallback
+        if len(compact) <= max_len:
+            return compact
+        return compact[: max_len - 1].rstrip() + '…'
+
     def get_cost_summary(self) -> list[dict]:
         rows = self.conn.execute("""
             SELECT
@@ -302,10 +323,51 @@ class MemoryStore:
         self, session_id: str, subproject_id: str | None
     ) -> None:
         """Associate a session with a subproject."""
+        now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
         self.conn.execute("""
-            UPDATE sessions SET subproject_id = ? WHERE session_id = ?
-        """, (subproject_id, session_id))
+            INSERT INTO sessions
+                (session_id, project_id, subproject_id, started_at, last_message_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(session_id) DO UPDATE SET
+                subproject_id = excluded.subproject_id,
+                last_message_at = excluded.last_message_at
+        """, (session_id, self.project_id, subproject_id, now, now))
         self.conn.commit()
+
+    def set_session_skills(
+        self,
+        session_id: str,
+        skill_ids: list[str],
+    ) -> None:
+        now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+        self.conn.execute("""
+            INSERT INTO sessions
+                (session_id, project_id, started_at, last_message_at, active_skills_json)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(session_id) DO UPDATE SET
+                active_skills_json = excluded.active_skills_json,
+                last_message_at = excluded.last_message_at
+        """, (
+            session_id,
+            self.project_id,
+            now,
+            now,
+            json.dumps(skill_ids or []),
+        ))
+        self.conn.commit()
+
+    def get_session_skills(self, session_id: str) -> list[str]:
+        row = self.conn.execute("""
+            SELECT active_skills_json
+            FROM sessions
+            WHERE session_id = ?
+        """, (session_id,)).fetchone()
+        if not row or not row[0]:
+            return []
+        try:
+            return [str(item) for item in json.loads(row[0])]
+        except Exception:
+            return []
 
     # ─── Session listing and retrieval ────────────────────────────────────────
 
@@ -326,7 +388,22 @@ class MemoryStore:
                        MAX(c.timestamp) AS last_message_at,
                        COUNT(*) AS message_count,
                        s.subproject_id,
-                       0 AS archived
+                       0 AS archived,
+                       (
+                           SELECT content
+                           FROM conversations c2
+                           WHERE c2.session_id = c.session_id
+                             AND c2.role = 'user'
+                           ORDER BY c2.id ASC
+                           LIMIT 1
+                       ) AS first_user_message,
+                       (
+                           SELECT content
+                           FROM conversations c3
+                           WHERE c3.session_id = c.session_id
+                           ORDER BY c3.id DESC
+                           LIMIT 1
+                       ) AS last_message_preview
                 FROM conversations c
                 INNER JOIN sessions s ON c.session_id = s.session_id
                 WHERE s.project_id = ? AND s.subproject_id = ?
@@ -335,7 +412,7 @@ class MemoryStore:
 
             archived_rows = self.conn.execute("""
                 SELECT session_id, started_at, last_message_at,
-                       message_count, subproject_id, 1
+                       message_count, subproject_id, 1, summary, raw_messages
                 FROM archived_sessions
                 WHERE project_id = ? AND subproject_id = ?
             """, (project_id, subproject_id)).fetchall()
@@ -346,20 +423,48 @@ class MemoryStore:
                        MAX(c.timestamp) AS last_message_at,
                        COUNT(*) AS message_count,
                        s.subproject_id,
-                       0 AS archived
+                       0 AS archived,
+                       (
+                           SELECT content
+                           FROM conversations c2
+                           WHERE c2.session_id = c.session_id
+                             AND c2.role = 'user'
+                           ORDER BY c2.id ASC
+                           LIMIT 1
+                       ) AS first_user_message,
+                       (
+                           SELECT content
+                           FROM conversations c3
+                           WHERE c3.session_id = c.session_id
+                           ORDER BY c3.id DESC
+                           LIMIT 1
+                       ) AS last_message_preview
                 FROM conversations c
-                LEFT JOIN sessions s ON c.session_id = s.session_id
+                INNER JOIN sessions s ON c.session_id = s.session_id
+                WHERE s.project_id = ?
                 GROUP BY c.session_id
-            """).fetchall()
+            """, (project_id,)).fetchall()
 
             archived_rows = self.conn.execute("""
                 SELECT session_id, started_at, last_message_at,
-                       message_count, subproject_id, 1
+                       message_count, subproject_id, 1, summary, raw_messages
                 FROM archived_sessions
                 WHERE project_id = ?
             """, (project_id,)).fetchall()
 
         def _row_to_dict(r) -> dict:
+            if bool(r[5]):
+                summary = r[6] or ''
+                raw_messages = json.loads(r[7] or '[]')
+                first_user = next(
+                    (m.get('content', '') for m in raw_messages if m.get('role') == 'user'),
+                    '',
+                )
+                last_preview = raw_messages[-1].get('content', '') if raw_messages else summary
+            else:
+                first_user = r[6] or ''
+                last_preview = r[7] or ''
+
             return {
                 'session_id': r[0],
                 'started_at': r[1],
@@ -367,30 +472,49 @@ class MemoryStore:
                 'message_count': r[3],
                 'subproject_id': r[4],
                 'archived': bool(r[5]),
+                'title': self._compact_session_text(first_user),
+                'preview': self._compact_session_text(
+                    last_preview,
+                    fallback=self._compact_session_text(first_user),
+                    max_len=96,
+                ),
             }
 
         all_sessions = [_row_to_dict(r) for r in active_rows + archived_rows]
         all_sessions.sort(key=lambda s: s['last_message_at'] or '', reverse=True)
         return all_sessions
 
-    def get_session(self, session_id: str) -> dict | None:
+    def get_session(
+        self,
+        session_id: str,
+        project_id: str | None = None,
+        subproject_id: str | None = None,
+    ) -> dict | None:
         """Return full session including messages. Checks active and archived tables."""
-        rows = self.conn.execute("""
-            SELECT role, content, model_used, tokens_used, cost_usd, timestamp
-            FROM conversations
-            WHERE session_id = ?
-            ORDER BY id
-        """, (session_id,)).fetchall()
+        active_query = """
+            SELECT c.role, c.content, c.model_used, c.tokens_used, c.cost_usd,
+                   c.timestamp, s.subproject_id, s.estimated_tokens
+                   , s.active_skills_json
+            FROM conversations c
+            INNER JOIN sessions s ON c.session_id = s.session_id
+            WHERE c.session_id = ?
+        """
+        params: list = [session_id]
+        if project_id:
+            active_query += " AND s.project_id = ?"
+            params.append(project_id)
+        if subproject_id is not None:
+            active_query += " AND s.subproject_id = ?"
+            params.append(subproject_id)
+        active_query += " ORDER BY c.id"
+        rows = self.conn.execute(active_query, params).fetchall()
 
         if rows:
-            meta = self.conn.execute("""
-                SELECT subproject_id, estimated_tokens
-                FROM sessions WHERE session_id = ?
-            """, (session_id,)).fetchone()
             return {
                 'session_id': session_id,
-                'subproject_id': meta[0] if meta else None,
-                'estimated_tokens': meta[1] if meta else 0,
+                'subproject_id': rows[0][6],
+                'estimated_tokens': rows[0][7],
+                'skill_ids': json.loads(rows[0][8] or '[]'),
                 'archived': False,
                 'messages': [
                     {
@@ -401,12 +525,20 @@ class MemoryStore:
                 ],
             }
 
-        row = self.conn.execute("""
+        archived_query = """
             SELECT session_id, project_id, subproject_id, started_at,
                    last_message_at, message_count, summary, raw_messages
             FROM archived_sessions
             WHERE session_id = ?
-        """, (session_id,)).fetchone()
+        """
+        archived_params: list = [session_id]
+        if project_id:
+            archived_query += " AND project_id = ?"
+            archived_params.append(project_id)
+        if subproject_id is not None:
+            archived_query += " AND subproject_id = ?"
+            archived_params.append(subproject_id)
+        row = self.conn.execute(archived_query, archived_params).fetchone()
 
         if row:
             return {

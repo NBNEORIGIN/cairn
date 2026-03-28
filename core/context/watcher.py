@@ -66,15 +66,43 @@ class FileWatcher:
         path: str,
         indexer,                              # CodeIndexer instance
         loop: asyncio.AbstractEventLoop,
+        context_engine=None,
     ):
         self.path = path
         self.indexer = indexer
         self.loop = loop
+        self.context_engine = context_engine
         self._observer = None
         self._timers: dict[str, threading.Timer] = {}
         self._lock = threading.Lock()
         self.last_reindex_at: datetime | None = None
         self._active = False
+
+    def _handle_index_result(self, file_path: str, result: dict) -> None:
+        status = result.get('status')
+        if status == 'indexed':
+            self.last_reindex_at = datetime.now(timezone.utc)
+            if (
+                self.context_engine
+                and getattr(self.context_engine, 'hybrid_retriever', None)
+            ):
+                try:
+                    self.context_engine.hybrid_retriever.invalidate_cache()
+                except Exception as exc:
+                    logger.warning(
+                        '[watcher] failed to invalidate hybrid cache for %s: %s',
+                        file_path,
+                        exc,
+                    )
+            logger.info(
+                f'[watcher] reindexed {file_path} '
+                f'({result["chunks"]} chunks)'
+            )
+        elif status == 'error':
+            logger.warning(
+                f'[watcher] reindex error for {file_path}: '
+                f'{result.get("error")}'
+            )
 
     def start(self):
         """Start monitoring. Safe to call multiple times."""
@@ -150,17 +178,7 @@ class FileWatcher:
                     None,
                     lambda: self.indexer.index_file(file_path),
                 )
-                if result.get('status') == 'indexed':
-                    self.last_reindex_at = datetime.now(timezone.utc)
-                    logger.info(
-                        f'[watcher] reindexed {file_path} '
-                        f'({result["chunks"]} chunks)'
-                    )
-                elif result.get('status') == 'error':
-                    logger.warning(
-                        f'[watcher] reindex error for {file_path}: '
-                        f'{result.get("error")}'
-                    )
+                self._handle_index_result(file_path, result)
             except Exception as exc:
                 logger.error(f'[watcher] _reindex raised: {exc}')
 

@@ -11,6 +11,23 @@ interface TestResults {
   last_run: string | null
 }
 
+interface EvalEntry {
+  id: string
+  passed: boolean
+  score: number
+  model_used?: string | null
+  cost_usd?: number | null
+}
+
+interface EvalResults {
+  passed: number | null
+  failed: number | null
+  suite: string | null
+  model?: string | null
+  last_run: string | null
+  results?: EvalEntry[]
+}
+
 interface ApiKeys {
   anthropic: boolean
   deepseek: boolean
@@ -43,10 +60,12 @@ interface WiggumRun {
 
 interface StatusData {
   api_status: string
+  stale?: boolean
   commit_hash: string | null
   commit_message: string | null
   commit_time: string | null
   test_results: TestResults
+  eval_results: EvalResults
   api_keys: ApiKeys
   ollama: OllamaStatus
   projects: ProjectInfo[]
@@ -171,7 +190,6 @@ function SystemCard({ data }: { data: StatusData }) {
 }
 
 function TestsCard({ results }: { results: TestResults }) {
-  const allPassed = results.failed === 0 && results.errors === 0
   return (
     <Card title="Tests">
       <div className="flex items-center gap-4 text-sm">
@@ -190,6 +208,44 @@ function TestsCard({ results }: { results: TestResults }) {
           </>
         ) : (
           <span className="text-gray-500 text-xs">No test results cached yet — run pytest to populate</span>
+        )}
+      </div>
+    </Card>
+  )
+}
+
+function EvalCard({ results }: { results: EvalResults }) {
+  const topFailures = (results.results || []).filter(item => !item.passed).slice(0, 3)
+  return (
+    <Card title="Evaluator">
+      <div className="space-y-3 text-sm">
+        {results.passed !== null ? (
+          <>
+            <div className="flex items-center gap-4">
+              <span className="text-green-400 font-semibold">{results.passed} passed</span>
+              <span className={results.failed ? 'text-red-400 font-semibold' : 'text-gray-500'}>
+                {results.failed ?? 0} failed
+              </span>
+              {results.model && (
+                <span className="ml-auto text-xs text-gray-500">{results.model}</span>
+              )}
+            </div>
+            <div className="text-xs text-gray-500">
+              {results.suite || 'suite'} · last run {formatTime(results.last_run)}
+            </div>
+            {topFailures.length > 0 && (
+              <div className="space-y-1 rounded-lg border border-amber-800 bg-amber-950/40 px-3 py-2 text-xs text-amber-200">
+                {topFailures.map(item => (
+                  <div key={item.id} className="flex items-center justify-between gap-3">
+                    <span className="truncate">{item.id}</span>
+                    <span className="text-amber-400">{Math.round(item.score * 100)}%</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          <span className="text-gray-500 text-xs">No eval results cached yet — run the CLAW evaluator to populate</span>
         )}
       </div>
     </Card>
@@ -274,6 +330,7 @@ function WiggumCard({ runs }: { runs: WiggumRun[] }) {
 export default function StatusPage() {
   const [data, setData] = useState<StatusData | null>(null)
   const [offline, setOffline] = useState(false)
+  const [stale, setStale] = useState(false)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
 
   const fetchStatus = useCallback(async () => {
@@ -286,15 +343,20 @@ export default function StatusPage() {
       const json = await r.json() as StatusData & { error?: string }
       if (json.error) {
         setOffline(true)
+        setStale(false)
         return
       }
       setData(json)
       setOffline(false)
+      setStale(Boolean(json.stale || json.api_status === 'stale'))
       setLastUpdated(new Date())
     } catch {
-      setOffline(true)
+      if (!data) {
+        setOffline(true)
+      }
+      setStale(Boolean(data))
     }
-  }, [])
+  }, [data])
 
   useEffect(() => {
     fetchStatus()
@@ -315,6 +377,8 @@ export default function StatusPage() {
         <div className="flex items-center gap-2 text-xs text-gray-500">
           {offline
             ? <span className="text-red-400">● Offline</span>
+            : stale
+              ? <span className="text-amber-400">● Stale</span>
             : <span className="text-green-400">● Live</span>
           }
           {lastUpdated && (
@@ -327,6 +391,12 @@ export default function StatusPage() {
       {offline && (
         <div className="mb-4 px-4 py-3 bg-red-900 border border-red-700 rounded-lg text-red-200 text-sm">
           API offline — retrying every 10 seconds…
+        </div>
+      )}
+
+      {stale && !offline && (
+        <div className="mb-4 rounded-lg border border-amber-700 bg-amber-900 px-4 py-3 text-sm text-amber-200">
+          Showing last known status — the API was slow to answer the latest poll.
         </div>
       )}
 
@@ -354,6 +424,7 @@ export default function StatusPage() {
             <SystemCard data={data} />
             <TestsCard results={data.test_results} />
           </div>
+          <EvalCard results={data.eval_results} />
           <ProjectsCard projects={data.projects} />
           <WiggumCard runs={data.wiggum_runs} />
         </div>

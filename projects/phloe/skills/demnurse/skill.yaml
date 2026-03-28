@@ -1,0 +1,14 @@
+skill_id: demnurse
+project_id: phloe
+display_name: DemNurse
+description: Amy Law / The Alncom Group nurse compliance tenant
+triggers:
+  - demnurse
+  - amy law
+  - alncom
+  - nurse compliance
+subproject_id: demnurse.nbne.uk
+key_rules:
+  - Keep changes scoped to the DemNurse tenant
+  - Preserve tenant-aware booking behavior
+prompt_hint: Use DemNurse context when the prompt mentions the tenant directly

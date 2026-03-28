@@ -30,6 +30,9 @@ class ClaudeClient:
         image_base64: str | None = None,
         image_media_type: str = 'image/png',
         raw_messages: list[dict] | None = None,
+        pre_assembled: list[dict] | None = None,
+        cache_manager=None,
+        provider_name: str = '',
     ) -> tuple[str, Optional[dict], dict]:
         """
         Send a chat message and return (response_text, tool_call, usage).
@@ -37,12 +40,31 @@ class ClaudeClient:
         usage is {'input_tokens': int, 'output_tokens': int}.
         use_opus: override to Opus for a specific request (architecture,
                   security review, complex debugging).
+        pre_assembled: if provided, use these messages directly instead of
+                       building from system/history/message.
         """
         model = self.opus_model if use_opus else self.model
-        messages = (
-            raw_messages if raw_messages is not None
-            else self._build_messages(history, message, image_base64, image_media_type)
-        )
+
+        if pre_assembled is not None:
+            # Extract system from pre_assembled messages
+            system_blocks = []
+            messages = []
+            for msg in pre_assembled:
+                if msg.get('role') == 'system':
+                    content = msg.get('content', '')
+                    if isinstance(content, list):
+                        system_blocks.extend(content)
+                    elif content:
+                        system_blocks.append({'type': 'text', 'text': content})
+                else:
+                    messages.append(msg)
+            if system_blocks:
+                system = system_blocks
+        else:
+            messages = (
+                raw_messages if raw_messages is not None
+                else self._build_messages(history, message, image_base64, image_media_type)
+            )
 
         kwargs: dict = {
             'model': model,
@@ -80,6 +102,20 @@ class ClaudeClient:
                 response.usage.input_tokens + response.usage.output_tokens
             ),
         }
+
+        # Record cache hit stats if available
+        cached_tokens = getattr(response.usage, 'cache_read_input_tokens', 0) or 0
+        if cached_tokens and cache_manager:
+            try:
+                pname = provider_name or ('opus' if use_opus else 'sonnet')
+                cache_manager.record_request(
+                    provider=pname,
+                    input_tokens=response.usage.input_tokens,
+                    cached_tokens=cached_tokens,
+                )
+            except Exception:
+                pass
+        usage['cached_input_tokens'] = cached_tokens
 
         return response_text, tool_call, usage
 

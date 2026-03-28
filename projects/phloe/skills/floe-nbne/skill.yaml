@@ -1,0 +1,12 @@
+skill_id: floe-nbne
+project_id: phloe
+display_name: Floe NBNE
+description: NBNE internal Phloe tenant
+triggers:
+  - floe nbne
+  - nbne internal tenant
+  - floe.nbne.uk
+subproject_id: floe.nbne.uk
+key_rules:
+  - Keep internal NBNE flows scoped to the Floe tenant
+prompt_hint: Use internal Floe tenant context when referenced explicitly

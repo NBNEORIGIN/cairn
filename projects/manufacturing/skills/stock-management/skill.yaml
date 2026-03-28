@@ -1,0 +1,13 @@
+skill_id: stock-management
+project_id: manufacturing
+display_name: Stock Management
+description: Stock levels, M-numbers, blanks, and shipment sheet replacement flows
+triggers:
+  - stock level
+  - m-number
+  - shipment sheet
+  - what should we make today
+subproject_id:
+key_rules:
+  - Preserve NBNE manufacturing naming conventions
+prompt_hint: Focus on stock and production-planning context

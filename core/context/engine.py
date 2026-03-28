@@ -1,7 +1,13 @@
 import os
 import json
+import logging
 from pathlib import Path
 from typing import Callable
+
+from core.memory.assembler import MemoryAssembler
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+logger = logging.getLogger(__name__)
 
 
 class ContextEngine:
@@ -34,9 +40,30 @@ class ContextEngine:
     def __init__(self, project_id: str, db_url: str):
         self.project_id = project_id
         self.db_url = db_url
-        self.project_dir = Path('projects') / project_id
+        self.project_dir = _REPO_ROOT / 'projects' / project_id
         self.core_md_path = self.project_dir / 'core.md'
         self._conn = None
+        self.hybrid_retriever = None
+        self.assembler = MemoryAssembler()
+
+        if self.db_url:
+            try:
+                from core.memory.retriever import HybridRetriever
+                self.hybrid_retriever = HybridRetriever(self)
+            except Exception as exc:
+                logger.warning(
+                    "[context] hybrid retrieval unavailable for %s: %s",
+                    self.project_id,
+                    exc,
+                )
+
+    @property
+    def retrieval_mode(self) -> str:
+        if self.hybrid_retriever and self.hybrid_retriever.is_available:
+            return 'hybrid'
+        if self.db_url:
+            return 'cosine'
+        return 'keyword'
 
     def _get_connection(self):
         if not self._conn or self._conn.closed:
@@ -77,6 +104,20 @@ class ContextEngine:
         When subproject_id is provided, chunks are filtered to that
         subproject plus project-level chunks (subproject_id IS NULL).
         """
+        if self.hybrid_retriever and self.hybrid_retriever.is_available:
+            try:
+                return self.hybrid_retriever.retrieve(
+                    task,
+                    embedding_fn,
+                    subproject_id=subproject_id,
+                )
+            except Exception as e:
+                logger.warning(
+                    "Hybrid retrieval failed for %s (%s), "
+                    "falling back to cosine/keyword",
+                    self.project_id,
+                    e,
+                )
         try:
             return self._retrieve_by_embedding(task, embedding_fn, subproject_id)
         except Exception as e:
@@ -89,8 +130,10 @@ class ContextEngine:
         task: str,
         embedding_fn: Callable,
         subproject_id: str | None = None,
+        limit: int | None = None,
     ) -> list[dict]:
         """pgvector similarity search with optional subproject scoping."""
+        limit = limit or self.MAX_TIER2_CHUNKS
         task_embedding = embedding_fn(task)
         conn = self._get_connection()
         with conn.cursor() as cur:
@@ -100,6 +143,7 @@ class ContextEngine:
                         file_path,
                         chunk_content,
                         chunk_type,
+                        chunk_name,
                         1 - (embedding <=> %s::vector) AS similarity
                     FROM claw_code_chunks
                     WHERE
@@ -114,7 +158,7 @@ class ContextEngine:
                     subproject_id,
                     task_embedding,
                     self.SIMILARITY_THRESHOLD,
-                    self.MAX_TIER2_CHUNKS,
+                    limit,
                 ))
             else:
                 cur.execute("""
@@ -122,6 +166,7 @@ class ContextEngine:
                         file_path,
                         chunk_content,
                         chunk_type,
+                        chunk_name,
                         1 - (embedding <=> %s::vector) AS similarity
                     FROM claw_code_chunks
                     WHERE
@@ -134,7 +179,7 @@ class ContextEngine:
                     self.project_id,
                     task_embedding,
                     self.SIMILARITY_THRESHOLD,
-                    self.MAX_TIER2_CHUNKS,
+                    limit,
                 ))
             rows = cur.fetchall()
         return [
@@ -142,7 +187,8 @@ class ContextEngine:
                 'file': row[0],
                 'content': row[1],
                 'chunk_type': row[2],
-                'score': float(row[3]),
+                'chunk_name': row[3],
+                'score': float(row[4]),
             }
             for row in rows
         ]
@@ -192,7 +238,7 @@ class ContextEngine:
                 )
             with conn.cursor() as cur:
                 cur.execute(f"""
-                    SELECT file_path, chunk_content, chunk_type,
+                    SELECT file_path, chunk_content, chunk_type, chunk_name,
                            0.5 AS similarity
                     FROM claw_code_chunks
                     WHERE project_id = %s
@@ -207,13 +253,64 @@ class ContextEngine:
                     'file': row[0],
                     'content': row[1],
                     'chunk_type': row[2],
-                    'score': float(row[3]),
+                    'chunk_name': row[3],
+                    'score': float(row[4]),
                 }
                 for row in rows
             ]
         except Exception as e:
             print(f"Keyword fallback also failed: {e}")
             return []
+
+    def get_all_chunks(
+        self,
+        subproject_id: str | None = None,
+    ) -> list[dict]:
+        """
+        Return all stored chunks for the current project scope.
+
+        Used by the hybrid retriever to build an in-memory BM25 index while
+        preserving the same project/subproject isolation as cosine retrieval.
+        """
+        if not self.db_url:
+            return []
+
+        try:
+            conn = self._get_connection()
+            with conn.cursor() as cur:
+                if subproject_id:
+                    cur.execute("""
+                        SELECT file_path, chunk_content, chunk_type, chunk_name
+                        FROM claw_code_chunks
+                        WHERE project_id = %s
+                          AND (subproject_id IS NULL OR subproject_id = %s)
+                        ORDER BY file_path, id
+                    """, (self.project_id, subproject_id))
+                else:
+                    cur.execute("""
+                        SELECT file_path, chunk_content, chunk_type, chunk_name
+                        FROM claw_code_chunks
+                        WHERE project_id = %s
+                        ORDER BY file_path, id
+                    """, (self.project_id,))
+                rows = cur.fetchall()
+        except Exception as exc:
+            logger.warning(
+                "[context] get_all_chunks failed for %s: %s",
+                self.project_id,
+                exc,
+            )
+            return []
+
+        return [
+            {
+                'file': row[0],
+                'content': row[1],
+                'chunk_type': row[2],
+                'chunk_name': row[3],
+            }
+            for row in rows
+        ]
 
     async def resolve_mentions(
         self,
@@ -410,42 +507,108 @@ class ContextEngine:
         embedding_fn: Callable,
         subproject_id: str | None = None,
         resolved_mentions: list[dict] | None = None,
-    ) -> str:
+        skill_context: str | None = None,
+        include_metadata: bool = False,
+    ) -> str | tuple[str, dict]:
         """Assemble full context string from all available tiers.
 
         resolved_mentions, if provided, are injected first under an
         '=== EXPLICITLY MENTIONED CONTEXT ===' header so the model
         knows these were pinned by the user rather than retrieved.
         """
-        parts = []
+        context_files: set[str] = set()
+        core_text = self.load_tier1()
+        chunks = self.retrieve_tier2(task, embedding_fn, subproject_id)
+        match_quality_counts = {
+            'exact': 0,
+            'semantic': 0,
+            'exact+semantic': 0,
+        }
+        for chunk in chunks:
+            match_quality = chunk.get('match_quality')
+            if match_quality in match_quality_counts:
+                match_quality_counts[match_quality] += 1
+            context_files.add(chunk['file'])
 
-        parts.append("# PROJECT CONTEXT\n")
-        parts.append(self.load_tier1())
-        parts.append("\n\n")
+        for chunk in resolved_mentions or []:
+            label = chunk.get('label', '')
+            if label.startswith('file: '):
+                context_files.add(label.removeprefix('file: ').strip())
+
+        distilled_core = self.assembler.distill_core_rules(core_text)
+        trimmed_skill = self.assembler._trim_text_to_budget(  # noqa: SLF001
+            skill_context or '',
+            self.assembler.SKILL_BUDGET_TOKENS,
+        )
+        parts = ['# PROJECT CONTEXT\n', distilled_core, '\n\n']
+
+        if trimmed_skill:
+            parts.append('=== ACTIVE SKILLS ===\n')
+            parts.append(trimmed_skill)
+            parts.append('\n=== END ACTIVE SKILLS ===\n\n')
 
         if resolved_mentions:
-            parts.append("=== EXPLICITLY MENTIONED CONTEXT ===\n")
+            parts.append('=== EXPLICITLY MENTIONED CONTEXT ===\n')
             for chunk in resolved_mentions:
                 parts.append(f"[{chunk['label']}]\n")
                 parts.append(chunk['content'])
-                parts.append("\n\n")
-            parts.append("=== END MENTIONED CONTEXT ===\n\n")
+                parts.append('\n\n')
+            parts.append('=== END MENTIONED CONTEXT ===\n\n')
 
-        chunks = self.retrieve_tier2(task, embedding_fn, subproject_id)
         if chunks:
-            parts.append("# RELEVANT CODE\n")
+            parts.append('# RELEVANT CONTEXT\n')
             parts.append(
                 f"# (Retrieved {len(chunks)} relevant sections "
-                f"from codebase index)\n\n"
+                f"from {self.retrieval_mode} index)\n\n"
             )
             for chunk in chunks:
+                quality_part = (
+                    f"{chunk.get('match_quality')}, " if chunk.get('match_quality') else ''
+                )
                 parts.append(
-                    f"## {chunk['file']} "
-                    f"[similarity: {chunk['score']:.2f}]\n"
+                    f"## {chunk['file']} [{quality_part}score: {chunk['score']:.2f}]\n"
                 )
                 parts.append(f"```\n{chunk['content']}\n```\n\n")
 
-        return ''.join(parts)
+        prompt = ''.join(parts)
+        core_tokens = self.assembler.estimate_tokens(distilled_core)
+        skill_tokens = self.assembler.estimate_tokens(trimmed_skill)
+        mention_tokens = sum(
+            self.assembler.estimate_tokens(f"[{chunk['label']}] {chunk['content']}")
+            for chunk in (resolved_mentions or [])
+        )
+        retrieved_tokens = sum(
+            self.assembler.estimate_tokens(chunk.get('content', ''))
+            for chunk in chunks
+        )
+        total_tokens = core_tokens + skill_tokens + mention_tokens + retrieved_tokens
+        budget_pct = min(
+            100.0,
+            round(
+                (total_tokens / self.assembler.TOTAL_BUDGET_TOKENS) * 100,
+                1,
+            ),
+        )
+        if not include_metadata:
+            return prompt
+
+        return prompt, {
+            'context_files': sorted(context_files),
+            'context_file_count': len(context_files),
+            'retrieved_chunk_count': len(chunks),
+            'retrieval_mode': self.retrieval_mode,
+            'resolved_mention_count': len(resolved_mentions or []),
+            'match_quality_counts': match_quality_counts,
+            'retrieved_files': [chunk['file'] for chunk in chunks[:8]],
+            'assembly_tokens': {
+                'core': core_tokens,
+                'skill': skill_tokens,
+                'mentions': mention_tokens,
+                'retrieved': retrieved_tokens,
+                'total': total_tokens,
+                'budget_pct': budget_pct,
+            },
+        }
 
     def _load_config(self) -> dict:
         config_path = self.project_dir / 'config.json'

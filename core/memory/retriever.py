@@ -1,0 +1,330 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, replace
+import logging
+import re
+import time
+from typing import Callable
+
+try:
+    from rank_bm25 import BM25Okapi
+except ImportError:  # pragma: no cover - exercised via availability checks
+    class BM25Okapi:  # type: ignore[no-redef]
+        """
+        Tiny fallback scorer used when rank_bm25 is unavailable.
+
+        This keeps hybrid retrieval working in degraded mode by ranking chunks
+        with simple token-overlap scoring instead of disabling BM25 entirely.
+        """
+
+        def __init__(self, corpus: list[list[str]]):
+            self.corpus = corpus
+
+        def get_scores(self, query_tokens: list[str]) -> list[float]:
+            query_set = set(query_tokens)
+            scores: list[float] = []
+            for doc_tokens in self.corpus:
+                doc_set = set(doc_tokens)
+                overlap = len(query_set & doc_set)
+                length_penalty = max(len(doc_set), 1)
+                scores.append(overlap / length_penalty)
+            return scores
+
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class RetrievedChunk:
+    file: str
+    content: str
+    chunk_type: str
+    score: float = 0.0
+    bm25_rank: int | None = None
+    cosine_rank: int | None = None
+    chunk_name: str | None = None
+
+    @property
+    def match_quality(self) -> str:
+        if self.bm25_rank is not None and self.cosine_rank is not None:
+            return 'exact+semantic'
+        if self.bm25_rank is not None:
+            return 'exact'
+        return 'semantic'
+
+    @property
+    def dedupe_key(self) -> str:
+        head = self.content[:120]
+        return f'{self.file}:{self.chunk_type}:{head}'
+
+
+class HybridRetriever:
+    """
+    Hybrid Tier 2 retrieval for the current ContextEngine contract.
+
+    BM25 runs over the existing pgvector chunk corpus already stored in
+    `claw_code_chunks`. Results are merged with cosine search via
+    Reciprocal Rank Fusion.
+
+    The cache is short-lived rather than watcher-driven in Phase 1 so the
+    implementation stays compatible with the current watcher wiring.
+    """
+
+    CACHE_TTL_SECONDS = 30.0
+
+    def __init__(
+        self,
+        context_engine,
+        bm25_top_k: int = 20,
+        cosine_top_k: int = 20,
+        rrf_k: int = 60,
+    ):
+        self.context_engine = context_engine
+        self.bm25_top_k = bm25_top_k
+        self.cosine_top_k = cosine_top_k
+        self.rrf_k = rrf_k
+        self._bm25_cache: dict[str, BM25Okapi] = {}
+        self._bm25_corpus: dict[str, list[RetrievedChunk]] = {}
+        self._bm25_built_at: dict[str, float] = {}
+
+    @property
+    def is_available(self) -> bool:
+        return bool(self.context_engine.db_url)
+
+    def _tokenize(self, text: str) -> list[str]:
+        text = text.lower()
+        tokens = re.findall(r'[a-z0-9_./\-]+', text)
+        return [tok for tok in tokens if len(tok) > 1]
+
+    def _cache_key(self, subproject_id: str | None) -> str:
+        if not subproject_id:
+            return f'{self.context_engine.project_id}:global'
+        if subproject_id.startswith(f'{self.context_engine.project_id}:'):
+            return subproject_id
+        return f'{self.context_engine.project_id}:{subproject_id}'
+
+    def _cache_is_fresh(self, key: str) -> bool:
+        built_at = self._bm25_built_at.get(key)
+        if built_at is None:
+            return False
+        return (time.monotonic() - built_at) < self.CACHE_TTL_SECONDS
+
+    def _build_bm25_index(
+        self,
+        subproject_id: str | None = None,
+    ) -> tuple[BM25Okapi | None, list[RetrievedChunk]]:
+        raw_chunks = self.context_engine.get_all_chunks(subproject_id=subproject_id)
+        chunks = [
+            RetrievedChunk(
+                file=chunk['file'],
+                content=chunk['content'],
+                chunk_type=chunk.get('chunk_type', 'window'),
+                chunk_name=chunk.get('chunk_name'),
+            )
+            for chunk in raw_chunks
+        ]
+        if not chunks:
+            return None, []
+
+        corpus = [
+            self._tokenize(
+                ' '.join(
+                    part for part in (
+                        chunk.file,
+                        chunk.chunk_name or '',
+                        chunk.content,
+                    )
+                    if part
+                )
+            )
+            for chunk in chunks
+        ]
+        if not any(corpus):
+            return None, []
+        return BM25Okapi(corpus), chunks
+
+    def _get_or_build_bm25(
+        self,
+        subproject_id: str | None = None,
+    ) -> tuple[BM25Okapi | None, list[RetrievedChunk]]:
+        key = self._cache_key(subproject_id)
+        if key not in self._bm25_cache or not self._cache_is_fresh(key):
+            index, corpus = self._build_bm25_index(subproject_id=subproject_id)
+            if index is None:
+                self._bm25_cache.pop(key, None)
+                self._bm25_corpus.pop(key, None)
+                self._bm25_built_at.pop(key, None)
+                return None, []
+            self._bm25_cache[key] = index
+            self._bm25_corpus[key] = corpus
+            self._bm25_built_at[key] = time.monotonic()
+        return self._bm25_cache.get(key), self._bm25_corpus.get(key, [])
+
+    def invalidate_cache(self, subproject_id: str | None = None) -> None:
+        if subproject_id is None:
+            prefix = f'{self.context_engine.project_id}:'
+            for key in list(self._bm25_cache):
+                if key.startswith(prefix):
+                    self._bm25_cache.pop(key, None)
+                    self._bm25_corpus.pop(key, None)
+                    self._bm25_built_at.pop(key, None)
+            return
+
+        key = self._cache_key(subproject_id)
+        self._bm25_cache.pop(key, None)
+        self._bm25_corpus.pop(key, None)
+        self._bm25_built_at.pop(key, None)
+
+    def _bm25_search(
+        self,
+        query: str,
+        subproject_id: str | None = None,
+        top_k: int | None = None,
+    ) -> list[RetrievedChunk]:
+        top_k = top_k or self.bm25_top_k
+        index, corpus = self._get_or_build_bm25(subproject_id=subproject_id)
+        if index is None or not corpus:
+            return []
+
+        query_tokens = self._tokenize(query)
+        if not query_tokens:
+            return []
+
+        scores = index.get_scores(query_tokens)
+        top_indices = sorted(
+            range(len(scores)),
+            key=lambda idx: scores[idx],
+            reverse=True,
+        )[:top_k]
+
+        results: list[RetrievedChunk] = []
+        for rank, idx in enumerate(top_indices):
+            score = float(scores[idx])
+            doc_tokens = self._tokenize(
+                ' '.join(
+                    part for part in (
+                        corpus[idx].file,
+                        corpus[idx].chunk_name or '',
+                        corpus[idx].content,
+                    )
+                    if part
+                )
+            )
+            overlap = len(set(query_tokens) & set(doc_tokens))
+            if score <= 0 and overlap == 0:
+                continue
+            if score <= 0 and overlap > 0:
+                score = overlap / max(len(set(query_tokens)), 1)
+            results.append(
+                replace(
+                    corpus[idx],
+                    score=score,
+                    bm25_rank=rank,
+                    cosine_rank=None,
+                )
+            )
+        return results
+
+    def _to_chunk(self, row: dict, cosine_rank: int | None = None) -> RetrievedChunk:
+        return RetrievedChunk(
+            file=row['file'],
+            content=row['content'],
+            chunk_type=row.get('chunk_type', 'window'),
+            chunk_name=row.get('chunk_name'),
+            score=float(row.get('score', 0.0)),
+            bm25_rank=None,
+            cosine_rank=cosine_rank,
+        )
+
+    def _rrf_merge(
+        self,
+        bm25_results: list[RetrievedChunk],
+        cosine_results: list[RetrievedChunk],
+    ) -> list[RetrievedChunk]:
+        scores: dict[str, float] = {}
+        merged: dict[str, RetrievedChunk] = {}
+
+        for rank, chunk in enumerate(bm25_results):
+            key = chunk.dedupe_key
+            scores[key] = scores.get(key, 0.0) + 1.0 / (self.rrf_k + rank + 1)
+            merged[key] = replace(chunk, bm25_rank=rank)
+
+        for rank, chunk in enumerate(cosine_results):
+            key = chunk.dedupe_key
+            scores[key] = scores.get(key, 0.0) + 1.0 / (self.rrf_k + rank + 1)
+            if key in merged:
+                merged[key] = replace(
+                    merged[key],
+                    cosine_rank=rank,
+                    score=float(scores[key]),
+                )
+            else:
+                merged[key] = replace(
+                    chunk,
+                    cosine_rank=rank,
+                    score=float(scores[key]),
+                )
+
+        ordered = sorted(scores, key=lambda key: scores[key], reverse=True)
+        return [
+            replace(merged[key], score=float(scores[key]))
+            for key in ordered
+        ]
+
+    def retrieve(
+        self,
+        task: str,
+        embedding_fn: Callable,
+        subproject_id: str | None = None,
+    ) -> list[dict]:
+        if not self.is_available:
+            raise RuntimeError('Hybrid retrieval unavailable')
+
+        bm25_results = self._bm25_search(task, subproject_id=subproject_id)
+
+        cosine_error = None
+        try:
+            cosine_raw = self.context_engine._retrieve_by_embedding(
+                task,
+                embedding_fn,
+                subproject_id=subproject_id,
+                limit=self.cosine_top_k,
+            )
+        except Exception as exc:
+            cosine_error = exc
+            cosine_raw = []
+
+        cosine_results = [
+            self._to_chunk(row, cosine_rank=rank)
+            for rank, row in enumerate(cosine_raw)
+        ]
+
+        if bm25_results and cosine_results:
+            merged = self._rrf_merge(bm25_results, cosine_results)
+            return [self._to_dict(chunk) for chunk in merged[:self.context_engine.MAX_TIER2_CHUNKS]]
+
+        if bm25_results:
+            return [self._to_dict(chunk) for chunk in bm25_results[:self.context_engine.MAX_TIER2_CHUNKS]]
+
+        if cosine_results:
+            return [self._to_dict(chunk) for chunk in cosine_results[:self.context_engine.MAX_TIER2_CHUNKS]]
+
+        if cosine_error:
+            logger.warning(
+                '[retriever] cosine retrieval failed for %s: %s',
+                self.context_engine.project_id,
+                cosine_error,
+            )
+        return self.context_engine._retrieve_by_keyword(task, subproject_id)
+
+    def _to_dict(self, chunk: RetrievedChunk) -> dict:
+        return {
+            'file': chunk.file,
+            'content': chunk.content,
+            'chunk_type': chunk.chunk_type,
+            'chunk_name': chunk.chunk_name,
+            'score': float(chunk.score),
+            'match_quality': chunk.match_quality,
+            'bm25_rank': chunk.bm25_rank,
+            'cosine_rank': chunk.cosine_rank,
+        }

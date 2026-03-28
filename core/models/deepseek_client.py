@@ -107,6 +107,9 @@ class DeepSeekClient:
         image_base64: str | None = None,  # ignored — DeepSeek V3 is text-only
         image_media_type: str = 'image/png',
         raw_messages: list[dict] | None = None,
+        pre_assembled: list[dict] | None = None,
+        cache_manager=None,
+        provider_name: str = '',
     ) -> tuple[str, Optional[dict], dict]:
         """
         Same signature as ClaudeClient.chat() and OpenAIClient.chat().
@@ -114,10 +117,13 @@ class DeepSeekClient:
           tool_call = {'name': str, 'input': dict, 'tool_use_id': str} | None
           usage     = {'input_tokens': int, 'output_tokens': int, 'total_tokens': int}
         """
-        messages = (
-            raw_messages if raw_messages is not None
-            else self._build_messages(system, history, message)
-        )
+        if pre_assembled is not None:
+            messages = pre_assembled
+        else:
+            messages = (
+                raw_messages if raw_messages is not None
+                else self._build_messages(system, history, message)
+            )
 
         kwargs: dict = {
             'model': self.model,
@@ -152,6 +158,19 @@ class DeepSeekClient:
             'output_tokens': response.usage.completion_tokens,
             'total_tokens': response.usage.total_tokens,
         }
+
+        # Record cache hits if available (DeepSeek supports prompt caching)
+        cached_tokens = getattr(response.usage, 'prompt_cache_hit_tokens', 0) or 0
+        if cached_tokens and cache_manager:
+            try:
+                cache_manager.record_request(
+                    provider=provider_name or 'deepseek',
+                    input_tokens=response.usage.prompt_tokens,
+                    cached_tokens=cached_tokens,
+                )
+            except Exception:
+                pass
+        usage['cached_input_tokens'] = cached_tokens
 
         return response_text, tool_call, usage
 

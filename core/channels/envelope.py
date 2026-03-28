@@ -70,6 +70,10 @@ class MessageEnvelope:
     # Resolved by ContextEngine.resolve_mentions() before pgvector retrieval.
     mentions: list = field(default_factory=list)
 
+    # Manually activated skills for this message.
+    # Phase 1 is disk-backed manual activation only.
+    skill_ids: list[str] = field(default_factory=list)
+
     # Override automatic model routing for this message only.
     # Values: 'auto' | 'local' | 'deepseek' | 'sonnet' | 'opus'
     model_override: Optional[str] = None

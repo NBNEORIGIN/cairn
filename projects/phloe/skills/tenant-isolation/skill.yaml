@@ -1,0 +1,14 @@
+skill_id: tenant-isolation
+project_id: phloe
+display_name: Tenant Isolation
+description: Phloe multi-tenant safety, queryset scoping, and subproject/client separation.
+triggers:
+  - tenant isolation
+  - multi tenant
+  - request.tenant
+  - data leakage
+subproject_id:
+prompt_hint: Treat tenant scoping as a hard correctness requirement and mention request.tenant or an equivalent tenant boundary when relevant
+key_rules:
+  - Every queryset must respect tenant isolation.
+  - Cross-client memory or retrieval leakage is unacceptable.

@@ -62,12 +62,19 @@ def check_tool_description(
 # ── CHECK 2 ───────────────────────────────────────────────────────────────────
 
 _REFUSAL_PHRASES = (
-    'i cannot',
     "i don't have access",
+    "i can't access",
+    "i can't help",
+    "i can't comply",
     "i'm unable to",
     'as an ai',
     'i am unable to',
     'i am not able to',
+    'i cannot access',
+    'i cannot help',
+    'i cannot assist',
+    'i cannot comply',
+    'i cannot complete this request',
 )
 
 
@@ -83,11 +90,47 @@ def check_refusal(response_text: str) -> str | None:
 # ── CHECK 3 ───────────────────────────────────────────────────────────────────
 
 _FILE_PATH_PATTERN = re.compile(
-    r'(?<![`\'"])'          # not already in a quote
+    r'(?<![A-Za-z0-9_./\\-])'  # token/path boundary
     r'([A-Za-z0-9_./\\-]+'  # path characters
     r'\.(?:py|ts|tsx|js|jsx|md|json|yaml|yml|html|css|sql))'
-    r'(?![`\'"])',           # not followed by closing quote
+    r'(?![A-Za-z0-9_./\\-])',  # token/path boundary
 )
+
+_CODE_EXTENSIONS = {'.py', '.ts', '.tsx', '.js', '.jsx'}
+
+
+def _looks_like_file_reference(raw_path: str) -> bool:
+    """
+    Distinguish genuine file references from plain technology names.
+
+    We only treat a bare token as a likely file when it has clear path/file
+    signals. This avoids false positives like "Next.js" while still catching
+    path-shaped references such as "core/agent.py" or "./app/main.ts".
+    """
+    if '/' in raw_path or '\\' in raw_path:
+        return True
+    if raw_path.startswith(('.', '~')):
+        return True
+
+    _, ext = os.path.splitext(raw_path)
+    if ext.lower() not in _CODE_EXTENSIONS:
+        # Bare config/doc/data filenames like "config.json" or "README.md"
+        # are too ambiguous to treat as hallucinated paths. We only validate
+        # them when they are path-shaped ("projects/claw/config.json").
+        return False
+
+    stem = os.path.splitext(os.path.basename(raw_path))[0]
+    if not stem:
+        return False
+
+    # Bare code filenames are likely intentional when they look file-like,
+    # e.g. snake_case or kebab-case. Sentence-case tech names like "Next.js"
+    # should not trigger the validator.
+    return (
+        stem.islower()
+        or any(ch in stem for ch in ('_', '-'))
+        or any(ch.isdigit() for ch in stem)
+    )
 
 
 def check_hallucinated_file(
@@ -102,12 +145,20 @@ def check_hallucinated_file(
     """
     matches = _FILE_PATH_PATTERN.findall(response_text)
     context_set = {os.path.normpath(f) for f in files_in_context}
+    context_basenames = {
+        os.path.basename(path).lower()
+        for path in context_set
+    }
 
     for raw_path in matches:
         if '://' in raw_path or raw_path.startswith('http'):
             continue
+        if not _looks_like_file_reference(raw_path):
+            continue
         norm = os.path.normpath(raw_path)
         if norm in context_set:
+            continue
+        if os.path.basename(norm).lower() in context_basenames:
             continue
         abs_path = os.path.join(project_root, raw_path)
         if os.path.exists(abs_path) or os.path.exists(raw_path):

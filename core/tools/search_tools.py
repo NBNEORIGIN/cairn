@@ -6,6 +6,17 @@ import fnmatch
 from pathlib import Path
 from .registry import Tool, RiskLevel
 
+_SKIP_DIRS = {
+    '.git',
+    '.venv',
+    'venv',
+    'node_modules',
+    '.next',
+    '__pycache__',
+    'dist',
+    'build',
+}
+
 
 def _search_code(
     project_root: str,
@@ -22,15 +33,17 @@ def _search_code(
         return f"ERROR: Project root not found: {project_root}"
 
     # Try ripgrep first (much faster on large codebases)
-    rg_args = ['rg', '--line-number', '--no-heading', '--color', 'never']
+    rg_args = ['rg', '--line-number', '--no-heading', '--color', 'never', '--smart-case']
+    for dirname in _SKIP_DIRS:
+        rg_args += ['--glob', f'!**/{dirname}/**']
     if file_pattern:
         rg_args += ['--glob', file_pattern]
-    rg_args += ['--', query, str(root)]
+    rg_args += ['--', query, '.']
 
     try:
         result = subprocess.run(
             rg_args,
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, timeout=30, cwd=str(root),
         )
         if result.returncode in (0, 1):  # 1 = no matches, not an error
             output = result.stdout.strip()
@@ -42,7 +55,7 @@ def _search_code(
                 lines = lines[:100]
                 lines.append(f"... (truncated, {len(output.splitlines()) - 100} more matches)")
             return '\n'.join(lines)
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except (FileNotFoundError, subprocess.TimeoutExpired, PermissionError, OSError):
         pass  # ripgrep not available, fall back
 
     # Python fallback
@@ -56,7 +69,13 @@ def _search_code(
     for filepath in root.rglob('*'):
         if not filepath.is_file():
             continue
-        if file_pattern and not fnmatch.fnmatch(filepath.name, file_pattern):
+        if any(part in _SKIP_DIRS for part in filepath.parts):
+            continue
+        rel_path = str(filepath.relative_to(root)).replace('\\', '/')
+        if file_pattern and not (
+            fnmatch.fnmatch(rel_path, file_pattern)
+            or fnmatch.fnmatch(filepath.name, file_pattern)
+        ):
             continue
         # Skip binary and large files
         if filepath.suffix in {'.pyc', '.png', '.jpg', '.gif', '.ico', '.woff'}:
@@ -65,8 +84,7 @@ def _search_code(
             text = filepath.read_text(encoding='utf-8', errors='ignore')
             for i, line in enumerate(text.splitlines(), 1):
                 if pattern.search(line):
-                    rel = filepath.relative_to(root)
-                    results.append(f"{rel}:{i}:{line.strip()}")
+                    results.append(f"{rel_path}:{i}:{line.strip()}")
                     if len(results) >= 100:
                         results.append("... (truncated)")
                         return '\n'.join(results)

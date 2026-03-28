@@ -107,3 +107,15 @@ Tools registered for this project. Risk levels:
 - web_fetch uses verify=False (SSL) to handle Cloudflare-protected sites
 - generate_video and generate_image registered but not in permissions (GPU-intensive)
 - DeepSeek routing bug fixed 2026-03-24: was silently routing all "api" projects to DeepSeek
+
+## Session 2026-03-28 — claw (bc3db364)
+- Implement validation for empty or near-empty responses to prevent silent failures
+- Add explicit error handling for validation checks to improve debugging
+- Ensure all validation failures produce actionable error messages
+
+## Session 2026-03-28 — claw (1973b4d9)
+- Validation checks must handle empty responses as failure conditions
+- Implement validation for response content completeness before processing
+- System should flag near-empty outputs as quality control failures
+- Establish minimum content thresholds for valid assistant responses
+- Treat empty/near-empty outputs as critical validation failures requiring correction

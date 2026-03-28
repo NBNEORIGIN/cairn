@@ -1,0 +1,15 @@
+skill_id: tenant-safety
+project_id: phloe
+display_name: Phloe Tenant Safety
+description: Multi-tenant safety rules for the Phloe platform
+triggers:
+  - tenant isolation
+  - phloe tenant
+  - request.tenant
+  - multi-tenant
+  - data isolation
+subproject_id:
+key_rules:
+  - Every queryset must be scoped to the tenant boundary
+  - Prefer safe abstractions over ad-hoc tenant filtering
+prompt_hint: Treat tenant safety as a first-class correctness rule

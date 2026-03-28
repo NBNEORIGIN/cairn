@@ -21,6 +21,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 _SESSION_LOG_HEADER = '## Session Log'
 _INACTIVITY_SECONDS = 30 * 60  # 30 minutes
 
@@ -57,7 +58,7 @@ class SessionSummariser:
 
     def __init__(self, project_id: str):
         self.project_id = project_id
-        self._core_md_path = Path(f'projects/{project_id}/core.md')
+        self._core_md_path = _REPO_ROOT / 'projects' / project_id / 'core.md'
         self._inactivity_timer: threading.Timer | None = None
 
     # ─── Public API ───────────────────────────────────────────────────────────
@@ -67,6 +68,7 @@ class SessionSummariser:
         messages: list[dict],
         session_id: str = '',
         wiggum_run_id: str = '',
+        skill_ids: list[str] | None = None,
     ) -> list[str]:
         """
         Summarise the session and append bullets to core.md.
@@ -109,6 +111,8 @@ class SessionSummariser:
         section += '\n'.join(f'- {b}' for b in bullets) + '\n'
 
         self._append_to_core_md(section, existing)
+        if skill_ids:
+            self._append_to_skill_decisions(skill_ids, bullets)
         logger.info(f'[summariser] appended {len(bullets)} bullets to {self._core_md_path}')
         return bullets
 
@@ -237,3 +241,32 @@ class SessionSummariser:
             )
 
         self._core_md_path.write_text(new_content, encoding='utf-8')
+
+    def _append_to_skill_decisions(
+        self,
+        skill_ids: list[str],
+        bullets: list[str],
+    ) -> None:
+        dated_bullets = [
+            f"{datetime.now(timezone.utc).strftime('%Y-%m-%d')}: {bullet}"
+            for bullet in bullets
+        ]
+        for skill_id in skill_ids:
+            decisions_path = (
+                _REPO_ROOT
+                / 'projects'
+                / self.project_id
+                / 'skills'
+                / skill_id
+                / 'decisions.md'
+            )
+            decisions_path.parent.mkdir(parents=True, exist_ok=True)
+            existing = decisions_path.read_text(encoding='utf-8') if decisions_path.exists() else ''
+            kept = self._deduplicate(dated_bullets, existing)
+            if not kept:
+                continue
+            prefix = '' if not existing.strip() else '\n'
+            decisions_path.write_text(
+                existing + prefix + '\n'.join(f'- {bullet}' for bullet in kept) + '\n',
+                encoding='utf-8',
+            )

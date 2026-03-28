@@ -31,6 +31,9 @@ class OpenAIClient:
         image_base64: str | None = None,
         image_media_type: str = 'image/png',
         raw_messages: list[dict] | None = None,
+        pre_assembled: list[dict] | None = None,
+        cache_manager=None,
+        provider_name: str = '',
     ) -> tuple[str, Optional[dict], dict]:
         """
         Same signature as ClaudeClient.chat().
@@ -38,11 +41,14 @@ class OpenAIClient:
           tool_call = {'name': str, 'input': dict, 'tool_use_id': str} | None
           usage     = {'input_tokens': int, 'output_tokens': int, 'total_tokens': int}
         """
-        # raw_messages already includes system as first message
-        messages = (
-            raw_messages if raw_messages is not None
-            else self._build_messages(system, history, message, image_base64, image_media_type)
-        )
+        if pre_assembled is not None:
+            messages = pre_assembled
+        else:
+            # raw_messages already includes system as first message
+            messages = (
+                raw_messages if raw_messages is not None
+                else self._build_messages(system, history, message, image_base64, image_media_type)
+            )
 
         kwargs: dict = {
             'model': self.model,
@@ -73,6 +79,22 @@ class OpenAIClient:
             'output_tokens': response.usage.completion_tokens,
             'total_tokens': response.usage.total_tokens,
         }
+
+        # Record cache hits if available (OpenAI cached_tokens in prompt_tokens_details)
+        cached_tokens = 0
+        prompt_details = getattr(response.usage, 'prompt_tokens_details', None)
+        if prompt_details:
+            cached_tokens = getattr(prompt_details, 'cached_tokens', 0) or 0
+        if cached_tokens and cache_manager:
+            try:
+                cache_manager.record_request(
+                    provider=provider_name or 'openai',
+                    input_tokens=response.usage.prompt_tokens,
+                    cached_tokens=cached_tokens,
+                )
+            except Exception:
+                pass
+        usage['cached_input_tokens'] = cached_tokens
 
         return response_text, tool_call, usage
 
