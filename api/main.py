@@ -938,6 +938,80 @@ async def get_cost_summary(
     }
 
 
+@app.get("/cost/today")
+async def get_today_cost(
+    since: Optional[str] = None,
+    _: bool = Depends(verify_api_key),
+):
+    """
+    Total spend across ALL projects since midnight UTC today (or ?since= date).
+    Broken down by provider: anthropic | openai | deepseek | local
+    """
+    from datetime import date as _date
+
+    # Default: midnight UTC today
+    if since:
+        since_dt = since if 'T' in since else f'{since}T00:00:00'
+    else:
+        since_dt = datetime.combine(_date.today(), datetime.min.time()).isoformat()
+
+    data_dir = os.getenv('CLAW_DATA_DIR', './data')
+
+    # If no agents loaded yet, scan projects dir directly
+    agents_to_query: dict[str, ClawAgent] = dict(_agents)
+    if not agents_to_query and _PROJECTS_ROOT.exists():
+        for project_dir in sorted(_PROJECTS_ROOT.iterdir()):
+            config_path = project_dir / 'config.json'
+            if project_dir.is_dir() and not project_dir.name.startswith('_') and config_path.exists():
+                try:
+                    config = json.loads(config_path.read_text())
+                    agents_to_query[project_dir.name] = ClawAgent(
+                        project_id=project_dir.name,
+                        config=config,
+                    )
+                except Exception:
+                    pass
+
+    # Gather per-project rows
+    all_rows: list[dict] = []
+    for project_id, agent in agents_to_query.items():
+        for row in agent.memory.get_spend_since(since_dt):
+            all_rows.append({**row, 'project_id': project_id})
+
+    # Map model name → provider bucket
+    def _provider(model: str) -> str:
+        m = (model or '').lower()
+        if any(x in m for x in ('claude', 'anthropic')):
+            return 'anthropic'
+        if any(x in m for x in ('gpt', 'o1', 'openai')):
+            return 'openai'
+        if 'deepseek' in m:
+            return 'deepseek'
+        return 'local'  # Ollama / qwen / llama
+
+    # Aggregate by provider
+    by_provider: dict[str, dict] = {}
+    total_cost = 0.0
+    for row in all_rows:
+        p = _provider(row['model'])
+        bucket = by_provider.setdefault(p, {
+            'provider': p, 'calls': 0, 'tokens': 0, 'cost_usd': 0.0, 'models': [],
+        })
+        bucket['calls']    += row['calls']
+        bucket['tokens']   += row['tokens'] or 0
+        bucket['cost_usd'] = round(bucket['cost_usd'] + row['cost_usd'], 6)
+        if row['model'] and row['model'] not in bucket['models']:
+            bucket['models'].append(row['model'])
+        total_cost += row['cost_usd']
+
+    return {
+        'since': since_dt,
+        'total_cost_usd': round(total_cost, 6),
+        'by_provider': list(by_provider.values()),
+        'by_project': all_rows,
+    }
+
+
 @app.get("/debug/tools/{project_id}")
 async def debug_tools(project_id: str):
     """Show exactly which tools are registered and exposed for a project."""

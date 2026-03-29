@@ -269,6 +269,35 @@ class MemoryStore:
             for r in rows
         ]
 
+    def get_spend_since(self, since_iso: str) -> list[dict]:
+        """
+        Cost breakdown since a given UTC timestamp (ISO 8601).
+        Groups by model_used so the caller can map to provider.
+        Used by GET /cost/today for cross-project aggregation.
+        """
+        rows = self.conn.execute("""
+            SELECT
+                model_used,
+                COUNT(*)         AS calls,
+                SUM(tokens_used) AS total_tokens,
+                SUM(cost_usd)    AS total_cost
+            FROM conversations
+            WHERE role = 'assistant'
+              AND model_used != ''
+              AND timestamp >= ?
+            GROUP BY model_used
+            ORDER BY total_cost DESC
+        """, (since_iso,)).fetchall()
+        return [
+            {
+                'model': r[0],
+                'calls': r[1],
+                'tokens': r[2],
+                'cost_usd': round(r[3] or 0, 6),
+            }
+            for r in rows
+        ]
+
     # ─── Subproject management ─────────────────────────────────────────────────
 
     def create_subproject(
