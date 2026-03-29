@@ -2945,17 +2945,30 @@ class TestIndexerImprovements:
     def _make_indexer(self):
         """Create a CodeIndexer with all DB dependencies mocked."""
         import sys
-        from unittest.mock import MagicMock
-        # Ensure pgvector module exists for import
+        import unittest.mock as mock
+        # Ensure pgvector modules exist so patch targets resolve
         if 'pgvector' not in sys.modules:
-            sys.modules['pgvector'] = MagicMock()
-            sys.modules['pgvector.psycopg2'] = MagicMock()
+            sys.modules['pgvector'] = mock.MagicMock()
+        if 'pgvector.psycopg2' not in sys.modules:
+            sys.modules['pgvector.psycopg2'] = mock.MagicMock()
         from core.context.indexer import CodeIndexer
-        with patch('psycopg2.connect') as mock_conn:
-            mock_conn.return_value = MagicMock()
-            mock_conn.return_value.cursor.return_value.__enter__ = MagicMock()
-            mock_conn.return_value.cursor.return_value.__exit__ = MagicMock()
-            return CodeIndexer('test', '.', 'fake://url')
+        with mock.patch(
+            'pgvector.psycopg2.register_vector'
+        ):
+            with mock.patch(
+                'psycopg2.connect'
+            ) as mock_conn:
+                conn = mock.MagicMock()
+                cur = mock.MagicMock()
+                cur.fetchone.return_value = (0,)
+                cur.fetchall.return_value = []
+                cur.__enter__ = mock.Mock(return_value=cur)
+                cur.__exit__ = mock.Mock(return_value=False)
+                conn.cursor.return_value = cur
+                mock_conn.return_value = conn
+                return CodeIndexer(
+                    'test', '.', 'fake://url'
+                )
 
     def test_indexer_embedding_model_check(self):
         """check_embedding_model returns False when model is unavailable."""
