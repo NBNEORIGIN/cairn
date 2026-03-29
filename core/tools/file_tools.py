@@ -6,20 +6,22 @@ import os
 from pathlib import Path
 from .registry import Tool, RiskLevel
 
-# D:\claw\projects is always allowed so agents can read their own
-# core.md, config.json, and skill definitions regardless of where
-# their codebase_path points.
-_PROJECTS_DIR = Path(__file__).resolve().parent.parent.parent / 'projects'
+# Cairn repo root — always allowed so any project can read Cairn's own
+# source, project configs, core.md, and skill definitions.
+_CAIRN_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 def _resolve_safe(project_root: Path, file_path: str) -> Path:
     """Resolve file_path against project_root, blocking traversal.
 
-    Accepts both relative paths (``backend/urls.py``) and absolute paths
-    (``D:/nbne_business/nbne_platform/backend/urls.py``) as long as the
-    resolved result lives under either ``project_root`` or the shared
-    ``projects/`` directory.  Uses ``os.path.normcase`` so drive-letter
-    case and separator differences on Windows don't cause false rejections.
+    A resolved path is allowed if it lives under any of:
+      1. The project's own codebase_path (passed as ``project_root``)
+      2. The Cairn repo root  (D:\\claw)
+      3. D:\\claw\\projects   (subset of 2, listed for clarity)
+
+    Accepts both relative and absolute ``file_path`` values.  Uses
+    ``os.path.normcase`` so drive-letter case and separator differences
+    on Windows don't cause false rejections.
     """
     candidate = Path(file_path)
     if candidate.is_absolute():
@@ -30,14 +32,13 @@ def _resolve_safe(project_root: Path, file_path: str) -> Path:
     norm_resolved = os.path.normcase(str(resolved))
     allowed_roots = [
         os.path.normcase(str(project_root.resolve())),
-        os.path.normcase(str(_PROJECTS_DIR)),
+        os.path.normcase(str(_CAIRN_ROOT)),
     ]
     if any(norm_resolved.startswith(r) for r in allowed_roots):
         return resolved
 
     raise PermissionError(
-        f"Path '{file_path}' is outside project root "
-        f"'{project_root.resolve()}' — rejected."
+        f"Path '{file_path}' is outside allowed roots — rejected."
     )
 
 
