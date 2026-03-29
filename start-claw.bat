@@ -14,12 +14,20 @@ echo [CLAW] Stopping any existing processes...
 taskkill /f /fi "WINDOWTITLE eq CLAW API*" >nul 2>&1
 taskkill /f /fi "WINDOWTITLE eq CLAW Web*" >nul 2>&1
 
-REM Kill any orphaned processes on our ports
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8765 "') do taskkill /f /pid %%a >nul 2>&1
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":3000 "') do taskkill /f /pid %%a >nul 2>&1
+REM Kill any orphaned processes on our ports (skip PID 0)
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8765 "') do (
+    if not "%%a"=="0" (
+        taskkill /f /pid %%a >nul 2>&1
+    )
+)
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":3000 "') do (
+    if not "%%a"=="0" (
+        taskkill /f /pid %%a >nul 2>&1
+    )
+)
 
 echo [CLAW] Waiting for ports to clear...
-timeout /t 2 /nobreak >nul
+timeout /t 3 /nobreak >nul
 
 echo [CLAW] Starting API on port 8765...
 start "CLAW API" cmd /k "cd /d D:\claw && .\.venv\Scripts\python -m uvicorn api.main:app --host 0.0.0.0 --port 8765"
