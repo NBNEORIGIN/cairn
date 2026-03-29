@@ -260,7 +260,7 @@ function EvalCard({ results }: { results: EvalResults }) {
             )}
           </>
         ) : (
-          <span className="text-gray-500 text-xs">No eval results cached yet — run the CLAW evaluator to populate</span>
+          <span className="text-gray-500 text-xs">No eval results cached yet — run the Cairn evaluator to populate</span>
         )}
       </div>
     </Card>
@@ -557,7 +557,7 @@ export default function StatusPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <h1 className="text-xl font-semibold text-gray-100">CLAW Status</h1>
+          <h1 className="text-xl font-semibold text-gray-100">Cairn Status</h1>
           <a href="/" className="text-xs text-gray-600 hover:text-gray-400 transition-colors">
             ← Chat
           </a>

@@ -246,14 +246,14 @@ function ValidationBanner({ metadata }: { metadata?: MessageMetadata }) {
   if (metadata.stopped) {
     return (
       <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
-        Generation stopped before CLAW finished the response.
+        Generation stopped before Cairn finished the response.
       </div>
     )
   }
   if (metadata.timed_out) {
     return (
       <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
-        CLAW hit the request deadline and returned early.
+        Cairn hit the request deadline and returned early.
       </div>
     )
   }
@@ -300,7 +300,7 @@ export function MessageBubble({ message, onApprove, onReject }: MessageBubblePro
       <div className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-[0_16px_40px_-24px_rgba(15,23,42,0.28)]">
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-slate-50/80 px-4 py-3">
           <span className="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-sky-700">
-            {message.modelUsed ? modelLabel(message.modelUsed) : 'CLAW'}
+            {message.modelUsed ? modelLabel(message.modelUsed) : 'Cairn'}
           </span>
           {message.modelUsed && (
             <span className="text-xs text-slate-500">{message.modelUsed}</span>

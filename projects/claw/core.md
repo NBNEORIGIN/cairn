@@ -1,4 +1,4 @@
-# CLAW — Self-Hosted Sovereign AI Coding Agent
+# Cairn — Self-Hosted Sovereign AI Agent
 # Version: 1.1
 # This is CLAW's context for maintaining itself.
 
@@ -119,3 +119,28 @@ Tools registered for this project. Risk levels:
 - System should flag near-empty outputs as quality control failures
 - Establish minimum content thresholds for valid assistant responses
 - Treat empty/near-empty outputs as critical validation failures requiring correction
+
+## Session 2026-03-28 — claw (06985e28)
+- Validation check for empty responses must be implemented to prevent silent failures.
+- Near-empty responses should be treated as errors to maintain quality standards.
+- Automated validation rules are required to catch incomplete outputs early.
+
+## Session 2026-03-28 — claw (4aaf39ef)
+- Use validation checks to detect empty or near-empty responses
+- Ensure responses contain substantive content to pass validation
+- Address validation failures by improving response completeness
+- Monitor for empty outputs as a quality control measure
+- Implement safeguards against generating insufficient content
+- Treat validation errors as indicators of response quality issues
+- Apply validation rules consistently across response generation
+- Prioritize content completeness in response design
+- Use validation feedback to refine response generation processes
+- Maintain minimum content thresholds to avoid validation failures
+
+## Session 2026-03-29 — claw (9adf340a)
+- Developer decided to address validation failure for empty/near-empty responses
+- Encountered validation system flagging empty content as problematic
+- Identified need for robust content generation to pass validation checks
+- Established pattern: validation systems require substantive output to succeed
+- Discovered gotcha: automated checks can fail on minimal or placeholder content
+- Architectural rule: implement meaningful fallback content to avoid validation failures

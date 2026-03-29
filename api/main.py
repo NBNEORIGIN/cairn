@@ -267,7 +267,7 @@ _index_runs: dict[str, dict] = {}
 
 
 app = FastAPI(
-    title="CLAW — Coding and Language Agent Workbench",
+    title="Cairn — Sovereign AI Agent",
     version="0.1.0",
     description="Sovereign AI coding agent with permanent per-project context",
     lifespan=lifespan,

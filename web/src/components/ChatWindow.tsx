@@ -870,8 +870,8 @@ export function ChatWindow() {
         <div className="border-b border-slate-200 bg-white/80 px-5 py-4">
           <div className="flex flex-wrap items-center gap-4">
             <div className="min-w-[220px]">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-sky-700">CLAW Workbench</div>
-              <div className="text-sm text-slate-500">Sovereign coding agent with durable project memory</div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-sky-700">Cairn</div>
+              <div className="text-sm text-slate-500">Sovereign AI agent for NBNE</div>
             </div>
 
             <div className="flex items-center gap-2">
@@ -1071,7 +1071,7 @@ export function ChatWindow() {
               value={input}
               onChange={handleTextareaChange}
               onKeyDown={handleKeyDown}
-              placeholder={projectId ? (activeSubproject ? `Ask CLAW about ${activeSubproject.display_name}… (@ to pin context)` : `Ask CLAW about ${projectId}… (@ to pin context)`) : 'Select a project first'}
+              placeholder={projectId ? (activeSubproject ? `Ask Cairn about ${activeSubproject.display_name}… (@ to pin context)` : `Ask Cairn about ${projectId}… (@ to pin context)`) : 'Select a project first'}
               disabled={!projectId || loading}
               rows={1}
               className="min-h-[44px] max-h-[120px] flex-1 resize-none rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-sky-300 placeholder:text-slate-400 disabled:opacity-50"

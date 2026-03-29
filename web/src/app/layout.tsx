@@ -2,8 +2,8 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'CLAW — Sovereign AI Agent',
-  description: 'Per-project AI coding agent with permanent context',
+  title: 'Cairn — Sovereign AI Agent',
+  description: 'Sovereign AI agent for NBNE',
 }
 
 export default function RootLayout({
