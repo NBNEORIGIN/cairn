@@ -58,6 +58,21 @@ interface WiggumRun {
   started_at: string
 }
 
+interface EmbeddingModel {
+  name: string
+  available: boolean
+  ollama_running: boolean
+  latency_ms: number | null
+}
+
+interface EmbeddingTestResult {
+  success: boolean
+  model: string
+  dim: number | null
+  latency_ms: number | null
+  error: string | null
+}
+
 interface StatusData {
   api_status: string
   stale?: boolean
@@ -355,6 +370,149 @@ function WiggumCard({ runs }: { runs: WiggumRun[] }) {
   )
 }
 
+function IndexingPanel({ projects }: { projects: ProjectInfo[] }) {
+  const [embeddingModel, setEmbeddingModel] = useState<EmbeddingModel | null>(null)
+  const [testResult, setTestResult] = useState<EmbeddingTestResult | null>(null)
+  const [testing, setTesting] = useState(false)
+  const [indexingAll, setIndexingAll] = useState(false)
+  const [indexingProject, setIndexingProject] = useState<string | null>(null)
+
+  // Poll /health for embedding_model every 15s
+  useEffect(() => {
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const r = await fetch('http://localhost:8765/health')
+        if (r.ok) {
+          const data = await r.json()
+          if (!cancelled && data.embedding_model) setEmbeddingModel(data.embedding_model)
+        }
+      } catch { /* ignore */ }
+    }
+    poll()
+    const id = setInterval(poll, 15_000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [])
+
+  const runEmbeddingTest = async () => {
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const r = await fetch('http://localhost:8765/admin/test-embedding', {
+        method: 'POST',
+        headers: { 'X-API-Key': 'claw-dev-key-change-in-production' },
+      })
+      if (r.ok) setTestResult(await r.json())
+    } catch { /* ignore */ }
+    setTesting(false)
+  }
+
+  const indexAll = async () => {
+    setIndexingAll(true)
+    const unindexed = projects.filter(p => p.loaded && (p.files_indexed === null || p.files_indexed === 0))
+    for (const p of unindexed) {
+      setIndexingProject(p.name)
+      try {
+        await fetch(`http://localhost:8765/projects/${p.name}/index`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ force: true }),
+        })
+      } catch { /* ignore */ }
+    }
+    setIndexingProject(null)
+    setIndexingAll(false)
+  }
+
+  const totalChunks = projects.reduce((sum, p) => sum + (p.files_indexed ?? 0), 0)
+  const indexedCount = projects.filter(p => (p.files_indexed ?? 0) > 0).length
+  const unindexedProjects = projects.filter(p => p.loaded && (p.files_indexed === null || p.files_indexed === 0))
+
+  return (
+    <Card title="Indexing &amp; Embeddings">
+      <div className="space-y-4">
+        {/* Summary bar */}
+        <div className="flex items-center gap-4 text-sm">
+          <span className="text-gray-300">
+            <span className="font-semibold text-gray-100">{indexedCount}</span>/{projects.length} projects indexed
+          </span>
+          <span className="text-gray-500">|</span>
+          <span className="text-gray-400">{totalChunks.toLocaleString()} total chunks</span>
+          {unindexedProjects.length > 0 && (
+            <button
+              onClick={indexAll}
+              disabled={indexingAll}
+              className="ml-auto text-xs px-3 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50"
+            >
+              {indexingAll ? `Indexing ${indexingProject || '...'}` : `Index All (${unindexedProjects.length})`}
+            </button>
+          )}
+        </div>
+
+        {/* Per-project progress bars */}
+        <div className="space-y-2">
+          {projects.map(p => {
+            const chunks = p.files_indexed ?? 0
+            const maxChunks = Math.max(...projects.map(pp => pp.files_indexed ?? 0), 1)
+            const pct = Math.min(100, (chunks / maxChunks) * 100)
+            return (
+              <div key={p.name} className="flex items-center gap-3">
+                <span className="w-28 text-xs font-mono text-gray-300 truncate">{p.name}</span>
+                <div className="flex-1 h-2 bg-gray-800 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${chunks > 0 ? 'bg-green-500' : 'bg-gray-700'}`}
+                    style={{ width: `${chunks > 0 ? Math.max(pct, 3) : 0}%` }}
+                  />
+                </div>
+                <span className="w-16 text-right text-xs text-gray-500">{chunks > 0 ? chunks : '—'}</span>
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Embedding model status */}
+        <div className="border-t border-gray-700 pt-3">
+          <div className="flex items-center gap-3 text-sm">
+            <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Embedding Model</span>
+            {embeddingModel ? (
+              <div className="flex items-center gap-3 text-gray-300">
+                <Dot on={embeddingModel.available} />
+                <span className="font-mono text-xs text-gray-100">{embeddingModel.name}</span>
+                {embeddingModel.available ? (
+                  <span className="text-xs text-gray-500">{embeddingModel.latency_ms}ms</span>
+                ) : (
+                  <span className="text-xs text-amber-400">
+                    {embeddingModel.ollama_running ? 'model not pulled' : 'Ollama offline'}
+                  </span>
+                )}
+              </div>
+            ) : (
+              <span className="text-xs text-gray-600">loading...</span>
+            )}
+            <button
+              onClick={runEmbeddingTest}
+              disabled={testing}
+              className="ml-auto text-xs px-2 py-0.5 rounded border border-gray-600 text-gray-400 hover:text-gray-200 hover:border-gray-500 disabled:opacity-50"
+            >
+              {testing ? 'Testing...' : 'Test Pipeline'}
+            </button>
+          </div>
+          {testResult && (
+            <div className={`mt-2 text-xs px-3 py-2 rounded ${
+              testResult.success ? 'bg-green-900/40 border border-green-800 text-green-300' : 'bg-red-900/40 border border-red-800 text-red-300'
+            }`}>
+              {testResult.success
+                ? `Passed — ${testResult.dim}d vector in ${testResult.latency_ms}ms (${testResult.model})`
+                : `Failed — ${testResult.error}`
+              }
+            </div>
+          )}
+        </div>
+      </div>
+    </Card>
+  )
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function StatusPage() {
@@ -455,6 +613,7 @@ export default function StatusPage() {
             <TestsCard results={data.test_results} />
           </div>
           <EvalCard results={data.eval_results} />
+          <IndexingPanel projects={data.projects} />
           <ProjectsCard projects={data.projects} />
           <WiggumCard runs={data.wiggum_runs} />
         </div>

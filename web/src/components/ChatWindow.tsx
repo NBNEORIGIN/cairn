@@ -265,9 +265,10 @@ export function ChatWindow() {
   const [sessionTokens, setSessionTokens] = useState(0)
   const [archiveBanner, setArchiveBanner] = useState<string | null>(null)
 
-  // Index warning
+  // Index warning & header indicator
   const [indexWarning, setIndexWarning] = useState<{ project: string; message: string } | null>(null)
   const [indexDismissed, setIndexDismissed] = useState(false)
+  const [indexChunks, setIndexChunks] = useState<number | null>(null)
 
   // @ mention
   const [mentions, setMentions] = useState<Mention[]>([])
@@ -402,6 +403,7 @@ export function ChatWindow() {
         const data = await r.json()
         const status = data.index_status?.[projectId]
         if (!status) return
+        setIndexChunks(status.chunks ?? null)
         if (status.indexed) {
           setIndexWarning(null)
         } else {
@@ -938,6 +940,13 @@ export function ChatWindow() {
             </div>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 shadow-sm">
               Session <span className="font-mono text-slate-700">{sessionId.slice(0, 8)}…</span>
+            </div>
+            <div className={`rounded-2xl border px-3 py-2 text-xs shadow-sm ${
+              indexChunks === null ? 'border-slate-200 bg-slate-50 text-slate-400'
+              : indexChunks > 0 ? 'border-green-200 bg-green-50 text-green-700'
+              : 'border-amber-200 bg-amber-50 text-amber-700'
+            }`} title={indexChunks !== null ? `${indexChunks} indexed chunks` : 'Index status unknown'}>
+              {indexChunks === null ? '… idx' : indexChunks > 0 ? `${indexChunks} idx` : '0 idx'}
             </div>
             <button onClick={newSession} className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-sky-700">New chat</button>
           </div>

@@ -2942,46 +2942,91 @@ class TestAutoIndexAndScheduled:
 class TestIndexerImprovements:
     """Tests for indexer timeout, progress, and model check."""
 
-    def test_indexer_embedding_model_check(self):
-        """check_embedding_model returns False when model is unavailable."""
-        from unittest.mock import patch, MagicMock
+    def _make_indexer(self):
+        """Create a CodeIndexer with all DB dependencies mocked."""
+        import sys
+        from unittest.mock import MagicMock
+        # Ensure pgvector module exists for import
+        if 'pgvector' not in sys.modules:
+            sys.modules['pgvector'] = MagicMock()
+            sys.modules['pgvector.psycopg2'] = MagicMock()
         from core.context.indexer import CodeIndexer
-
-        # Override the conftest auto-mock to simulate failure
-        with patch.object(CodeIndexer, 'check_embedding_model', lambda self: False), \
-             patch('psycopg2.connect') as mock_conn, \
-             patch('pgvector.psycopg2.register_vector'):
+        with patch('psycopg2.connect') as mock_conn:
             mock_conn.return_value = MagicMock()
             mock_conn.return_value.cursor.return_value.__enter__ = MagicMock()
             mock_conn.return_value.cursor.return_value.__exit__ = MagicMock()
-            indexer = CodeIndexer('test', '.', 'fake://url')
+            return CodeIndexer('test', '.', 'fake://url')
+
+    def test_indexer_embedding_model_check(self):
+        """check_embedding_model returns False when model is unavailable."""
+        from core.context.indexer import CodeIndexer
+        indexer = self._make_indexer()
+        # Override the conftest auto-mock to simulate failure
+        with patch.object(CodeIndexer, 'check_embedding_model', lambda self: False):
             assert indexer.check_embedding_model() is False
 
     def test_indexer_embedding_model_check_succeeds(self):
         """check_embedding_model returns True when model responds (conftest mock)."""
-        from core.context.indexer import CodeIndexer
+        indexer = self._make_indexer()
         # The conftest mock already makes check_embedding_model return True
-        with patch('psycopg2.connect') as mock_conn, \
-             patch('pgvector.psycopg2.register_vector'):
-            mock_conn.return_value = MagicMock()
-            mock_conn.return_value.cursor.return_value.__enter__ = MagicMock()
-            mock_conn.return_value.cursor.return_value.__exit__ = MagicMock()
-            indexer = CodeIndexer('test', '.', 'fake://url')
         assert indexer.check_embedding_model() is True
 
     def test_indexer_error_on_missing_model(self):
         """index_project raises IndexerError when embedding model missing."""
-        from unittest.mock import patch, MagicMock
         from core.context.indexer import CodeIndexer, IndexerError
-
+        indexer = self._make_indexer()
         # Override conftest mock to simulate missing model
         with patch.object(CodeIndexer, 'check_embedding_model', lambda self: False):
-            with patch('psycopg2.connect') as mock_conn, \
-                 patch('pgvector.psycopg2.register_vector'):
-                mock_conn.return_value = MagicMock()
-                mock_conn.return_value.cursor.return_value.__enter__ = MagicMock()
-                mock_conn.return_value.cursor.return_value.__exit__ = MagicMock()
-                indexer = CodeIndexer('test', '.', 'fake://url')
-
             with pytest.raises(IndexerError, match='Embedding model not available'):
                 indexer.index_project()
+
+
+class TestEmbeddingModelStatus:
+    """Tests for embedding_model in /health and POST /admin/test-embedding."""
+
+    def test_health_includes_embedding_model(self, client):
+        tc, _ = client
+        data = tc.get("/health").json()
+        assert 'embedding_model' in data
+
+    def test_embedding_model_has_required_keys(self, client):
+        tc, _ = client
+        em = tc.get("/health").json()['embedding_model']
+        for key in ('name', 'available', 'ollama_running', 'latency_ms'):
+            assert key in em, f"Missing embedding_model key: {key}"
+
+    def test_embedding_model_name_from_env(self, client):
+        tc, _ = client
+        em = tc.get("/health").json()['embedding_model']
+        # Should be the env default or 'nomic-embed-text'
+        assert isinstance(em['name'], str)
+        assert len(em['name']) > 0
+
+    def test_embedding_model_cache_returns_same(self, client):
+        """Two rapid calls should return identical cached data."""
+        tc, _ = client
+        em1 = tc.get("/health").json()['embedding_model']
+        em2 = tc.get("/health").json()['embedding_model']
+        assert em1 == em2
+
+    def test_test_embedding_endpoint_exists(self, client):
+        tc, headers = client
+        r = tc.post("/admin/test-embedding", headers=headers)
+        assert r.status_code == 200
+
+    def test_test_embedding_returns_required_keys(self, client):
+        tc, headers = client
+        data = tc.post("/admin/test-embedding", headers=headers).json()
+        for key in ('success', 'model', 'dim', 'latency_ms', 'error'):
+            assert key in data, f"Missing test-embedding key: {key}"
+
+    def test_test_embedding_returns_model_name(self, client):
+        tc, headers = client
+        data = tc.post("/admin/test-embedding", headers=headers).json()
+        assert isinstance(data['model'], str)
+        assert len(data['model']) > 0
+
+    def test_test_embedding_requires_auth(self, client):
+        tc, _ = client
+        r = tc.post("/admin/test-embedding")
+        assert r.status_code in (401, 403)

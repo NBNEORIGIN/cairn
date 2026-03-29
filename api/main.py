@@ -956,6 +956,54 @@ async def debug_tools(project_id: str):
         return {'error': str(e)}
 
 
+# ── Embedding model status cache (60s TTL) ───────────────────────────────────
+_embedding_model_cache: dict | None = None
+_embedding_model_cache_ts: float = 0.0
+_EMBEDDING_CACHE_TTL = 60.0
+
+
+async def _embedding_model_status() -> dict:
+    """Return embedding model availability with 60s cache."""
+    global _embedding_model_cache, _embedding_model_cache_ts
+    now = time.monotonic()
+    if _embedding_model_cache and (now - _embedding_model_cache_ts) < _EMBEDDING_CACHE_TTL:
+        return _embedding_model_cache
+
+    model_name = os.getenv('OLLAMA_EMBED_MODEL', 'nomic-embed-text')
+    ollama_base = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
+    result: dict = {
+        'name': model_name,
+        'available': False,
+        'ollama_running': False,
+        'latency_ms': None,
+    }
+
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=5) as client:
+            # Check if Ollama is running
+            tags_r = await client.get(f'{ollama_base}/api/tags')
+            if tags_r.status_code == 200:
+                result['ollama_running'] = True
+                installed = [m['name'] for m in tags_r.json().get('models', [])]
+                if any(model_name in m for m in installed):
+                    # Test embedding latency
+                    t0 = time.monotonic()
+                    embed_r = await client.post(
+                        f'{ollama_base}/api/embeddings',
+                        json={'model': model_name, 'prompt': 'test'},
+                    )
+                    if embed_r.status_code == 200 and embed_r.json().get('embedding'):
+                        result['available'] = True
+                        result['latency_ms'] = round((time.monotonic() - t0) * 1000, 1)
+    except Exception:
+        pass
+
+    _embedding_model_cache = result
+    _embedding_model_cache_ts = now
+    return result
+
+
 async def _all_project_chunk_counts() -> dict[str, int]:
     """Query pgvector for chunk counts grouped by project_id."""
     db_url = os.getenv('DATABASE_URL', '')
@@ -1017,6 +1065,9 @@ async def health():
     except Exception:
         pass
 
+    # ── Embedding model status (cached 60s) ─────────────────────────────
+    embedding_model = await _embedding_model_status()
+
     # ── Per-project index status ──────────────────────────────────────────
     index_status = {}
     chunk_counts = await _all_project_chunk_counts()
@@ -1051,8 +1102,45 @@ async def health():
         'projects_loaded': list(_agents.keys()),
         'skills_loaded': sum(len(agent.skills.list_skills()) for agent in _agents.values()),
         'skill_classifier_ready': getattr(app.state, 'skill_classifier_ready', False),
+        'embedding_model': embedding_model,
         'index_status': index_status,
     }
+
+
+@app.post("/admin/test-embedding")
+async def test_embedding(_: bool = Depends(verify_api_key)):
+    """End-to-end embedding pipeline test — tries a real embed call."""
+    model_name = os.getenv('OLLAMA_EMBED_MODEL', 'nomic-embed-text')
+    ollama_base = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
+    result: dict = {
+        'success': False,
+        'model': model_name,
+        'dim': None,
+        'latency_ms': None,
+        'error': None,
+    }
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=10) as client:
+            t0 = time.monotonic()
+            r = await client.post(
+                f'{ollama_base}/api/embeddings',
+                json={'model': model_name, 'prompt': 'Hello world embedding test'},
+            )
+            latency = round((time.monotonic() - t0) * 1000, 1)
+            if r.status_code == 200:
+                embedding = r.json().get('embedding', [])
+                if embedding:
+                    result['success'] = True
+                    result['dim'] = len(embedding)
+                    result['latency_ms'] = latency
+                else:
+                    result['error'] = 'Empty embedding returned'
+            else:
+                result['error'] = f'HTTP {r.status_code}: {r.text[:200]}'
+    except Exception as e:
+        result['error'] = str(e)
+    return result
 
 
 # ─── WIGGUM endpoints ────────────────────────────────────────────────────────
