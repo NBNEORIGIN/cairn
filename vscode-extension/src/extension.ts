@@ -339,15 +339,14 @@ export function activate(context: vscode.ExtensionContext) {
     // Select / switch project
     context.subscriptions.push(
         vscode.commands.registerCommand('cairn.selectProject', async () => {
-            const { apiUrl, apiKey } = getConfig();
+            const { apiUrl } = getConfig();
             try {
-                const res = await fetch(`${apiUrl}/projects`, {
-                    headers: apiKey ? { 'X-API-Key': apiKey } : {},
+                const res = await fetch(`${apiUrl}/health`, {
+                    signal: AbortSignal.timeout(5000),
                 });
-                const data = await res.json() as { projects: Array<{ id: string; name: string; ready: boolean }> };
-                const items = data.projects
-                    .filter(p => p.ready)
-                    .map(p => ({ label: p.id, description: p.name }));
+                const data = await res.json() as { projects_loaded?: string[] };
+                const items = (data.projects_loaded || [])
+                    .map(id => ({ label: id, description: id }));
 
                 const picked = await vscode.window.showQuickPick(items, {
                     placeHolder: 'Select Cairn project',

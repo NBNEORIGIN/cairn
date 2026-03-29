@@ -124,15 +124,15 @@ export class CairnPanel {
     }
 
     private async _fetchProjects(): Promise<Array<{ id: string; name: string }>> {
-        const { apiUrl, apiKey } = this._getApiConfig();
+        const { apiUrl } = this._getApiConfig();
         try {
-            const res = await fetch(`${apiUrl}/projects`, {
-                headers: apiKey ? { 'X-API-Key': apiKey } : {},
+            // Use /health (no auth required) — returns projects_loaded: string[]
+            const res = await fetch(`${apiUrl}/health`, {
                 signal: AbortSignal.timeout(5000),
             });
             if (!res.ok) { return []; }
-            const data = await res.json() as { projects: Array<{ id: string; name: string; ready: boolean }> };
-            return (data.projects || []).filter(p => p.ready).map(p => ({ id: p.id, name: p.name }));
+            const data = await res.json() as { projects_loaded?: string[] };
+            return (data.projects_loaded || []).map(id => ({ id, name: id }));
         } catch {
             return [];
         }
