@@ -1365,7 +1365,8 @@ class ClawAgent:
     ) -> AgentResponse:
         """
         Process the user's approve/reject decision for a pending tool call.
-        If approved, execute the tool and feed the result back to the model.
+        If approved, execute the tool and feed the result back to the model
+        so it can continue its multi-step plan (e.g. git_add → git_commit).
         """
         approval = envelope.tool_approval
         if not approval.get('approved'):
@@ -1398,11 +1399,39 @@ class ClawAgent:
                 approved_by='user',
             )
 
-        # Brief confirmation back to user
-        return AgentResponse(
-            content=f"Done. {result}",
-            session_id=envelope.session_id,
-            project_id=self.project_id,
+        # Feed the tool result back to the model so it can continue its
+        # multi-step plan (e.g. call git_commit after git_add completes).
+        history = self.memory.get_recent_history(envelope.session_id, limit=10)
+        raw_context_prompt, context_meta = self.context.build_context_prompt(
+            task=envelope.content or tool_name,
+            embedding_fn=self._embed,
+            subproject_id=envelope.subproject_id,
+            include_metadata=True,
+        )
+        context_prompt, _ = self._assemble_context_prompt(
+            raw_context_prompt, history, 'claude', [],
+        )
+        routing_decision = route_decision(
+            task=envelope.content or tool_name,
+            context_tokens=estimate_tokens(context_prompt + (envelope.content or '')),
+            project_config=self.config,
+            risk_level='review',
+            project=self.project_id,
+        )
+        return await self._continue_with_tool_result(
+            envelope=envelope,
+            context_prompt=context_prompt,
+            history=history,
+            tool_call=tool_call,
+            result=result,
+            model_choice=routing_decision.choice,
+            model_used='',
+            prior_cost=0.0,
+            executed_tool_calls=[{
+                'tool_name': tool_name,
+                'input': tool_input,
+                'result': result,
+            }],
         )
 
     async def _continue_with_tool_result(
