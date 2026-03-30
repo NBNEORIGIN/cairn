@@ -190,3 +190,37 @@ that auto-resolves service, staff, and pricing from the event record.
 capacity checking, and client creation logic. The next booking type (e.g. room hire,
 course enrolment) should follow this same pattern: new model, FK on Booking, branch
 in BookingViewSet.create().
+
+### 2026-03-30 — Phloe Marketing Site Rebuild (phloe.co.uk)
+
+**Context**: The marketing site existed under the old "Floe" branding with a light
+theme. Required a full rebuild to match the Phloe rebrand and the production product.
+
+**Decision**: Rebuilt phloe.co.uk as a single-file static site with a dark theme
+(Linear/Stripe aesthetic). No framework, no build step — index.html with all CSS
+and JS inline. Deployed on Hetzner alongside the client sites.
+
+**Architecture**:
+- `index.html` — single file, all CSS and JS inline, dark theme
+- `platform.html` — legacy file, may be removed in a future cleanup
+- Repo: `D:\nbne_business\nbne-landing` → `github.com/NBNEORIGIN/nbne-landing`
+- Server: 178.104.1.152, site root `/opt/nbne/client-sites/phloe`
+- nginx config: `/etc/nginx/sites-available/phloe.conf`
+- Cloudflare Origin cert at `/etc/ssl/cloudflare/phloe/`, Full (strict) SSL mode
+- DNS: Cloudflare A records for `@` and `www`, orange-clouded (proxied)
+
+**Deploy process**: `git push` to `NBNEORIGIN/nbne-landing` master, then SSH to server
+and `git pull` at the site root. No CI pipeline required.
+
+**Pricing and beta**:
+- Beta programme is now closed (as of 2026-03-30)
+- Production pricing: £200 one-off setup + £40/month
+- No free trial period, no beta rates for new clients
+
+**Platform decisions**:
+- Vercel and Railway are **deprecated** for all NBNE sites
+- All NBNE sites deploy via GitHub → Hetzner
+- Any legacy `vercel.json` or Railway URLs in the codebase are to be removed
+
+**Rejected**: Continuing to use Vercel or Railway. These add unnecessary third-party
+dependencies for sites that are already running on NBNE-controlled Hetzner infrastructure.
