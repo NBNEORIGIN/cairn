@@ -1,5 +1,5 @@
 # Manufacturing / Origin Designed — Cairn Agent Core Context
-# Version: 1.1
+# Version: 1.2
 
 ## What this is
 The manufacturing management system for NBNE's Origin Designed product
@@ -101,12 +101,50 @@ D2C: 28 active personalised orders. Formula-driven, handle with care.
 
 NEW PRODUCTS: 998-row pipeline with DATE, BLANK, DESIGNED, PUBLISHED.
 
-## Current state
-Application scaffolding in progress as of 2026-03-31.
+## Current state (updated 2026-04-01)
+
 Repo: https://github.com/NBNEORIGIN/manufacture
 Local: D:\manufacture
-The Excel workbook (Shipment_Stock_Sheet.xlsx) is the authoritative
-reference for domain understanding and data structure.
+Stack: Django 5.x + DRF, Next.js 14, PostgreSQL (DB: manufacture, pw: postgres123)
+Venv: D:\manufacture\.venv
+
+### Phase 0 — COMPLETE (2026-04-01)
+Django scaffolding, 7 apps, models, 5 seed import commands.
+Seeded: 2,442 products, 4,281 SKUs, 360 optimal levels, 21 materials.
+
+### Phase 1 — COMPLETE (2026-04-01)
+Make-list engine (deficit * 60d priority), production stage tracking,
+full frontend wiring. Composite blank→machine resolution.
+220 items on make list with deficit > 0.
+
+### Phase 2 — COMPLETE (2026-04-01)
+FBA shipment tracking with status workflow (planning→shipped).
+Historical import: 140 shipments, 42,854 units, 5,467 items.
+Stats endpoint with country breakdown.
+
+### Phase 3 — COMPLETE (2026-04-01)
+CSV import automation. Three parsers: FBA Inventory, Sales & Traffic,
+Restock Inventory. Auto-detection from column headers. Preview/confirm
+workflow — stock never auto-updated. Import audit trail.
+
+### Remaining phases
+Phase 4: D2C Queue (personalised orders — Gabby is primary user)
+Phase 5: Procurement (materials, suppliers — low priority, sheet works)
+Phase 6: SP-API Integration (automated report retrieval)
+Phase 7: Error Tracking & Analytics (RECORDS sheet import)
+
+### Key technical decisions
+- Direct API calls from frontend (no Next.js proxy — was unreliable)
+- API_BASE hardcoded to http://127.0.0.1:8000 in frontend/src/lib/api.ts
+- CORS allows localhost:3000
+- No auth yet (AllowAny) — internal LAN app
+- Composite blanks resolved by first word (DICK,TOM → ROLF)
+- Spreadsheet floats need int(float(v)) not int(v)
+- ASSEMBLY/SKU ASSIGNMENT have duplicate column headers — first-occurrence only
+- Channel values are messy — mapped via CHANNEL_MAP dict in import commands
+
+The Excel workbook (Shipment_Stock_Sheet.xlsx) remains the authoritative
+reference for domain understanding.
 Key Excel sheets: ORDERS, MASTER STOCK, ASSEMBLY, DIBOND PLACEMENT,
                   SUB PLACEMENTS, RECORDS, PROCUREMENT, ScratchPad2,
                   SKU ASSIGNMENT, D2C, NEW PRODUCTS
