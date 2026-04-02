@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  cairn-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      CAIRN_API_URL: ${CAIRN_API_URL:-http://cairn-api:8765}
+      CAIRN_API_KEY: ${CAIRN_API_KEY}
+      PHLOE_API_URL: ${PHLOE_API_URL:-https://phloe.co.uk}
+      PHLOE_TENANT_SLUG: ${PHLOE_TENANT_SLUG:-nbne}
+    ports:
+      - "127.0.0.1:3020:3000"
+    networks:
+      - cairn
+
+networks:
+  cairn:
+    external: true
