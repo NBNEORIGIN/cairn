@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  cairn-db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: cairn
+      POSTGRES_USER: cairn
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-cairn_secure_pw}
+    volumes:
+      - cairn-pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cairn"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  cairn-api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    restart: unless-stopped
+    depends_on:
+      cairn-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://cairn:${DB_PASSWORD:-cairn_secure_pw}@cairn-db:5432/cairn
+      CLAW_FORCE_API: "true"
+      CLAW_API_KEY: ${CLAW_API_KEY:-claw-dev-key-change-in-production}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      DEEPSEEK_ENABLED: "true"
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      CLAW_DATA_DIR: /app/data
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - cairn-data:/app/data
+
+  cairn-web:
+    image: cairn-web:latest
+    restart: unless-stopped
+    depends_on:
+      - cairn-api
+    environment:
+      CAIRN_API_URL: http://cairn-api:8765
+      CAIRN_API_KEY: ${CLAW_API_KEY:-claw-dev-key-change-in-production}
+      PHLOE_API_URL: http://host.docker.internal:8004
+      PHLOE_TENANT_SLUG: nbne
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:3020:3000"
+
+volumes:
+  cairn-pgdata:
+  cairn-data:
