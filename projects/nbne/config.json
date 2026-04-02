@@ -1,0 +1,32 @@
+{
+  "name": "NBNE Business Brain",
+  "description": "NBNE business operations — process knowledge, manufacturing, ledger, marketing. Staff-facing Q&A via cairn.nbnesigns.co.uk",
+  "project_type": "business",
+  "force_model": "api",
+
+  "permissions": [
+    "read_file",
+    "search_code",
+    "web_fetch",
+    "web_check_status"
+  ],
+
+  "model_preferences": {
+    "force_model": "api",
+    "opus_keywords": [
+      "strategy", "pricing", "margin", "investment", "hiring"
+    ]
+  },
+
+  "business_modules": {
+    "manufacture": "http://localhost:8002/api/cairn/context",
+    "ledger": "http://localhost:8001/api/cairn/context",
+    "marketing": "http://localhost:8004/api/cairn/context"
+  },
+
+  "indexing": {
+    "auto_reindex": false,
+    "exclude_paths": [],
+    "include_extensions": [".md", ".txt"]
+  }
+}
