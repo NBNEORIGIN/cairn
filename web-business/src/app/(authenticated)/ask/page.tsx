@@ -89,7 +89,7 @@ function AskPageInner() {
     const params = new URLSearchParams({
       project: 'nbne',
       session_id: sessionId.current,
-      content: text,
+      message: text,
       channel: 'web',
     })
 
