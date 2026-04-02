@@ -7,6 +7,9 @@ const PATH_TITLES: Record<string, string> = {
   '/dashboard': "Today's Priorities",
   '/ask': 'Ask',
   '/processes': 'How We Do Things',
+  '/voice': 'Voice Memos',
+  '/documents': 'Documents',
+  '/notes': 'Notes',
 }
 
 export default function HeaderWrapper() {
