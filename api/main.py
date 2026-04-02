@@ -1140,10 +1140,11 @@ async def retrieve_chat_history(
     # Normalise to MCP spec shape
     entries = [
         {
-            'query': query,
+            'query': r.get('query', '') or query,
             'decision': r.get('description', ''),
-            'rejected': '',  # not stored in current schema
+            'rejected': r.get('rejected', ''),
             'outcome': r.get('type', ''),
+            'model': r.get('model_used', ''),
             'files_changed': r.get('files', []),
             'created_at': r.get('timestamp', ''),
         }
@@ -1172,22 +1173,16 @@ async def write_memory(
     session_id = body.session_id or f'cairn_{uuid.uuid4().hex[:12]}'
 
     try:
-        # Map the spec fields to the existing schema
-        # decision_type captures the outcome; description captures the decision;
-        # reasoning captures the rejected approaches and model info
-        reasoning_parts = []
-        if body.rejected:
-            reasoning_parts.append(f'Rejected: {body.rejected}')
-        if body.model:
-            reasoning_parts.append(f'Model: {body.model}')
-        reasoning_parts.append(f'Query: {body.query}')
-
         store.record_decision(
             session_id=session_id,
             decision_type=body.outcome,
             description=body.decision,
-            reasoning='\n'.join(reasoning_parts),
+            reasoning=body.rejected,
             files_affected=body.files_changed,
+            project=body.project,
+            query=body.query,
+            rejected=body.rejected,
+            model_used=body.model,
         )
     finally:
         store.close()

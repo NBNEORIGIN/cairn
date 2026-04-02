@@ -119,6 +119,18 @@ class MemoryStore:
             self.conn.execute(
                 "ALTER TABLE sessions ADD COLUMN active_skills_json TEXT DEFAULT '[]'"
             )
+
+        # Cairn Protocol spec fields for decisions table
+        dcols = [r[1] for r in self.conn.execute("PRAGMA table_info(decisions)")]
+        if 'project' not in dcols:
+            self.conn.execute("ALTER TABLE decisions ADD COLUMN project TEXT DEFAULT ''")
+        if 'query' not in dcols:
+            self.conn.execute("ALTER TABLE decisions ADD COLUMN query TEXT DEFAULT ''")
+        if 'rejected' not in dcols:
+            self.conn.execute("ALTER TABLE decisions ADD COLUMN rejected TEXT DEFAULT ''")
+        if 'model_used' not in dcols:
+            self.conn.execute("ALTER TABLE decisions ADD COLUMN model_used TEXT DEFAULT ''")
+
         self.conn.commit()
 
     # ─── Core message storage ──────────────────────────────────────────────────
@@ -176,6 +188,10 @@ class MemoryStore:
         description: str,
         reasoning: str = '',
         files_affected: list | None = None,
+        project: str = '',
+        query: str = '',
+        rejected: str = '',
+        model_used: str = '',
     ):
         """
         Record an architectural or implementation decision.
@@ -184,11 +200,13 @@ class MemoryStore:
         self.conn.execute("""
             INSERT INTO decisions
                 (session_id, decision_type, description,
-                 reasoning, files_affected)
-            VALUES (?, ?, ?, ?, ?)
+                 reasoning, files_affected,
+                 project, query, rejected, model_used)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             session_id, decision_type, description, reasoning,
             json.dumps(files_affected or []),
+            project, query, rejected, model_used,
         ))
         self.conn.commit()
 
@@ -214,13 +232,17 @@ class MemoryStore:
         """Search past decisions by keyword — agent recall mechanism."""
         rows = self.conn.execute("""
             SELECT decision_type, description, reasoning,
-                   files_affected, timestamp
+                   files_affected, timestamp,
+                   project, query, rejected, model_used
             FROM decisions
             WHERE description LIKE ?
                OR reasoning LIKE ?
+               OR query LIKE ?
+               OR rejected LIKE ?
             ORDER BY timestamp DESC
             LIMIT 10
-        """, (f'%{query}%', f'%{query}%')).fetchall()
+        """, (f'%{query}%', f'%{query}%',
+              f'%{query}%', f'%{query}%')).fetchall()
 
         return [
             {
@@ -228,6 +250,10 @@ class MemoryStore:
                 'reasoning': r[2],
                 'files': json.loads(r[3] or '[]'),
                 'timestamp': r[4],
+                'project': r[5] if len(r) > 5 else '',
+                'query': r[6] if len(r) > 6 else '',
+                'rejected': r[7] if len(r) > 7 else '',
+                'model_used': r[8] if len(r) > 8 else '',
             }
             for r in rows
         ]
