@@ -143,6 +143,14 @@ async def lifespan(app: FastAPI):
         app.state.skill_classifier = None
         app.state.skill_classifier_ready = False
 
+    # ── Amazon Intelligence schema ─────────────────────────────────────
+    try:
+        from core.amazon_intel.db import ensure_schema as ami_ensure_schema
+        ami_ensure_schema()
+        print('[CLAW startup] Amazon Intel schema ready')
+    except Exception as ami_err:
+        print(f'[CLAW startup] Amazon Intel schema failed: {ami_err}')
+
     # ── Auto-index empty projects ───────────────────────────────────────
     skip_auto_index = os.getenv('CAIRN_SKIP_AUTO_INDEX', '').lower() in {
         '1', 'true', 'yes',
@@ -2135,3 +2143,7 @@ async def status_summary(_: bool = Depends(verify_api_key)):
 # Register WhatsApp proxy route
 from api.routes.whatsapp import router as whatsapp_router
 app.include_router(whatsapp_router)
+
+# Register Amazon Intelligence routes
+from api.routes.amazon_intel import router as ami_router
+app.include_router(ami_router)

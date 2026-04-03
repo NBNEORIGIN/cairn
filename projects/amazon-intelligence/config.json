@@ -1,7 +1,7 @@
 {
   "name": "Amazon Listing Intelligence",
   "description": "Read-only Amazon listing health pipeline — flatfile content, business report performance, ad spend analysis, cross-referenced with Manufacture margins. Weekly underperformance reports with diagnosis.",
-  "codebase_path": "D:/amazon_intelligence",
+  "codebase_path": "D:/claw",
   "project_type": "coding",
   "force_model": "api",
 
