@@ -26,16 +26,16 @@ HEADER_ALIASES = {
         'Title', 'title',
     ],
     'sessions': [
-        'Sessions - Total', 'Sessions — Total', 'Sessions',
-        'Sessions - Mobile', 'Total Sessions',
+        'Sessions - Total', 'Sessions \u2013 Total', 'Sessions \u2014 Total',
+        'Sessions', 'Total Sessions',
     ],
     'session_percentage': [
-        'Session Percentage - Total', 'Session Percentage — Total',
+        'Session Percentage - Total', 'Session percentage - Total',
         'Session Percentage', 'Session %',
     ],
     'page_views': [
-        'Page Views - Total', 'Page Views — Total', 'Page Views',
-        'Total Page Views',
+        'Page Views - Total', 'Page views - Total',
+        'Page Views', 'Total Page Views',
     ],
     'buy_box_percentage': [
         'Buy Box Percentage', 'Buy Box %', 'Featured Offer (Buy Box) Percentage',
@@ -56,13 +56,21 @@ HEADER_ALIASES = {
 }
 
 
+def _normalise_header(h: str) -> str:
+    """Normalise dashes and whitespace in header names for matching."""
+    # Replace en dash (U+2013) and em dash (U+2014) with regular dash
+    return h.strip().replace('\u2013', '-').replace('\u2014', '-').lower()
+
+
 def _build_column_map(headers: list[str]) -> dict[str, int]:
     """Map our internal field names to column indices using aliases."""
+    normalised = [_normalise_header(h) for h in headers]
     col_map = {}
     for field, aliases in HEADER_ALIASES.items():
         for alias in aliases:
-            for i, h in enumerate(headers):
-                if h.strip().lower() == alias.lower():
+            alias_norm = _normalise_header(alias)
+            for i, h in enumerate(normalised):
+                if h == alias_norm:
                     col_map[field] = i
                     break
             if field in col_map:

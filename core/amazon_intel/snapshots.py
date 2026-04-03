@@ -117,6 +117,21 @@ async def build_snapshots(marketplace: str = None) -> dict:
 
         snapshots.append(snap)
 
+    # Deduplicate by (asin, snapshot_date) — keep row with most data
+    seen = {}
+    for snap in snapshots:
+        key = (snap['asin'], snap['snapshot_date'])
+        if key not in seen:
+            seen[key] = snap
+        else:
+            existing = seen[key]
+            # Prefer the row with performance data, then more content
+            if snap.get('sessions_30d') is not None and existing.get('sessions_30d') is None:
+                seen[key] = snap
+            elif snap.get('bullet_count', 0) > existing.get('bullet_count', 0):
+                seen[key] = snap
+    snapshots = list(seen.values())
+
     # Upsert into database
     stored = _store_snapshots(snapshots)
 
@@ -240,67 +255,71 @@ def _get_sku_to_m_mapping() -> dict[str, str]:
 
 
 def _store_snapshots(snapshots: list[dict]) -> int:
-    """Upsert snapshots into ami_listing_snapshots. Returns count stored."""
-    stored = 0
+    """Upsert snapshots into ami_listing_snapshots using batch insert."""
+    from psycopg2.extras import execute_values
+
+    if not snapshots:
+        return 0
+
+    def _row(s):
+        return (
+            s.get('asin'), s.get('sku'), s.get('m_number'),
+            s.get('marketplace'), s.get('snapshot_date'),
+            s.get('title'), s.get('bullet_count', 0),
+            s.get('image_count', 0), s.get('has_description', False),
+            s.get('keyword_count', 0), s.get('your_price'),
+            s.get('fulfilment'), s.get('brand'),
+            s.get('sessions_30d'), s.get('page_views_30d'),
+            s.get('conversion_rate'), s.get('buy_box_pct'),
+            s.get('units_ordered_30d'), s.get('ordered_revenue_30d'),
+            s.get('ad_spend_30d'), s.get('ad_impressions'),
+            s.get('ad_clicks'), s.get('acos'), s.get('roas'),
+            s.get('cost_price'), s.get('gross_margin'),
+            s.get('health_score'), s.get('issues'),
+            s.get('diagnosis_codes'), s.get('recommendations'),
+            s.get('flatfile_upload_id'), s.get('bizrpt_upload_id'),
+            s.get('ad_upload_id'), s.get('data_sources'),
+        )
+
+    values = [_row(s) for s in snapshots]
+
+    sql = """INSERT INTO ami_listing_snapshots
+                 (asin, sku, m_number, marketplace, snapshot_date,
+                  title, bullet_count, image_count, has_description,
+                  keyword_count, your_price, fulfilment, brand,
+                  sessions_30d, page_views_30d, conversion_rate,
+                  buy_box_pct, units_ordered_30d, ordered_revenue_30d,
+                  ad_spend_30d, ad_impressions, ad_clicks, acos, roas,
+                  cost_price, gross_margin,
+                  health_score, issues, diagnosis_codes, recommendations,
+                  flatfile_upload_id, bizrpt_upload_id, ad_upload_id,
+                  data_sources)
+             VALUES %s
+             ON CONFLICT (asin, snapshot_date)
+             DO UPDATE SET
+                 sku = EXCLUDED.sku,
+                 m_number = EXCLUDED.m_number,
+                 title = EXCLUDED.title,
+                 bullet_count = EXCLUDED.bullet_count,
+                 image_count = EXCLUDED.image_count,
+                 has_description = EXCLUDED.has_description,
+                 keyword_count = EXCLUDED.keyword_count,
+                 your_price = EXCLUDED.your_price,
+                 sessions_30d = EXCLUDED.sessions_30d,
+                 conversion_rate = EXCLUDED.conversion_rate,
+                 buy_box_pct = EXCLUDED.buy_box_pct,
+                 health_score = EXCLUDED.health_score,
+                 issues = EXCLUDED.issues,
+                 diagnosis_codes = EXCLUDED.diagnosis_codes,
+                 recommendations = EXCLUDED.recommendations,
+                 data_sources = EXCLUDED.data_sources"""
+
     with get_conn() as conn:
         with conn.cursor() as cur:
-            for s in snapshots:
-                try:
-                    cur.execute("SAVEPOINT snap_save")
-                    cur.execute(
-                        """INSERT INTO ami_listing_snapshots
-                               (asin, sku, m_number, marketplace, snapshot_date,
-                                title, bullet_count, image_count, has_description,
-                                keyword_count, your_price, fulfilment, brand,
-                                sessions_30d, page_views_30d, conversion_rate,
-                                buy_box_pct, units_ordered_30d, ordered_revenue_30d,
-                                ad_spend_30d, ad_impressions, ad_clicks, acos, roas,
-                                cost_price, gross_margin,
-                                health_score, issues, diagnosis_codes, recommendations,
-                                flatfile_upload_id, bizrpt_upload_id, ad_upload_id,
-                                data_sources)
-                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                           ON CONFLICT (asin, snapshot_date)
-                           DO UPDATE SET
-                               sku = EXCLUDED.sku,
-                               m_number = EXCLUDED.m_number,
-                               title = EXCLUDED.title,
-                               bullet_count = EXCLUDED.bullet_count,
-                               image_count = EXCLUDED.image_count,
-                               has_description = EXCLUDED.has_description,
-                               keyword_count = EXCLUDED.keyword_count,
-                               your_price = EXCLUDED.your_price,
-                               sessions_30d = EXCLUDED.sessions_30d,
-                               conversion_rate = EXCLUDED.conversion_rate,
-                               buy_box_pct = EXCLUDED.buy_box_pct,
-                               health_score = EXCLUDED.health_score,
-                               issues = EXCLUDED.issues,
-                               diagnosis_codes = EXCLUDED.diagnosis_codes,
-                               recommendations = EXCLUDED.recommendations,
-                               data_sources = EXCLUDED.data_sources""",
-                        (s.get('asin'), s.get('sku'), s.get('m_number'),
-                         s.get('marketplace'), s.get('snapshot_date'),
-                         s.get('title'), s.get('bullet_count', 0),
-                         s.get('image_count', 0), s.get('has_description', False),
-                         s.get('keyword_count', 0), s.get('your_price'),
-                         s.get('fulfilment'), s.get('brand'),
-                         s.get('sessions_30d'), s.get('page_views_30d'),
-                         s.get('conversion_rate'), s.get('buy_box_pct'),
-                         s.get('units_ordered_30d'), s.get('ordered_revenue_30d'),
-                         s.get('ad_spend_30d'), s.get('ad_impressions'),
-                         s.get('ad_clicks'), s.get('acos'), s.get('roas'),
-                         s.get('cost_price'), s.get('gross_margin'),
-                         s.get('health_score'), s.get('issues'),
-                         s.get('diagnosis_codes'), s.get('recommendations'),
-                         s.get('flatfile_upload_id'), s.get('bizrpt_upload_id'),
-                         s.get('ad_upload_id'), s.get('data_sources')),
-                    )
-                    stored += 1
-                except Exception:
-                    cur.execute("ROLLBACK TO SAVEPOINT snap_save")
-
+            execute_values(cur, sql, values, page_size=500)
             conn.commit()
-    return stored
+
+    return len(values)
 
 
 def query_snapshots(*, marketplace: str = None, min_score: float = None,

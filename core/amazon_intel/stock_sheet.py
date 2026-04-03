@@ -17,6 +17,7 @@ Columns:
 """
 import csv
 import os
+import re
 from pathlib import Path
 from core.amazon_intel.db import get_conn
 
@@ -30,15 +31,29 @@ STOCK_SHEET_PATH = os.getenv(
 COUNTRY_MAP = {
     'uk': 'UK', 'usa': 'US', 'us': 'US', 'ca': 'CA', 'canada': 'CA',
     'au': 'AU', 'aus': 'AU', 'de': 'DE', 'germany': 'DE',
-    'fr': 'FR', 'fr crafts': 'FR', 'ebay': 'EBAY', 'etsy': 'ETSY',
+    'fr': 'FR', 'fr crafts': 'FR', 'fr designed': 'FR',
+    'fr crafts - duplicate designed': 'FR',
+    'fr designed - duplicate crafts': 'FR',
+    'it': 'IT', 'it designed': 'IT', 'es': 'ES', 'nl': 'NL',
+    'ebay': 'EBAY', 'etsy': 'ETSY', 'shopify': 'SHOPIFY',
     'amazon': 'UK',  # bare "amazon" means UK marketplace
+    'old listing': 'INACTIVE', 'reuse': 'INACTIVE', 'stock': 'INACTIVE',
 }
 
 
 def _normalise_country(raw: str) -> str:
     if not raw:
         return ''
-    return COUNTRY_MAP.get(raw.strip().lower(), raw.strip().upper())
+    cleaned = raw.strip().lower()
+    if cleaned in COUNTRY_MAP:
+        return COUNTRY_MAP[cleaned]
+    # Handle concatenated values like "ETSYOD001198"
+    if cleaned.startswith('etsy'):
+        return 'ETSY'
+    # Handle note-like values (e.g. "M0781 IS FREE TO USE")
+    if cleaned.startswith('m0') or cleaned.startswith('m1'):
+        return 'INACTIVE'
+    return raw.strip().upper()[:50]
 
 
 def _parse_stock_sheet(csv_path: str) -> list[dict]:
@@ -78,7 +93,9 @@ def _parse_stock_sheet(csv_path: str) -> list[dict]:
         description = (cols[4] or '').strip()
         blank_name = (cols[5] or '').strip()
         is_personalised = bool((cols[6] or '').strip())
-        asin = (cols[7] or '').strip() if len(cols) > 7 else ''
+        asin_raw = (cols[7] or '').strip() if len(cols) > 7 else ''
+        # Only keep values that look like real ASINs (B followed by 9 alphanumeric)
+        asin = asin_raw if re.match(r'^B[0-9A-Z]{9}$', asin_raw) else ''
 
         rows.append({
             'sku': sku,

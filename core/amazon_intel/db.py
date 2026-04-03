@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS ami_sku_mapping (
     sku             VARCHAR(100) NOT NULL,
     m_number        VARCHAR(20) NOT NULL,
     new_sku         VARCHAR(100),
-    country         VARCHAR(10),
+    country         VARCHAR(50),
     description     VARCHAR(500),
     blank_name      VARCHAR(100),
     is_personalised BOOLEAN DEFAULT FALSE,

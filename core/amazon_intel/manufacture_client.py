@@ -52,6 +52,16 @@ async def get_stock_level(m_number: str) -> Optional[dict]:
         return None
 
 
+async def is_available() -> bool:
+    """Quick connectivity check — returns False if Manufacture API is unreachable."""
+    try:
+        async with httpx.AsyncClient(timeout=2) as client:
+            resp = await client.get(f'{MANUFACTURE_API_URL}/api/products/', params={'limit': 1})
+            return resp.status_code == 200
+    except (httpx.ConnectError, httpx.TimeoutException):
+        return False
+
+
 async def batch_product_data(m_numbers: list[str]) -> dict[str, dict]:
     """
     Fetch product + stock data for many M-numbers.
@@ -59,6 +69,10 @@ async def batch_product_data(m_numbers: list[str]) -> dict[str, dict]:
     Gracefully handles Manufacture being offline (returns empty dict).
     """
     import asyncio
+
+    # Quick connectivity check before attempting batch
+    if not await is_available():
+        return {}
 
     result = {}
     sem = asyncio.Semaphore(5)  # limit concurrent requests
