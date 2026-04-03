@@ -114,33 +114,59 @@ class CodeIndexer:
 
     def check_embedding_model(self) -> bool:
         """
-        Verify the embedding model is available by embedding a short test string.
-        Returns True if successful, False otherwise.
+        Verify an embedding model is available by embedding a short test string.
+        Tries Ollama first, falls back to OpenAI if OPENAI_API_KEY is set.
+        Returns True if either works.
         """
+        try:
+            self.embed('test')
+            return True
+        except Exception:
+            return False
+
+    def _use_openai_embeddings(self) -> bool:
+        """True if we should use OpenAI embeddings instead of Ollama."""
+        if os.getenv('CAIRN_EMBED_PROVIDER', '').lower() == 'openai':
+            return True
+        if os.getenv('CAIRN_EMBED_PROVIDER', '').lower() == 'ollama':
+            return False
+        # Auto-detect: try Ollama first, fall back to OpenAI
         try:
             import httpx
             response = httpx.post(
                 f"{os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')}"
                 f"/api/embeddings",
                 json={'model': 'nomic-embed-text', 'prompt': 'test'},
-                timeout=10,
+                timeout=5,
             )
             response.raise_for_status()
-            embedding = response.json().get('embedding', [])
-            return len(embedding) > 0
+            if len(response.json().get('embedding', [])) > 0:
+                return False  # Ollama works, use it
         except Exception:
-            return False
+            pass
+        return bool(os.getenv('OPENAI_API_KEY'))
 
     def embed(self, text: str) -> list[float]:
         """
-        Generate embedding via nomic-embed-text through Ollama.
-        nomic-embed-text is designed for code and documents.
-        768 dimensions. Runs on CPU — no GPU competition with inference.
-        Truncates to MAX_CHUNK_CHARS as a safety net against 500 errors.
+        Generate 768-dim embedding vector.
+        Uses Ollama nomic-embed-text by default. Falls back to OpenAI
+        text-embedding-3-small (truncated to 768 dims) if Ollama is
+        unavailable and OPENAI_API_KEY is set.
+
+        Set CAIRN_EMBED_PROVIDER=openai to force OpenAI (faster for bulk indexing).
+        Set CAIRN_EMBED_PROVIDER=ollama to force Ollama (free, local).
         """
         import httpx
         if len(text) > MAX_CHUNK_CHARS:
             text = text[:MAX_CHUNK_CHARS]
+
+        if self._use_openai_embeddings():
+            return self._embed_openai(text)
+        return self._embed_ollama(text)
+
+    def _embed_ollama(self, text: str) -> list[float]:
+        """Embed via Ollama nomic-embed-text (768 dims, local, free)."""
+        import httpx
         response = httpx.post(
             f"{os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')}"
             f"/api/embeddings",
@@ -149,6 +175,25 @@ class CodeIndexer:
         )
         response.raise_for_status()
         return response.json()['embedding']
+
+    def _embed_openai(self, text: str) -> list[float]:
+        """Embed via OpenAI text-embedding-3-small (768 dims, fast, ~£0.01/1M tokens)."""
+        import httpx
+        api_key = os.getenv('OPENAI_API_KEY', '')
+        if not api_key:
+            raise IndexerError("OPENAI_API_KEY not set — cannot use OpenAI embeddings")
+        response = httpx.post(
+            "https://api.openai.com/v1/embeddings",
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={
+                "model": "text-embedding-3-small",
+                "input": text,
+                "dimensions": 768,
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        return response.json()['data'][0]['embedding']
 
     def _reconnect(self):
         """Reconnect to the database if connection was lost."""
