@@ -178,22 +178,43 @@ class CodeIndexer:
 
     def _embed_openai(self, text: str) -> list[float]:
         """Embed via OpenAI text-embedding-3-small (768 dims, fast, ~£0.01/1M tokens)."""
+        return self._embed_openai_batch([text])[0]
+
+    def _embed_openai_batch(self, texts: list[str]) -> list[list[float]]:
+        """Batch embed via OpenAI — up to 2048 inputs per call."""
         import httpx
         api_key = os.getenv('OPENAI_API_KEY', '')
         if not api_key:
             raise IndexerError("OPENAI_API_KEY not set — cannot use OpenAI embeddings")
+        # Truncate each text
+        truncated = [t[:MAX_CHUNK_CHARS] for t in texts]
         response = httpx.post(
             "https://api.openai.com/v1/embeddings",
             headers={"Authorization": f"Bearer {api_key}"},
             json={
                 "model": "text-embedding-3-small",
-                "input": text,
+                "input": truncated,
                 "dimensions": 768,
             },
-            timeout=30,
+            timeout=60,
         )
         response.raise_for_status()
-        return response.json()['data'][0]['embedding']
+        data = response.json()['data']
+        # OpenAI returns results sorted by index
+        data.sort(key=lambda x: x['index'])
+        return [d['embedding'] for d in data]
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        """Batch embed — uses OpenAI batch API if available, else falls back to sequential."""
+        if self._use_openai_embeddings():
+            results = []
+            # Process in batches of 100 to stay well within limits
+            for i in range(0, len(texts), 100):
+                batch = texts[i:i + 100]
+                results.extend(self._embed_openai_batch(batch))
+            return results
+        # Ollama doesn't support batch — fall back to sequential
+        return [self._embed_ollama(t[:MAX_CHUNK_CHARS]) for t in texts]
 
     def _reconnect(self):
         """Reconnect to the database if connection was lost."""
@@ -321,17 +342,28 @@ class CodeIndexer:
                 self._delete_file_chunks(rel_path)
 
                 chunks = list(self._chunk_file(file_path, content))
-                file_ok = True
-                for chunk in chunks:
+                if not chunks:
+                    skipped += 1
+                    continue
+
+                # Batch embed all chunks for this file at once
+                try:
+                    embeddings = self.embed_batch(
+                        [c['content'] for c in chunks]
+                    )
+                except Exception as embed_err:
+                    print(
+                        f"  WARN embed failed for {rel_path}: {embed_err}",
+                        flush=True,
+                    )
                     try:
-                        embedding = self.embed(chunk['content'])
-                    except Exception as embed_err:
-                        print(
-                            f"  WARN embed timeout for {rel_path}: {embed_err}",
-                            flush=True,
-                        )
-                        file_ok = False
-                        break
+                        self.conn.rollback()
+                    except Exception:
+                        self._reconnect()
+                    errors += 1
+                    continue
+
+                for chunk, embedding in zip(chunks, embeddings):
                     self._store_chunk(
                         file_path=rel_path,
                         content=chunk['content'],
@@ -341,14 +373,6 @@ class CodeIndexer:
                         embedding=embedding,
                         last_modified=file_path.stat().st_mtime,
                     )
-
-                if not file_ok:
-                    try:
-                        self.conn.rollback()
-                    except Exception:
-                        self._reconnect()
-                    errors += 1
-                    continue
 
                 # Commit after each file — preserves progress if conn drops
                 self.conn.commit()
