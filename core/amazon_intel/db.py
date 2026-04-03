@@ -35,7 +35,7 @@ _SQL_SCHEMA = """
 CREATE TABLE IF NOT EXISTS ami_sku_mapping (
     id              SERIAL PRIMARY KEY,
     sku             VARCHAR(100) NOT NULL,
-    m_number        VARCHAR(20) NOT NULL,
+    m_number        VARCHAR(100) NOT NULL,
     new_sku         VARCHAR(100),
     country         VARCHAR(50),
     description     VARCHAR(500),
@@ -158,7 +158,7 @@ CREATE TABLE IF NOT EXISTS ami_listing_snapshots (
     id                  SERIAL PRIMARY KEY,
     asin                VARCHAR(100) NOT NULL,
     sku                 VARCHAR(100),
-    m_number            VARCHAR(20),
+    m_number            VARCHAR(100),
     marketplace         VARCHAR(10),
     snapshot_date       DATE NOT NULL,
     -- Content (from flatfile)

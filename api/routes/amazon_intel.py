@@ -78,6 +78,16 @@ async def upload_flatfile(file: UploadFile = File(...),
     return result
 
 
+@router.post("/upload/all-listings")
+async def upload_all_listings(file: UploadFile = File(...),
+                               marketplace: Optional[str] = Query(None)):
+    """Upload an Amazon All Listings Report (.txt TSV) to enrich SKU→ASIN mapping."""
+    from core.amazon_intel.parsers.all_listings import parse_and_store_all_listings
+    content = await file.read()
+    result = parse_and_store_all_listings(content, file.filename, marketplace)
+    return result
+
+
 @router.post("/upload/business-report")
 async def upload_business_report(file: UploadFile = File(...),
                                   marketplace: Optional[str] = Query(None)):
