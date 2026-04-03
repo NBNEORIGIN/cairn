@@ -109,7 +109,8 @@ def _extract_asin_from_ad_group(ad_group_name: str) -> str | None:
     """
     import re
     # ASIN pattern: B followed by 9 alphanumeric chars
-    match = re.search(r'\b(B[0-9A-Z]{9})\b', ad_group_name or '')
+    # Can't use \b because underscores in campaign names are word chars
+    match = re.search(r'(?:^|[^A-Z0-9])(B[0-9A-Z]{9})(?:[^A-Z0-9]|$)', ad_group_name or '')
     if match:
         return match.group(1)
     return None
@@ -123,7 +124,9 @@ def _read_file_content(content: bytes, filename: str) -> tuple[list[str], list[l
             tmp.write(content)
             tmp_path = tmp.name
         try:
-            wb = load_workbook(tmp_path, read_only=True, data_only=True)
+            import warnings
+            warnings.filterwarnings('ignore', category=UserWarning)
+            wb = load_workbook(tmp_path, data_only=True)
             ws = wb.active
             all_rows = []
             for row in ws.iter_rows(values_only=True):
@@ -169,8 +172,11 @@ def parse_advertising_report(content: bytes, filename: str) -> list[dict]:
 
         asin = _get('asin') if report_type == 'advertised_product' else None
         ad_group = _get('ad_group_name')
+        campaign = _get('campaign_name')
 
-        # For search term reports, try to extract ASIN from ad group name
+        # Extract ASIN from campaign or ad group name
+        if not asin and campaign:
+            asin = _extract_asin_from_ad_group(campaign)
         if not asin and ad_group:
             asin = _extract_asin_from_ad_group(ad_group)
 
