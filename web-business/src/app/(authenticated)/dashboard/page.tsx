@@ -94,6 +94,7 @@ function extractKPIs(data: ContextResponse) {
   // Finance / Ledger
   const cashBalance = dig(data.ledger?.data, 'cash_position', 'current_balance') as number | undefined
   const revenueMtd = dig(data.ledger?.data, 'revenue', 'mtd') as number | undefined
+  const revenueYtd = dig(data.ledger?.data, 'revenue', 'ytd') as number | undefined
 
   // Marketing / CRM
   const pipelineValue = dig(data.marketing?.data, 'crm', 'pipeline_value') as number | undefined
@@ -115,7 +116,7 @@ function extractKPIs(data: ContextResponse) {
   const priorityItems = makeList.filter((i) => ((i.priority_score as number) ?? 0) > 0.8)
 
   return {
-    cashBalance, revenueMtd, pipelineValue,
+    cashBalance, revenueMtd, revenueYtd, pipelineValue,
     amiCritical, amiAttention, amiTotal, imagesNeeded, bulletsNeeded, amiMarginAlerts,
     stockAlerts, priorityItems,
   }
@@ -223,7 +224,11 @@ export default function DashboardPage() {
       <section>
         <div className="grid grid-cols-2 gap-3 md:gap-4 md:grid-cols-4">
           <MetricTile label="Cash Position" value={fmt_currency(kpis?.cashBalance)} sub="Current balance" />
-          <MetricTile label="Revenue MTD" value={fmt_currency(kpis?.revenueMtd)} sub="Month to date" />
+          <MetricTile
+            label="Revenue"
+            value={fmt_currency(kpis?.revenueMtd || kpis?.revenueYtd)}
+            sub={kpis?.revenueMtd ? 'Month to date' : 'Year to date'}
+          />
           <MetricTile
             label="Amazon Listings"
             value={fmt_number(kpis?.amiTotal || undefined)}

@@ -22,8 +22,8 @@ function getModules(): ModuleSpec[] {
     { key: 'amazon', name: 'Amazon Intelligence', url: `${cairn}/ami/cairn/context` },
     // Manufacturing — standalone module (when deployed)
     { key: 'manufacture', name: 'Manufacturing', url: 'http://host.docker.internal:8015/api/cairn/context' },
-    // Ledger — standalone module (when deployed)
-    { key: 'ledger', name: 'Finance', url: 'http://host.docker.internal:8001/api/cairn/context' },
+    // Ledger — live on Hetzner port 8016
+    { key: 'ledger', name: 'Finance', url: 'http://host.docker.internal:8016/api/cairn/context' },
     // CRM / Marketing — Phloe NBNE tenant (when context endpoint built)
     { key: 'marketing', name: 'Customers', url: 'http://host.docker.internal:8004/api/cairn/context' },
   ]
