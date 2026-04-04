@@ -296,8 +296,8 @@ TOOL_SCHEMAS: dict[str, dict] = {
             },
             'limit': {
                 'type': 'integer',
-                'description': 'Max rows to return (default 100)',
-                'default': 100,
+                'description': 'Max rows to return (default 50)',
+                'default': 50,
             },
         },
         'required': ['sql'],

@@ -97,7 +97,7 @@ def _validate_query(sql: str) -> str | None:
     return None
 
 
-def _query_amazon_intel(project_root: str, sql: str, limit: int = 100, **kwargs) -> str:
+def _query_amazon_intel(project_root: str, sql: str, limit: int = 50, **kwargs) -> str:
     """Execute a read-only SQL query against the Amazon Intelligence tables."""
     error = _validate_query(sql)
     if error:
