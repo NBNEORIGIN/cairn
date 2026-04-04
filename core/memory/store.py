@@ -119,6 +119,8 @@ class MemoryStore:
             self.conn.execute(
                 "ALTER TABLE sessions ADD COLUMN active_skills_json TEXT DEFAULT '[]'"
             )
+        if 'title' not in cols:
+            self.conn.execute("ALTER TABLE sessions ADD COLUMN title TEXT")
 
         # Cairn Protocol spec fields for decisions table
         dcols = [r[1] for r in self.conn.execute("PRAGMA table_info(decisions)")]
@@ -544,35 +546,38 @@ class MemoryStore:
         If subproject_id provided, scope to that subproject only.
         Includes archived sessions marked with archived=True.
         """
+        # Active sessions query — includes title column
+        _active_sql = """
+            SELECT c.session_id,
+                   MIN(c.timestamp) AS started_at,
+                   MAX(c.timestamp) AS last_message_at,
+                   COUNT(*) AS message_count,
+                   s.subproject_id,
+                   0 AS archived,
+                   (
+                       SELECT content
+                       FROM conversations c2
+                       WHERE c2.session_id = c.session_id
+                         AND c2.role = 'user'
+                       ORDER BY c2.id ASC
+                       LIMIT 1
+                   ) AS first_user_message,
+                   (
+                       SELECT content
+                       FROM conversations c3
+                       WHERE c3.session_id = c.session_id
+                       ORDER BY c3.id DESC
+                       LIMIT 1
+                   ) AS last_message_preview,
+                   s.title
+            FROM conversations c
+            INNER JOIN sessions s ON c.session_id = s.session_id
+        """
         if subproject_id:
-            active_rows = self.conn.execute("""
-                SELECT c.session_id,
-                       MIN(c.timestamp) AS started_at,
-                       MAX(c.timestamp) AS last_message_at,
-                       COUNT(*) AS message_count,
-                       s.subproject_id,
-                       0 AS archived,
-                       (
-                           SELECT content
-                           FROM conversations c2
-                           WHERE c2.session_id = c.session_id
-                             AND c2.role = 'user'
-                           ORDER BY c2.id ASC
-                           LIMIT 1
-                       ) AS first_user_message,
-                       (
-                           SELECT content
-                           FROM conversations c3
-                           WHERE c3.session_id = c.session_id
-                           ORDER BY c3.id DESC
-                           LIMIT 1
-                       ) AS last_message_preview
-                FROM conversations c
-                INNER JOIN sessions s ON c.session_id = s.session_id
-                WHERE s.project_id = ? AND s.subproject_id = ?
-                GROUP BY c.session_id
-            """, (project_id, subproject_id)).fetchall()
-
+            active_rows = self.conn.execute(
+                _active_sql + " WHERE s.project_id = ? AND s.subproject_id = ? GROUP BY c.session_id",
+                (project_id, subproject_id),
+            ).fetchall()
             archived_rows = self.conn.execute("""
                 SELECT session_id, started_at, last_message_at,
                        message_count, subproject_id, 1, summary, raw_messages
@@ -580,34 +585,10 @@ class MemoryStore:
                 WHERE project_id = ? AND subproject_id = ?
             """, (project_id, subproject_id)).fetchall()
         else:
-            active_rows = self.conn.execute("""
-                SELECT c.session_id,
-                       MIN(c.timestamp) AS started_at,
-                       MAX(c.timestamp) AS last_message_at,
-                       COUNT(*) AS message_count,
-                       s.subproject_id,
-                       0 AS archived,
-                       (
-                           SELECT content
-                           FROM conversations c2
-                           WHERE c2.session_id = c.session_id
-                             AND c2.role = 'user'
-                           ORDER BY c2.id ASC
-                           LIMIT 1
-                       ) AS first_user_message,
-                       (
-                           SELECT content
-                           FROM conversations c3
-                           WHERE c3.session_id = c.session_id
-                           ORDER BY c3.id DESC
-                           LIMIT 1
-                       ) AS last_message_preview
-                FROM conversations c
-                INNER JOIN sessions s ON c.session_id = s.session_id
-                WHERE s.project_id = ?
-                GROUP BY c.session_id
-            """, (project_id,)).fetchall()
-
+            active_rows = self.conn.execute(
+                _active_sql + " WHERE s.project_id = ? GROUP BY c.session_id",
+                (project_id,),
+            ).fetchall()
             archived_rows = self.conn.execute("""
                 SELECT session_id, started_at, last_message_at,
                        message_count, subproject_id, 1, summary, raw_messages
@@ -616,7 +597,8 @@ class MemoryStore:
             """, (project_id,)).fetchall()
 
         def _row_to_dict(r) -> dict:
-            if bool(r[5]):
+            is_archived = bool(r[5])
+            if is_archived:
                 summary = r[6] or ''
                 raw_messages = json.loads(r[7] or '[]')
                 first_user = next(
@@ -624,9 +606,13 @@ class MemoryStore:
                     '',
                 )
                 last_preview = raw_messages[-1].get('content', '') if raw_messages else summary
+                explicit_title = None
             else:
                 first_user = r[6] or ''
                 last_preview = r[7] or ''
+                explicit_title = r[8] if len(r) > 8 else None
+
+            derived_title = self._compact_session_text(first_user)
 
             return {
                 'session_id': r[0],
@@ -634,11 +620,11 @@ class MemoryStore:
                 'last_message_at': r[2],
                 'message_count': r[3],
                 'subproject_id': r[4],
-                'archived': bool(r[5]),
-                'title': self._compact_session_text(first_user),
+                'archived': is_archived,
+                'title': explicit_title or derived_title,
                 'preview': self._compact_session_text(
                     last_preview,
-                    fallback=self._compact_session_text(first_user),
+                    fallback=derived_title,
                     max_len=96,
                 ),
             }
@@ -717,6 +703,47 @@ class MemoryStore:
             }
 
         return None
+
+    # ─── Session mutations ─────────────────────────────────────────────────────
+
+    def update_session(
+        self,
+        session_id: str,
+        title: str | None = None,
+        subproject_id: str | None = ...,
+    ) -> bool:
+        """Update session metadata. Only non-sentinel fields are changed."""
+        updates = []
+        params = []
+        if title is not None:
+            updates.append("title = ?")
+            params.append(title)
+        if subproject_id is not ...:
+            updates.append("subproject_id = ?")
+            params.append(subproject_id)
+        if not updates:
+            return False
+        params.append(session_id)
+        result = self.conn.execute(
+            f"UPDATE sessions SET {', '.join(updates)} WHERE session_id = ?",
+            params,
+        )
+        self.conn.commit()
+        return result.rowcount > 0
+
+    def delete_session(self, session_id: str) -> bool:
+        """Hard delete a session and its messages from both active and archived tables."""
+        self.conn.execute(
+            "DELETE FROM conversations WHERE session_id = ?", (session_id,)
+        )
+        r1 = self.conn.execute(
+            "DELETE FROM sessions WHERE session_id = ?", (session_id,)
+        )
+        r2 = self.conn.execute(
+            "DELETE FROM archived_sessions WHERE session_id = ?", (session_id,)
+        )
+        self.conn.commit()
+        return (r1.rowcount + r2.rowcount) > 0
 
     # ─── Token tracking and archiving ─────────────────────────────────────────
 

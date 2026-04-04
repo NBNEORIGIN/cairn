@@ -1,7 +1,9 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback, Suspense } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
+import ChatHistorySidebar from '@/components/chat/ChatHistorySidebar'
+import type { SessionMessage } from '@/types/chat'
 
 interface Message {
   id: string
@@ -70,14 +72,13 @@ function renderMarkdown(text: string): string {
       continue
     }
 
-    // Table: detect line starting with | and next line contains |---|
+    // Table
     if (line.trim().startsWith('|')) {
       const tableLines: string[] = []
       while (i < lines.length && lines[i].trim().startsWith('|')) {
         tableLines.push(lines[i])
         i++
       }
-      // Find separator row
       const sepIdx = tableLines.findIndex((l) => /^\|[\s\-:|]+\|/.test(l))
       if (sepIdx === 1 && tableLines.length >= 2) {
         const headerCells = splitTableRow(tableLines[0])
@@ -101,7 +102,6 @@ function renderMarkdown(text: string): string {
           `<div class="overflow-x-auto my-3"><table class="w-full border-collapse text-sm"><thead><tr>${headerHtml}</tr></thead><tbody>${bodyHtml}</tbody></table></div>`
         )
       } else {
-        // Not a valid table — just render as lines
         tableLines.forEach((tl) => output.push(`<p>${inlineMarkdown(tl)}</p>`))
       }
       continue
@@ -162,9 +162,7 @@ function inlineMarkdown(text: string): string {
 
 function AssistantBubble({ content, isError }: { content: string; isError?: boolean }) {
   if (isError) {
-    return (
-      <p className="text-sm text-red-600">{content}</p>
-    )
+    return <p className="text-sm text-red-600">{content}</p>
   }
   return (
     <div
@@ -182,20 +180,14 @@ function generateSessionId() {
 
 // ---- Mic button --------------------------------------------------------------
 
-function MicButton({
-  voiceState,
-  onToggle,
-}: {
-  voiceState: VoiceState
-  onToggle: () => void
-}) {
+function MicButton({ voiceState, onToggle }: { voiceState: VoiceState; onToggle: () => void }) {
   const isRecording = voiceState === 'recording'
   const isTranscribing = voiceState === 'transcribing'
   const isError = voiceState === 'error'
 
   let label = 'Start voice input'
   if (isRecording) label = 'Stop recording'
-  if (isTranscribing) label = 'Transcribing…'
+  if (isTranscribing) label = 'Transcribing\u2026'
   if (isError) label = 'Microphone access denied'
 
   return (
@@ -217,13 +209,11 @@ function MicButton({
       }
     >
       {isTranscribing ? (
-        /* Spinner */
         <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
         </svg>
       ) : (
-        /* Mic icon */
         <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
           <path d="M12 1a4 4 0 00-4 4v6a4 4 0 008 0V5a4 4 0 00-4-4zm-1 18.93V21h-2v2h6v-2h-2v-1.07A7.003 7.003 0 0019 13h-2a5 5 0 01-10 0H5a7.003 7.003 0 006 6.93z" />
         </svg>
@@ -236,7 +226,9 @@ function MicButton({
 
 function AskPageInner() {
   const searchParams = useSearchParams()
+  const router = useRouter()
   const prefill = searchParams.get('q') ?? ''
+  const urlSessionId = searchParams.get('s')
 
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState(prefill)
@@ -245,14 +237,72 @@ function AskPageInner() {
   const [voiceState, setVoiceState] = useState<VoiceState>('idle')
   const [speaking, setSpeaking] = useState<string | null>(null)
   const [voiceMode, setVoiceMode] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [sessionId, setSessionId] = useState<string>(
+    urlSessionId || generateSessionId()
+  )
+  const [loadingSession, setLoadingSession] = useState(false)
+
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const pendingAutoSpeakRef = useRef<string | null>(null)
-
-  const sessionId = useRef<string>(generateSessionId())
   const bottomRef = useRef<HTMLDivElement>(null)
   const esRef = useRef<EventSource | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
+  const isNewSession = useRef(!urlSessionId)
+
+  // Load existing session from URL param
+  useEffect(() => {
+    if (urlSessionId && urlSessionId !== sessionId) {
+      setSessionId(urlSessionId)
+      loadSession(urlSessionId)
+    }
+  }, [urlSessionId])
+
+  async function loadSession(sid: string) {
+    setLoadingSession(true)
+    try {
+      const res = await fetch(`/api/chat/sessions/${sid}`)
+      if (res.ok) {
+        const data = await res.json()
+        const msgs: Message[] = (data.messages ?? [])
+          .filter((m: SessionMessage) => m.role === 'user' || m.role === 'assistant')
+          .map((m: SessionMessage, i: number) => ({
+            id: `loaded-${i}`,
+            role: m.role as 'user' | 'assistant',
+            content: m.content,
+          }))
+        setMessages(msgs)
+        isNewSession.current = false
+      }
+    } catch {
+      // Session not found — start fresh
+    } finally {
+      setLoadingSession(false)
+    }
+  }
+
+  function handleSelectSession(sid: string) {
+    if (sid === sessionId) return
+    // Close any active stream
+    if (esRef.current) { esRef.current.close(); esRef.current = null }
+    setSending(false)
+    setSessionId(sid)
+    setMessages([])
+    isNewSession.current = false
+    router.replace(`/ask?s=${sid}`, { scroll: false })
+    loadSession(sid)
+  }
+
+  function handleNewChat() {
+    if (esRef.current) { esRef.current.close(); esRef.current = null }
+    setSending(false)
+    const newId = generateSessionId()
+    setSessionId(newId)
+    setMessages([])
+    isNewSession.current = true
+    router.replace('/ask', { scroll: false })
+  }
 
   const saveToMemory = useCallback(async (msgId: string) => {
     const idx = messages.findIndex((m) => m.id === msgId)
@@ -287,15 +337,12 @@ function AskPageInner() {
     const msg = messages.find((m) => m.id === msgId)
     if (!msg || !msg.content) return
 
-    // If already speaking this message, stop it
     if (speaking === msgId && audioRef.current) {
       audioRef.current.pause()
       audioRef.current = null
       setSpeaking(null)
       return
     }
-
-    // Stop any current playback
     if (audioRef.current) {
       audioRef.current.pause()
       audioRef.current = null
@@ -303,7 +350,6 @@ function AskPageInner() {
 
     setSpeaking(msgId)
     try {
-      // Strip markdown for cleaner speech
       const plainText = msg.content
         .replace(/\*\*(.*?)\*\*/g, '$1')
         .replace(/\*(.*?)\*/g, '$1')
@@ -319,26 +365,18 @@ function AskPageInner() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: plainText }),
       })
-      if (!res.ok) {
-        setSpeaking(null)
-        return
-      }
+      if (!res.ok) { setSpeaking(null); return }
       const audioBlob = await res.blob()
       const url = URL.createObjectURL(audioBlob)
       const audio = new Audio(url)
       audioRef.current = audio
-      audio.onended = () => {
-        setSpeaking(null)
-        audioRef.current = null
-        URL.revokeObjectURL(url)
-      }
+      audio.onended = () => { setSpeaking(null); audioRef.current = null; URL.revokeObjectURL(url) }
       audio.play()
     } catch {
       setSpeaking(null)
     }
   }, [messages, speaking])
 
-  // Auto-scroll to bottom whenever messages change
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
@@ -347,34 +385,27 @@ function AskPageInner() {
     const text = (overrideText ?? input).trim()
     if (!text || sending) return
 
-    const userMsg: Message = {
-      id: `u-${Date.now()}`,
-      role: 'user',
-      content: text,
-    }
+    const userMsg: Message = { id: `u-${Date.now()}`, role: 'user', content: text }
     setMessages((prev) => [...prev, userMsg])
     setInput('')
     setSending(true)
 
-    // Close any existing EventSource
-    if (esRef.current) {
-      esRef.current.close()
-      esRef.current = null
-    }
+    if (esRef.current) { esRef.current.close(); esRef.current = null }
 
-    // Create placeholder assistant message
     const assistantId = `a-${Date.now()}`
     setMessages((prev) => [...prev, { id: assistantId, role: 'assistant', content: '' }])
 
-    // If voice mode is active, auto-speak this response when it completes
-    if (voiceMode) {
-      pendingAutoSpeakRef.current = assistantId
+    if (voiceMode) pendingAutoSpeakRef.current = assistantId
+
+    // Update URL on first message of a new session
+    if (isNewSession.current) {
+      isNewSession.current = false
+      router.replace(`/ask?s=${sessionId}`, { scroll: false })
     }
 
-    // Build SSE URL
     const params = new URLSearchParams({
       project: 'nbne',
-      session_id: sessionId.current,
+      session_id: sessionId,
       message: text,
       channel: 'web',
     })
@@ -407,7 +438,6 @@ function AskPageInner() {
           es.close()
           esRef.current = null
           setSending(false)
-          // Auto-speak if this was a voice-submitted message
           if (pendingAutoSpeakRef.current === assistantId) {
             pendingAutoSpeakRef.current = null
             setTimeout(() => speakMessage(assistantId), 100)
@@ -416,9 +446,7 @@ function AskPageInner() {
           const errMsg: string = parsed.message ?? parsed.error ?? 'An error occurred'
           setMessages((prev) =>
             prev.map((m) =>
-              m.id === assistantId
-                ? { ...m, content: errMsg, isError: true }
-                : m
+              m.id === assistantId ? { ...m, content: errMsg, isError: true } : m
             )
           )
           es.close()
@@ -430,16 +458,12 @@ function AskPageInner() {
           setSending(false)
         }
       } catch {
-        // Non-JSON or unparseable — ignore
+        // Non-JSON — ignore
       }
     }
 
-    es.onerror = () => {
-      es.close()
-      esRef.current = null
-      setSending(false)
-    }
-  }, [input, sending])
+    es.onerror = () => { es.close(); esRef.current = null; setSending(false) }
+  }, [input, sending, sessionId, router, speakMessage, voiceMode])
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -457,7 +481,6 @@ function AskPageInner() {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true })
     } catch {
       setVoiceState('error')
-      // Reset error state after a couple seconds
       setTimeout(() => setVoiceState('idle'), 2500)
       return
     }
@@ -483,22 +506,15 @@ function AskPageInner() {
       formData.append('audio', blob, 'recording.webm')
 
       try {
-        const res = await fetch('/api/voice/transcribe', {
-          method: 'POST',
-          body: formData,
-        })
+        const res = await fetch('/api/voice/transcribe', { method: 'POST', body: formData })
         if (res.ok) {
           const data = await res.json()
           const transcribed: string = data.text ?? ''
           if (transcribed.trim()) {
-            // Put text in input field and auto-submit
             setInput(transcribed)
             setVoiceState('idle')
             setVoiceMode(true)
-            // Use the transcribed text directly to avoid stale closure on input
-            setTimeout(() => {
-              sendMessage(transcribed)
-            }, 0)
+            setTimeout(() => sendMessage(transcribed), 0)
           } else {
             setVoiceState('idle')
           }
@@ -520,125 +536,160 @@ function AskPageInner() {
   }, [voiceState])
 
   const handleVoiceToggle = useCallback(() => {
-    if (voiceState === 'idle') {
-      startRecording()
-    } else if (voiceState === 'recording') {
-      stopRecording()
-    }
+    if (voiceState === 'idle') startRecording()
+    else if (voiceState === 'recording') stopRecording()
   }, [voiceState, startRecording, stopRecording])
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-56px-3rem)] max-w-3xl mx-auto">
-      {/* Message list */}
-      <div className="flex-1 overflow-y-auto space-y-4 pb-4">
-        {messages.length === 0 && (
-          <div className="flex items-center justify-center h-full px-4">
-            <p className="text-sm text-slate-400 text-center">
-              Ask anything about the business — stock, orders, processes, financials.
-            </p>
-          </div>
-        )}
+    <div className="flex h-[calc(100dvh-56px-3rem)]">
+      {/* Chat history sidebar */}
+      <ChatHistorySidebar
+        isOpen={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        currentSessionId={sessionId}
+        onSelectSession={handleSelectSession}
+        onNewChat={handleNewChat}
+      />
 
-        {messages.map((msg) =>
-          msg.role === 'user' ? (
-            <div key={msg.id} className="flex justify-end">
-              <div className="max-w-[85%] md:max-w-[75%] bg-indigo-600 text-white text-sm px-3 py-2.5 md:px-4 md:py-3 rounded-2xl rounded-tr-sm">
-                {msg.content}
-              </div>
-            </div>
-          ) : (
-            <div key={msg.id} className="flex justify-start">
-              <div className="max-w-[85%] md:max-w-[75%] bg-white border border-slate-200 text-slate-800 text-sm px-3 py-2.5 md:px-4 md:py-3 rounded-2xl rounded-tl-sm shadow-sm">
-                {msg.content ? (
-                  <>
-                    <AssistantBubble content={msg.content} isError={msg.isError} />
-                    {!msg.isError && !sending && (
-                      <div className="mt-2 pt-2 border-t border-slate-100 flex items-center gap-3">
-                        <button
-                          onClick={() => speakMessage(msg.id)}
-                          className="text-xs text-slate-400 hover:text-indigo-600 transition-colors"
-                          title={speaking === msg.id ? 'Stop speaking' : 'Read aloud'}
-                        >
-                          {speaking === msg.id ? '⏹️ Stop' : '🔊 Listen'}
-                        </button>
-                        {msg.saved ? (
-                          <span className="text-xs text-emerald-600">✓ Saved to memory</span>
-                        ) : (
-                          <button
-                            onClick={() => saveToMemory(msg.id)}
-                            disabled={saving === msg.id}
-                            className="text-xs text-slate-400 hover:text-indigo-600 transition-colors disabled:opacity-50"
-                          >
-                            {saving === msg.id ? 'Saving…' : '💾 Remember this'}
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <span className="text-slate-400 animate-pulse">Thinking…</span>
-                )}
-              </div>
-            </div>
-          )
-        )}
-        <div ref={bottomRef} />
-      </div>
-
-      {/* Recording indicator */}
-      {voiceState === 'recording' && (
-        <div className="flex items-center gap-2 px-3 py-2 mb-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-600 font-medium">
-          <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-          Recording — tap mic to stop
-        </div>
-      )}
-      {voiceState === 'transcribing' && (
-        <div className="flex items-center gap-2 px-3 py-2 mb-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-500">
-          <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-          </svg>
-          Transcribing…
-        </div>
-      )}
-      {voiceState === 'error' && (
-        <div className="px-3 py-2 mb-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-600">
-          Microphone access denied
-        </div>
-      )}
-
-      {/* Voice mode indicator */}
-      {voiceMode && voiceState === 'idle' && !sending && (
-        <div className="flex items-center justify-between px-3 py-1.5 mb-2 bg-indigo-50 border border-indigo-200 rounded-lg">
-          <span className="text-xs text-indigo-600 font-medium">🔊 Voice mode — responses will be read aloud</span>
+      {/* Main chat area */}
+      <div className="flex-1 flex flex-col max-w-3xl mx-auto min-w-0">
+        {/* History toggle + new chat buttons */}
+        <div className="flex items-center gap-2 pb-2 flex-shrink-0">
           <button
-            onClick={() => setVoiceMode(false)}
-            className="text-xs text-indigo-400 hover:text-indigo-700 ml-2"
+            onClick={() => setHistoryOpen(!historyOpen)}
+            className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+            title="Chat history"
           >
-            Turn off
+            <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </button>
+          <button
+            onClick={handleNewChat}
+            className="text-xs text-slate-500 hover:text-indigo-600 transition-colors"
+          >
+            New chat
           </button>
         </div>
-      )}
 
-      {/* Input bar */}
-      <div className="bg-white border border-slate-200 rounded-xl p-2.5 md:p-3 flex gap-2 md:gap-3 items-end shadow-sm">
-        <textarea
-          className="flex-1 resize-none text-sm text-slate-800 placeholder-slate-400 focus:outline-none min-h-[40px] max-h-[160px] overflow-y-auto px-1 md:px-0"
-          rows={1}
-          placeholder="Ask anything…"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          disabled={sending}
-        />
-        <MicButton voiceState={voiceState} onToggle={handleVoiceToggle} />
-        <button
-          onClick={() => sendMessage()}
-          disabled={sending || !input.trim()}
-          className="flex-shrink-0 px-3 py-2 md:px-4 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed h-10"
-        >
-          Send
-        </button>
+        {/* Loading state for session */}
+        {loadingSession ? (
+          <div className="flex-1 flex items-center justify-center">
+            <p className="text-sm text-slate-400 animate-pulse">Loading conversation...</p>
+          </div>
+        ) : (
+          <>
+            {/* Message list */}
+            <div className="flex-1 overflow-y-auto space-y-4 pb-4">
+              {messages.length === 0 && (
+                <div className="flex items-center justify-center h-full px-4">
+                  <p className="text-sm text-slate-400 text-center">
+                    Ask anything about the business — stock, orders, processes, financials.
+                  </p>
+                </div>
+              )}
+
+              {messages.map((msg) =>
+                msg.role === 'user' ? (
+                  <div key={msg.id} className="flex justify-end">
+                    <div className="max-w-[85%] md:max-w-[75%] bg-indigo-600 text-white text-sm px-3 py-2.5 md:px-4 md:py-3 rounded-2xl rounded-tr-sm">
+                      {msg.content}
+                    </div>
+                  </div>
+                ) : (
+                  <div key={msg.id} className="flex justify-start">
+                    <div className="max-w-[85%] md:max-w-[75%] bg-white border border-slate-200 text-slate-800 text-sm px-3 py-2.5 md:px-4 md:py-3 rounded-2xl rounded-tl-sm shadow-sm">
+                      {msg.content ? (
+                        <>
+                          <AssistantBubble content={msg.content} isError={msg.isError} />
+                          {!msg.isError && !sending && (
+                            <div className="mt-2 pt-2 border-t border-slate-100 flex items-center gap-3">
+                              <button
+                                onClick={() => speakMessage(msg.id)}
+                                className="text-xs text-slate-400 hover:text-indigo-600 transition-colors"
+                                title={speaking === msg.id ? 'Stop speaking' : 'Read aloud'}
+                              >
+                                {speaking === msg.id ? '\u23f9\ufe0f Stop' : '\ud83d\udd0a Listen'}
+                              </button>
+                              {msg.saved ? (
+                                <span className="text-xs text-emerald-600">\u2713 Saved to memory</span>
+                              ) : (
+                                <button
+                                  onClick={() => saveToMemory(msg.id)}
+                                  disabled={saving === msg.id}
+                                  className="text-xs text-slate-400 hover:text-indigo-600 transition-colors disabled:opacity-50"
+                                >
+                                  {saving === msg.id ? 'Saving\u2026' : '\ud83d\udcbe Remember this'}
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-slate-400 animate-pulse">Thinking\u2026</span>
+                      )}
+                    </div>
+                  </div>
+                )
+              )}
+              <div ref={bottomRef} />
+            </div>
+
+            {/* Recording/voice indicators */}
+            {voiceState === 'recording' && (
+              <div className="flex items-center gap-2 px-3 py-2 mb-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-600 font-medium">
+                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                Recording — tap mic to stop
+              </div>
+            )}
+            {voiceState === 'transcribing' && (
+              <div className="flex items-center gap-2 px-3 py-2 mb-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-500">
+                <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                </svg>
+                Transcribing...
+              </div>
+            )}
+            {voiceState === 'error' && (
+              <div className="px-3 py-2 mb-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-600">
+                Microphone access denied
+              </div>
+            )}
+            {voiceMode && voiceState === 'idle' && !sending && (
+              <div className="flex items-center justify-between px-3 py-1.5 mb-2 bg-indigo-50 border border-indigo-200 rounded-lg">
+                <span className="text-xs text-indigo-600 font-medium">\ud83d\udd0a Voice mode — responses will be read aloud</span>
+                <button
+                  onClick={() => setVoiceMode(false)}
+                  className="text-xs text-indigo-400 hover:text-indigo-700 ml-2"
+                >
+                  Turn off
+                </button>
+              </div>
+            )}
+
+            {/* Input bar */}
+            <div className="bg-white border border-slate-200 rounded-xl p-2.5 md:p-3 flex gap-2 md:gap-3 items-end shadow-sm flex-shrink-0">
+              <textarea
+                className="flex-1 resize-none text-sm text-slate-800 placeholder-slate-400 focus:outline-none min-h-[40px] max-h-[160px] overflow-y-auto px-1 md:px-0"
+                rows={1}
+                placeholder="Ask anything\u2026"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={sending}
+              />
+              <MicButton voiceState={voiceState} onToggle={handleVoiceToggle} />
+              <button
+                onClick={() => sendMessage()}
+                disabled={sending || !input.trim()}
+                className="flex-shrink-0 px-3 py-2 md:px-4 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed h-10"
+              >
+                Send
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
@@ -648,7 +699,7 @@ function AskPageInner() {
 
 export default function AskPage() {
   return (
-    <Suspense fallback={<div className="text-sm text-slate-400">Loading…</div>}>
+    <Suspense fallback={<div className="text-sm text-slate-400">Loading\u2026</div>}>
       <AskPageInner />
     </Suspense>
   )

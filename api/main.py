@@ -151,6 +151,14 @@ async def lifespan(app: FastAPI):
     except Exception as ami_err:
         print(f'[CLAW startup] Amazon Intel schema failed: {ami_err}')
 
+    # ── Etsy Intelligence schema ───────────────────────────────────────
+    try:
+        from core.etsy_intel.db import ensure_schema as etsy_ensure_schema
+        etsy_ensure_schema()
+        print('[CLAW startup] Etsy Intel schema ready')
+    except Exception as etsy_err:
+        print(f'[CLAW startup] Etsy Intel schema failed: {etsy_err}')
+
     # ── Auto-index empty projects ───────────────────────────────────────
     skip_auto_index = os.getenv('CAIRN_SKIP_AUTO_INDEX', '').lower() in {
         '1', 'true', 'yes',
@@ -733,6 +741,62 @@ async def get_subproject_session(
     if not session:
         raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
     return session
+
+
+class SessionUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    subproject_id: Optional[str] = None
+
+
+@app.patch("/projects/{project}/sessions/{session_id}")
+async def update_session(
+    project: str,
+    session_id: str,
+    body: SessionUpdateRequest,
+    _: bool = Depends(verify_api_key),
+):
+    """Rename a session or move it to a different subproject."""
+    agent = get_agent(project)
+    kwargs = {}
+    if body.title is not None:
+        kwargs['title'] = body.title
+    if body.subproject_id is not None:
+        kwargs['subproject_id'] = body.subproject_id
+    if not kwargs:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    ok = agent.memory.update_session(session_id, **kwargs)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
+    return {'session_id': session_id, 'updated': True}
+
+
+@app.post("/projects/{project}/sessions/{session_id}/archive")
+async def archive_session(
+    project: str,
+    session_id: str,
+    _: bool = Depends(verify_api_key),
+):
+    """Archive a session (move to archived_sessions table)."""
+    agent = get_agent(project)
+    try:
+        agent.memory.archive_session(session_id, summary='Manually archived')
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {'session_id': session_id, 'archived': True}
+
+
+@app.delete("/projects/{project}/sessions/{session_id}")
+async def delete_session(
+    project: str,
+    session_id: str,
+    _: bool = Depends(verify_api_key),
+):
+    """Permanently delete a session and all its messages."""
+    agent = get_agent(project)
+    ok = agent.memory.delete_session(session_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
+    return {'session_id': session_id, 'deleted': True}
 
 
 @app.get("/projects/{project}/files")
@@ -2241,3 +2305,7 @@ app.include_router(whatsapp_router)
 # Register Amazon Intelligence routes
 from api.routes.amazon_intel import router as ami_router
 app.include_router(ami_router)
+
+# Register Etsy Intelligence routes
+from api.routes.etsy_intel import router as etsy_router
+app.include_router(etsy_router)
