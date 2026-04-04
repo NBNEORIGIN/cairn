@@ -187,7 +187,7 @@ function MicButton({ voiceState, onToggle }: { voiceState: VoiceState; onToggle:
 
   let label = 'Start voice input'
   if (isRecording) label = 'Stop recording'
-  if (isTranscribing) label = 'Transcribing\u2026'
+  if (isTranscribing) label = 'Transcribing...'
   if (isError) label = 'Microphone access denied'
 
   return (
@@ -609,24 +609,24 @@ function AskPageInner() {
                                 className="text-xs text-slate-400 hover:text-indigo-600 transition-colors"
                                 title={speaking === msg.id ? 'Stop speaking' : 'Read aloud'}
                               >
-                                {speaking === msg.id ? '\u23f9\ufe0f Stop' : '\ud83d\udd0a Listen'}
+                                {speaking === msg.id ? 'Stop' : 'Listen'}
                               </button>
                               {msg.saved ? (
-                                <span className="text-xs text-emerald-600">\u2713 Saved to memory</span>
+                                <span className="text-xs text-emerald-600">Saved to memory</span>
                               ) : (
                                 <button
                                   onClick={() => saveToMemory(msg.id)}
                                   disabled={saving === msg.id}
                                   className="text-xs text-slate-400 hover:text-indigo-600 transition-colors disabled:opacity-50"
                                 >
-                                  {saving === msg.id ? 'Saving\u2026' : '\ud83d\udcbe Remember this'}
+                                  {saving === msg.id ? 'Saving...' : 'Remember this'}
                                 </button>
                               )}
                             </div>
                           )}
                         </>
                       ) : (
-                        <span className="text-slate-400 animate-pulse">Thinking\u2026</span>
+                        <span className="text-slate-400 animate-pulse">Thinking...</span>
                       )}
                     </div>
                   </div>
@@ -658,7 +658,7 @@ function AskPageInner() {
             )}
             {voiceMode && voiceState === 'idle' && !sending && (
               <div className="flex items-center justify-between px-3 py-1.5 mb-2 bg-indigo-50 border border-indigo-200 rounded-lg">
-                <span className="text-xs text-indigo-600 font-medium">\ud83d\udd0a Voice mode — responses will be read aloud</span>
+                <span className="text-xs text-indigo-600 font-medium">Voice mode — responses will be read aloud</span>
                 <button
                   onClick={() => setVoiceMode(false)}
                   className="text-xs text-indigo-400 hover:text-indigo-700 ml-2"
@@ -673,7 +673,7 @@ function AskPageInner() {
               <textarea
                 className="flex-1 resize-none text-sm text-slate-800 placeholder-slate-400 focus:outline-none min-h-[40px] max-h-[160px] overflow-y-auto px-1 md:px-0"
                 rows={1}
-                placeholder="Ask anything\u2026"
+                placeholder="Ask anything..."
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
@@ -699,7 +699,7 @@ function AskPageInner() {
 
 export default function AskPage() {
   return (
-    <Suspense fallback={<div className="text-sm text-slate-400">Loading\u2026</div>}>
+    <Suspense fallback={<div className="text-sm text-slate-400">Loading...</div>}>
       <AskPageInner />
     </Suspense>
   )
