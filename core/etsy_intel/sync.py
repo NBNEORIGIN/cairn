@@ -15,17 +15,22 @@ from core.etsy_intel.scoring import calculate_health_score
 log = logging.getLogger(__name__)
 
 
-def _get_shop_ids() -> list[int]:
-    """Get configured shop IDs from env or database."""
+def _get_shop_identifiers() -> list[str]:
+    """Get configured shop IDs or names from env or database.
+
+    Etsy API v3 accepts both numeric shop IDs and shop name strings
+    in URL paths. We store numeric IDs in the database but accept
+    either form in ETSY_SHOP_IDS for convenience.
+    """
     env_ids = os.getenv('ETSY_SHOP_IDS', '')
     if env_ids:
-        return [int(x.strip()) for x in env_ids.split(',') if x.strip()]
+        return [x.strip() for x in env_ids.split(',') if x.strip()]
 
     # Fall back to shops already in database
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT shop_id FROM etsy_shops ORDER BY shop_id")
-            return [row[0] for row in cur.fetchall()]
+            return [str(row[0]) for row in cur.fetchall()]
 
 
 async def sync_all() -> dict:
@@ -35,21 +40,17 @@ async def sync_all() -> dict:
     """
     client = EtsyClient()
     try:
-        shop_ids = _get_shop_ids()
-        if not shop_ids:
-            # Try to discover shops
-            shops = await client.get_my_shops()
-            shop_ids = [s['shop_id'] for s in shops]
-            if not shop_ids:
-                return {'error': 'No shop IDs configured. Set ETSY_SHOP_IDS env var.'}
+        shop_identifiers = _get_shop_identifiers()
+        if not shop_identifiers:
+            return {'error': 'No shop IDs configured. Set ETSY_SHOP_IDS env var.'}
 
         result = {
             'sync_date': date.today().isoformat(),
             'shops': [],
         }
 
-        for shop_id in shop_ids:
-            shop_result = await _sync_shop(client, shop_id)
+        for shop_ident in shop_identifiers:
+            shop_result = await _sync_shop(client, shop_ident)
             result['shops'].append(shop_result)
 
         # Totals
@@ -62,14 +63,20 @@ async def sync_all() -> dict:
         await client.close()
 
 
-async def _sync_shop(client: EtsyClient, shop_id: int) -> dict:
-    """Sync a single shop: info, listings, sales, scoring, snapshots."""
-    today = date.today()
-    shop_result = {'shop_id': shop_id}
+async def _sync_shop(client: EtsyClient, shop_identifier: str) -> dict:
+    """Sync a single shop: info, listings, sales, scoring, snapshots.
 
-    # 1. Sync shop info
+    shop_identifier can be a numeric shop_id or a shop name string.
+    The Etsy API v3 accepts both in URL paths.
+    """
+    today = date.today()
+    shop_result = {'shop_identifier': shop_identifier}
+
+    # 1. Sync shop info — resolves name to numeric shop_id
     try:
-        shop_data = await client.get_shop(shop_id)
+        shop_data = await client.get_shop(shop_identifier)
+        shop_id = shop_data['shop_id']
+        shop_result['shop_id'] = shop_id
         upsert_shop({
             'shop_id': shop_id,
             'shop_name': shop_data.get('shop_name', ''),
@@ -82,7 +89,7 @@ async def _sync_shop(client: EtsyClient, shop_id: int) -> dict:
         shop_result['shop_name'] = shop_data.get('shop_name', '')
         log.info('Synced shop info: %s (ID: %d)', shop_data.get('shop_name'), shop_id)
     except Exception as e:
-        log.error('Failed to sync shop %d info: %s', shop_id, e)
+        log.error('Failed to sync shop %s info: %s', shop_identifier, e)
         shop_result['shop_error'] = str(e)
         return shop_result
 
