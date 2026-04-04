@@ -69,7 +69,12 @@ async function fetchModuleContext(): Promise<string> {
   }
 
   if (sections.length === 0) return ''
-  return '\n\n[LIVE BUSINESS DATA — use this to answer the question]\n' + sections.join('\n') + '\n[END LIVE DATA]\n\n'
+  return '\n\n[LIVE BUSINESS DATA — use this to answer the question]\n' + sections.join('\n') +
+    '\n\n[IMPORTANT: For detailed Amazon questions (sales figures, specific SKUs, revenue breakdowns, ' +
+    'product performance, ad spend, new products) you MUST use the query_amazon_intel tool to run SQL ' +
+    'against the ami_* tables. The summary above is just a snapshot — the tool gives you full access ' +
+    'to 4,000+ listings with sessions, conversion rates, revenue, ad data, and health scores.]\n' +
+    '[END LIVE DATA]\n\n'
 }
 
 const CAIRN_PERSONALITY = `[PERSONALITY]
