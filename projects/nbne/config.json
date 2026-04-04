@@ -8,7 +8,8 @@
     "read_file",
     "search_code",
     "web_fetch",
-    "web_check_status"
+    "web_check_status",
+    "query_amazon_intel"
   ],
 
   "model_preferences": {
