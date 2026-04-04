@@ -13,7 +13,7 @@ Commercial signage, e-commerce products (Amazon, Etsy, eBay), and software.
 
 ## The team
 - **Toby Fletcher** — Co-Director, CEng MIMechE
-- **Jo Fletcher** — Co-Director, operations and client relationships
+- **Joanne Tompkins** — Co-Director, operations and client relationships
 - **Ivan, Gabby, Ben, Sanna** — production and operations staff
 
 ## Sales channels

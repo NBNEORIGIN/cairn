@@ -10,7 +10,7 @@
 **Toby Fletcher** — Co-Director, NBNE. CEng MIMechE. Sets direction and priorities.
 Not a professional developer. Communicates plainly and expects the same back.
 
-**Jo Fletcher** — Co-Director, NBNE. Day-to-day operations and client relationships.
+**Joanne Tompkins** — Co-Director, NBNE. Day-to-day operations and client relationships.
 
 **The team**: Ivan, Gabby, Ben, Sanna.
 
