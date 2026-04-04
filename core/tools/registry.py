@@ -22,9 +22,10 @@ DEFAULT_PERMISSIONS = {
     'coding': [
         'read_file', 'search_code', 'run_tests',
         'edit_file', 'create_file', 'run_migration',
+        'query_amazon_intel',
     ],
     'readonly': [
-        'read_file', 'search_code',
+        'read_file', 'search_code', 'query_amazon_intel',
     ],
     'ops': [
         'read_file', 'search_code', 'run_command',
@@ -278,6 +279,28 @@ TOOL_SCHEMAS: dict[str, dict] = {
             },
         },
         'required': ['query'],
+    },
+    # ── Amazon Intelligence ──────────────────────────────────────────────────
+    'query_amazon_intel': {
+        'type': 'object',
+        'properties': {
+            'sql': {
+                'type': 'string',
+                'description': (
+                    'PostgreSQL SELECT query against ami_* tables. '
+                    'Tables: ami_sku_mapping, ami_flatfile_data, '
+                    'ami_business_report_data, ami_advertising_data, '
+                    'ami_listing_snapshots, ami_weekly_reports. '
+                    'See tool description for full schema.'
+                ),
+            },
+            'limit': {
+                'type': 'integer',
+                'description': 'Max rows to return (default 100)',
+                'default': 100,
+            },
+        },
+        'required': ['sql'],
     },
     # ── Server check ─────────────────────────────────────────────────────────
     'check_server': {

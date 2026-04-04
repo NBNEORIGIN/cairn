@@ -1447,21 +1447,25 @@ class ClawAgent:
         executed_tool_calls: list | None = None,
     ) -> AgentResponse:
         """
-        Feed a tool result back to the model for a final response.
-        Used for auto-approved (safe) tools like read_file and search_code.
+        Feed a tool result back to the model so it can continue its plan.
+        Tools are provided so the model can chain multi-step operations
+        (e.g. git_add → git_commit). If the model requests a REVIEW or
+        DESTRUCTIVE tool, it is surfaced for approval via pending_tool_call.
         """
         tool_result_message = (
             f"Tool result for {tool_call['name']}:\n{result}"
         )
 
-
+        available_tools = self._get_tools_for_task(
+            envelope.content, read_only=envelope.read_only
+        )
 
         if model_choice == ModelChoice.LOCAL:
-            response_text, _, usage = await self.ollama.chat(
+            response_text, next_tool_call, usage = await self.ollama.chat(
                 system=context_prompt,
                 history=history,
                 message=f"{envelope.content}\n\n{tool_result_message}",
-                tools=None,
+                tools=available_tools,
             )
             cost_usd = 0.0
         else:
@@ -1473,18 +1477,75 @@ class ClawAgent:
                 project=self.project_id,
             ).use_opus
             client, _ = await self._get_api_client(use_opus=use_opus)
-            response_text, _, usage, client, model_used = await self._chat_with_fallback(
+            response_text, next_tool_call, usage, client, model_used = await self._chat_with_fallback(
                 client,
                 system=context_prompt,
                 history=history,
                 message=f"{envelope.content}\n\n{tool_result_message}",
-                tools=None,
+                tools=available_tools,
                 use_opus=use_opus,
             )
             cost_usd = self._calculate_cost(usage, client)
 
-        # If Claude returned nothing, surface the raw tool result so the
-        # user always sees something rather than a blank message
+        total_cost = prior_cost + cost_usd
+
+        # If the model requested a follow-up tool, handle it
+        if next_tool_call:
+            next_tool = self.tools.get(next_tool_call['name'])
+            if next_tool and next_tool.risk_level == RiskLevel.SAFE:
+                # SAFE tool — execute inline and recurse
+                safe_result = await self._execute_tool(next_tool_call)
+                all_calls = (executed_tool_calls or []) + [{
+                    'tool_name': next_tool_call['name'],
+                    'input': next_tool_call.get('input', {}),
+                    'result': safe_result,
+                }]
+                return await self._continue_with_tool_result(
+                    envelope=envelope,
+                    context_prompt=context_prompt,
+                    history=history,
+                    tool_call=next_tool_call,
+                    result=safe_result,
+                    model_choice=model_choice,
+                    model_used=model_used,
+                    prior_cost=total_cost,
+                    executed_tool_calls=all_calls,
+                )
+            elif next_tool:
+                # REVIEW/DESTRUCTIVE — surface for approval
+                approval_text = response_text or self._queued_tool_fallback_response(
+                    envelope.content, next_tool_call, executed_tool_calls or [],
+                )
+                self.memory.add_message(
+                    session_id=envelope.session_id,
+                    role='assistant',
+                    content=approval_text,
+                    channel=envelope.channel.value,
+                    model_used=model_used,
+                    tokens_used=usage.get('total_tokens', 0),
+                    cost_usd=cost_usd,
+                    subproject_id=envelope.subproject_id,
+                )
+                pending = {
+                    'tool_call_id': str(uuid.uuid4()),
+                    'tool_name': next_tool_call['name'],
+                    'description': self._describe_tool_call(next_tool_call),
+                    'diff_preview': self._generate_diff_preview(next_tool_call),
+                    'input': next_tool_call.get('input', {}),
+                    'risk_level': next_tool.risk_level.value,
+                    'auto_approve': False,
+                }
+                return AgentResponse(
+                    content=approval_text,
+                    session_id=envelope.session_id,
+                    project_id=self.project_id,
+                    pending_tool_call=pending,
+                    model_used=model_used,
+                    cost_usd=total_cost,
+                    executed_tool_calls=executed_tool_calls or [],
+                )
+
+        # No follow-up tool — return the text response
         if not response_text:
             response_text = f"**{tool_call['name']} result:**\n\n{result}"
 
@@ -1504,7 +1565,7 @@ class ClawAgent:
             session_id=envelope.session_id,
             project_id=self.project_id,
             model_used=model_used,
-            cost_usd=prior_cost + cost_usd,
+            cost_usd=total_cost,
             executed_tool_calls=executed_tool_calls or [],
         )
 
@@ -2224,6 +2285,7 @@ class ClawAgent:
         )
         from .tools.video_tools import generate_video_tool
         from .tools.image_tools import generate_image_tool
+        from .tools.ami_tools import query_amazon_intel_tool
         for tool in [
             # File
             read_file_tool, edit_file_tool, create_file_tool,
@@ -2240,5 +2302,7 @@ class ClawAgent:
             web_fetch_tool, web_check_status_tool, web_search_tool,
             # Media
             generate_video_tool, generate_image_tool,
+            # Amazon Intelligence
+            query_amazon_intel_tool,
         ]:
             self.tools.register(tool)
