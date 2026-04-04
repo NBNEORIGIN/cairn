@@ -244,7 +244,9 @@ function AskPageInner() {
   const [saving, setSaving] = useState<string | null>(null)
   const [voiceState, setVoiceState] = useState<VoiceState>('idle')
   const [speaking, setSpeaking] = useState<string | null>(null)
+  const [voiceMode, setVoiceMode] = useState(false)
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const pendingAutoSpeakRef = useRef<string | null>(null)
 
   const sessionId = useRef<string>(generateSessionId())
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -364,6 +366,11 @@ function AskPageInner() {
     const assistantId = `a-${Date.now()}`
     setMessages((prev) => [...prev, { id: assistantId, role: 'assistant', content: '' }])
 
+    // If voice mode is active, auto-speak this response when it completes
+    if (voiceMode) {
+      pendingAutoSpeakRef.current = assistantId
+    }
+
     // Build SSE URL
     const params = new URLSearchParams({
       project: 'nbne',
@@ -400,6 +407,11 @@ function AskPageInner() {
           es.close()
           esRef.current = null
           setSending(false)
+          // Auto-speak if this was a voice-submitted message
+          if (pendingAutoSpeakRef.current === assistantId) {
+            pendingAutoSpeakRef.current = null
+            setTimeout(() => speakMessage(assistantId), 100)
+          }
         } else if (type === 'error') {
           const errMsg: string = parsed.message ?? parsed.error ?? 'An error occurred'
           setMessages((prev) =>
@@ -482,6 +494,7 @@ function AskPageInner() {
             // Put text in input field and auto-submit
             setInput(transcribed)
             setVoiceState('idle')
+            setVoiceMode(true)
             // Use the transcribed text directly to avoid stale closure on input
             setTimeout(() => {
               sendMessage(transcribed)
@@ -591,6 +604,19 @@ function AskPageInner() {
       {voiceState === 'error' && (
         <div className="px-3 py-2 mb-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-600">
           Microphone access denied
+        </div>
+      )}
+
+      {/* Voice mode indicator */}
+      {voiceMode && voiceState === 'idle' && !sending && (
+        <div className="flex items-center justify-between px-3 py-1.5 mb-2 bg-indigo-50 border border-indigo-200 rounded-lg">
+          <span className="text-xs text-indigo-600 font-medium">🔊 Voice mode — responses will be read aloud</span>
+          <button
+            onClick={() => setVoiceMode(false)}
+            className="text-xs text-indigo-400 hover:text-indigo-700 ml-2"
+          >
+            Turn off
+          </button>
         </div>
       )}
 
