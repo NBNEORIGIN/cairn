@@ -1,0 +1,45 @@
+{
+  "name": "Etsy Intelligence",
+  "description": "Etsy listing health pipeline — orders, listings, stats via Etsy API v3. Mirrors Amazon Intelligence pattern.",
+  "codebase_path": "D:/claw",
+  "project_type": "coding",
+  "force_model": "api",
+
+  "permissions": [
+    "read_file",
+    "search_code",
+    "edit_file",
+    "create_file",
+    "run_tests",
+    "run_command",
+    "run_migration",
+    "check_server",
+    "git_status",
+    "git_diff",
+    "git_log",
+    "git_add",
+    "git_commit",
+    "git_push",
+    "git_branch",
+    "git_stash",
+    "web_fetch",
+    "web_check_status"
+  ],
+
+  "model_preferences": {
+    "force_model": "api",
+    "opus_keywords": [
+      "architecture", "cross-module", "Cairn integration",
+      "health scoring", "API design"
+    ]
+  },
+
+  "related_projects": ["amazon-intelligence", "manufacturing", "claw"],
+
+  "indexing": {
+    "auto_reindex": false,
+    "include_paths": ["core/etsy_intel", "api/routes/etsy_intel.py"],
+    "exclude_paths": ["data", "node_modules", "__pycache__", ".venv"],
+    "include_extensions": [".py", ".json", ".md", ".sql"]
+  }
+}
