@@ -123,8 +123,8 @@ class EtsyClient:
                 return []
             raise
 
-    async def get_shop(self, shop_id: int) -> dict:
-        """GET /v3/application/shops/{shop_id}"""
+    async def get_shop(self, shop_id) -> dict:
+        """GET /v3/application/shops/{shop_id} — accepts numeric ID or shop name."""
         return await self._get(f'/application/shops/{shop_id}')
 
     # ── Listing endpoints ────────────────────────────────────────────────
