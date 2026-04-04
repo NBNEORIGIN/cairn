@@ -552,22 +552,26 @@ function AskPageInner() {
       />
 
       {/* Main chat area */}
-      <div className="flex-1 flex flex-col max-w-3xl mx-auto min-w-0">
-        {/* History toggle + new chat buttons */}
-        <div className="flex items-center gap-2 pb-2 flex-shrink-0">
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Toolbar */}
+        <div className="flex items-center gap-3 px-4 py-2 border-b border-slate-100 flex-shrink-0">
           <button
             onClick={() => setHistoryOpen(!historyOpen)}
-            className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors"
             title="Chat history"
           >
-            <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
+            History
           </button>
           <button
             onClick={handleNewChat}
-            className="text-xs text-slate-500 hover:text-indigo-600 transition-colors"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors"
           >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
             New chat
           </button>
         </div>
@@ -580,7 +584,7 @@ function AskPageInner() {
         ) : (
           <>
             {/* Message list */}
-            <div className="flex-1 overflow-y-auto space-y-4 pb-4">
+            <div className="flex-1 overflow-y-auto space-y-4 pb-4 px-4 max-w-3xl mx-auto w-full">
               {messages.length === 0 && (
                 <div className="flex items-center justify-center h-full px-4">
                   <p className="text-sm text-slate-400 text-center">
@@ -669,7 +673,7 @@ function AskPageInner() {
             )}
 
             {/* Input bar */}
-            <div className="bg-white border border-slate-200 rounded-xl p-2.5 md:p-3 flex gap-2 md:gap-3 items-end shadow-sm flex-shrink-0">
+            <div className="bg-white border border-slate-200 rounded-xl p-2.5 md:p-3 flex gap-2 md:gap-3 items-end shadow-sm flex-shrink-0 max-w-3xl mx-auto w-full">
               <textarea
                 className="flex-1 resize-none text-sm text-slate-800 placeholder-slate-400 focus:outline-none min-h-[40px] max-h-[160px] overflow-y-auto px-1 md:px-0"
                 rows={1}
