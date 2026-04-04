@@ -25,7 +25,7 @@ function getModules(): ModuleSpec[] {
     // Ledger — live on Hetzner port 8016
     { key: 'ledger', name: 'Finance', url: 'http://host.docker.internal:8016/api/cairn/context' },
     // CRM — NBNE business development platform
-    { key: 'crm', name: 'Customers', url: `${process.env.CRM_API_URL || 'http://host.docker.internal:3003'}/api/cairn/context` },
+    { key: 'crm', name: 'Customers', url: `${process.env.CRM_API_URL || 'http://host.docker.internal:3023'}/api/cairn/context` },
   ]
 }
 
