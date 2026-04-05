@@ -165,7 +165,7 @@ def _get_quick_wins() -> dict:
                               OR array_length(tags, 1) < 10
                     ) as tags_needed,
                     COUNT(*) FILTER (
-                        WHERE num_images < 5
+                        WHERE num_images IS NOT NULL AND num_images < 5
                     ) as images_needed
                 FROM etsy_listings
                 WHERE state = 'active'

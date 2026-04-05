@@ -139,9 +139,14 @@ async def _sync_shop(client: EtsyClient, shop_identifier: str) -> dict:
 
 def _parse_listing(raw: dict, shop_id: int) -> dict:
     """Parse an Etsy API listing response into our schema."""
-    # Extract image count from includes or separate field
-    images = raw.get('images', [])
-    num_images = len(images) if isinstance(images, list) else raw.get('num_images', 0)
+    # Image count: Etsy bulk listing endpoint doesn't include images.
+    # Set to None (unknown) rather than 0 to avoid false NO_IMAGES flags.
+    # Image counts are fetched separately per-listing if needed.
+    images = raw.get('images')
+    if images and isinstance(images, list) and len(images) > 0:
+        num_images = len(images)
+    else:
+        num_images = None  # unknown, not zero
 
     # Price: Etsy returns amount as {"amount": 1299, "divisor": 100, "currency_code": "GBP"}
     price_obj = raw.get('price', {})
