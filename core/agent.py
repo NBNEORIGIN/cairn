@@ -2217,7 +2217,10 @@ class ClawAgent:
         if status in (429, 529):
             return True
         msg = str(exc).lower()
-        return any(token in msg for token in ('429', '529', 'rate limit', 'overload'))
+        return any(token in msg for token in (
+            '429', '529', 'rate limit', 'overload',
+            'credit balance is too low', 'billing', 'quota exceeded',
+        ))
 
     def _model_timeout_seconds(self) -> float:
         raw = os.getenv('CLAW_MODEL_TIMEOUT_SECONDS', '45')
