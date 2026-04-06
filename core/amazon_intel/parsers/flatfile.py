@@ -83,6 +83,11 @@ FULFILMENT_HEADER_PATTERNS = [
     'Fulfilment Channel Code',
 ]
 
+RELEASE_DATE_HEADER_PATTERNS = [
+    'Offering Release Date (Sell on Amazon',
+    'Offering Release Date',
+]
+
 
 def _build_header_index(row4_values: list) -> dict[tuple[str, int], int]:
     """
@@ -240,6 +245,21 @@ def parse_flatfile(file_bytes: bytes, filename: str) -> list[dict]:
             browse_1 = _resolve_field('browse_node_1', row, header_index)
             browse_2 = _resolve_field('browse_node_2', row, header_index)
 
+            # Listing creation date — "Offering Release Date (Sell on Amazon, UK)"
+            release_date_raw = _resolve_pattern_field(
+                RELEASE_DATE_HEADER_PATTERNS, row, header_index
+            )
+            listing_created_at = None
+            if release_date_raw:
+                try:
+                    from datetime import datetime
+                    # Handle ISO 8601 format: 2023-08-29T14:44:37.267Z
+                    listing_created_at = datetime.fromisoformat(
+                        release_date_raw.replace('Z', '+00:00')
+                    ).strftime('%Y-%m-%d %H:%M:%S')
+                except (ValueError, AttributeError):
+                    pass  # unparseable date — skip
+
             # Build raw_json with all non-empty cells for completeness
             raw = {}
             for col_idx, val in enumerate(row):
@@ -274,6 +294,7 @@ def parse_flatfile(file_bytes: bytes, filename: str) -> list[dict]:
                 'browse_node_2': browse_2,
                 'keyword_count': keyword_count,
                 'bullet_count': bullet_count,
+                'listing_created_at': listing_created_at,
                 'raw_json': raw,
             })
 
@@ -311,8 +332,8 @@ def parse_and_store_flatfile(file_bytes: bytes, filename: str,
                                 generic_keyword3, generic_keyword4, generic_keyword5,
                                 main_image_url, image_count, your_price, fulfilment,
                                 colour, size, material, browse_node_1, browse_node_2,
-                                keyword_count, bullet_count, raw_json)
-                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                                keyword_count, bullet_count, listing_created_at, raw_json)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                         (upload_id, listing['sku'], listing['asin'],
                          listing['product_id_type'], listing['parent_child'],
                          listing['parent_sku'], listing['product_type'],
@@ -327,6 +348,7 @@ def parse_and_store_flatfile(file_bytes: bytes, filename: str,
                          listing['colour'], listing['size'], listing['material'],
                          listing['browse_node_1'], listing['browse_node_2'],
                          listing['keyword_count'], listing['bullet_count'],
+                         listing['listing_created_at'],
                          json.dumps(listing['raw_json'])),
                     )
                     stored += 1

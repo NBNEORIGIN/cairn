@@ -108,6 +108,33 @@ async def upload_advertising(file: UploadFile = File(...),
     return result
 
 
+# ── New products ─────────────────────────────────────────────────────────────
+
+@router.post("/new-products/ingest")
+async def ingest_new_products(
+    csv_path: str = Query(default='data/nbne-processes/new_products_dec2025_mar2026.csv'),
+):
+    """Ingest the new products reference CSV into ami_new_products."""
+    from core.amazon_intel.db import ingest_new_products_csv
+    from pathlib import Path
+    path = Path(csv_path)
+    if not path.exists():
+        # Try relative to claw root
+        path = Path(__file__).parent.parent.parent / csv_path
+    if not path.exists():
+        return {'error': f'File not found: {csv_path}', 'status': 'error'}
+    result = ingest_new_products_csv(str(path))
+    return {'status': 'complete', **result}
+
+
+@router.post("/migrate")
+async def run_migration():
+    """Run schema migrations (add new columns to existing tables)."""
+    from core.amazon_intel.db import migrate_ami_schema
+    migrate_ami_schema()
+    return {'status': 'complete', 'message': 'Schema migrations applied'}
+
+
 # ── Snapshots ────────────────────────────────────────────────────────────────
 
 @router.post("/snapshots/build")

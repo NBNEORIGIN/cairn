@@ -103,6 +103,7 @@ CREATE TABLE IF NOT EXISTS ami_flatfile_data (
     keyword_count   INTEGER DEFAULT 0,
     bullet_count    INTEGER DEFAULT 0,
     raw_json        JSONB,
+    listing_created_at TIMESTAMP,
     created_at      TIMESTAMP DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_ami_ff_sku ON ami_flatfile_data(sku);
@@ -186,6 +187,8 @@ CREATE TABLE IF NOT EXISTS ami_listing_snapshots (
     -- Cross-module (from Manufacture API)
     cost_price          NUMERIC(10,2),
     gross_margin        NUMERIC(6,4),
+    -- Listing date (from flatfile "Offering Release Date")
+    listing_created_at  TIMESTAMP,
     -- Scoring output
     health_score        NUMERIC(4,1),
     issues              TEXT[],
@@ -203,6 +206,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_ami_snap_asin_date
 CREATE INDEX IF NOT EXISTS idx_ami_snap_m ON ami_listing_snapshots(m_number);
 CREATE INDEX IF NOT EXISTS idx_ami_snap_score ON ami_listing_snapshots(health_score);
 CREATE INDEX IF NOT EXISTS idx_ami_snap_mkt ON ami_listing_snapshots(marketplace);
+
+-- New products reference (definitive list from Toby, Dec 2025 – Mar 2026)
+CREATE TABLE IF NOT EXISTS ami_new_products (
+    id              SERIAL PRIMARY KEY,
+    sku             VARCHAR(200) NOT NULL,
+    asin            VARCHAR(20),
+    channel         VARCHAR(50),
+    is_quartile     BOOLEAN DEFAULT FALSE,
+    created_at      TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ami_np_asin ON ami_new_products(asin);
+CREATE INDEX IF NOT EXISTS idx_ami_np_sku ON ami_new_products(sku);
 
 -- Weekly reports
 CREATE TABLE IF NOT EXISTS ami_weekly_reports (
@@ -255,6 +270,51 @@ def update_upload(upload_id: int, *, row_count: int = 0, skip_count: int = 0,
                  _json.dumps(errors or []), status, upload_id),
             )
             conn.commit()
+
+
+def ingest_new_products_csv(csv_path: str) -> dict:
+    """Ingest the new products reference CSV into ami_new_products."""
+    import csv as _csv
+    with open(csv_path, newline='', encoding='utf-8-sig') as f:
+        reader = _csv.DictReader(f)
+        rows = list(reader)
+
+    inserted = 0
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            # Clear existing data
+            cur.execute("DELETE FROM ami_new_products")
+            for row in rows:
+                sku = (row.get('SKU') or '').strip()
+                if not sku:
+                    continue
+                asin = (row.get('ASIN') or '').strip() or None
+                channel = (row.get('CHANNEL') or '').strip() or None
+                is_quartile = (row.get('QUARTILE?') or '').strip().upper() == 'YES'
+                cur.execute(
+                    """INSERT INTO ami_new_products (sku, asin, channel, is_quartile)
+                       VALUES (%s, %s, %s, %s)""",
+                    (sku, asin, channel, is_quartile),
+                )
+                inserted += 1
+            conn.commit()
+    return {'inserted': inserted, 'total_rows': len(rows)}
+
+
+def migrate_ami_schema():
+    """Add new columns to existing tables (safe to re-run)."""
+    migrations = [
+        "ALTER TABLE ami_flatfile_data ADD COLUMN listing_created_at TIMESTAMP",
+        "ALTER TABLE ami_listing_snapshots ADD COLUMN listing_created_at TIMESTAMP",
+    ]
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for sql in migrations:
+                try:
+                    cur.execute(sql)
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
 
 
 def list_uploads(limit: int = 50) -> list[dict]:

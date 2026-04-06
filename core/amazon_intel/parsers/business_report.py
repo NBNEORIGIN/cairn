@@ -26,40 +26,52 @@ HEADER_ALIASES = {
         'Title', 'title',
     ],
     'sessions': [
-        'Sessions - Total', 'Sessions \u2013 Total', 'Sessions \u2014 Total',
+        'Sessions - Total', 'Sessions – Total', 'Sessions — Total',
+        'sessions - total', 'sessions – total',
         'Sessions', 'Total Sessions',
     ],
     'session_percentage': [
         'Session Percentage - Total', 'Session percentage - Total',
+        'Session percentage – Total', 'session percentage - total',
+        'session percentage – total',
         'Session Percentage', 'Session %',
     ],
     'page_views': [
         'Page Views - Total', 'Page views - Total',
+        'Page views – Total', 'page views - total',
+        'page views – total',
         'Page Views', 'Total Page Views',
     ],
     'buy_box_percentage': [
-        'Buy Box Percentage', 'Buy Box %', 'Featured Offer (Buy Box) Percentage',
+        'Buy Box Percentage', 'Buy Box %',
+        'Featured Offer (Buy Box) Percentage',
+        'Featured Offer (Buy Box) percentage',
+        'featured offer (buy box) percentage',
     ],
     'units_ordered': [
-        'Units Ordered', 'Units Ordered - Total',
+        'Units Ordered', 'Units ordered',
+        'Units Ordered - Total', 'units ordered',
     ],
     'unit_session_percentage': [
-        'Unit Session Percentage', 'Unit Session Percentage - Total',
+        'Unit Session Percentage', 'Unit session percentage',
+        'Unit Session Percentage - Total', 'unit session percentage',
         'Unit Session %', 'Conversion Rate',
     ],
     'ordered_product_sales': [
-        'Ordered Product Sales', 'Ordered Product Sales - Total',
+        'Ordered Product Sales', 'Ordered product sales',
+        'Ordered Product Sales - Total', 'ordered product sales',
     ],
     'total_order_items': [
-        'Total Order Items', 'Total Order Items - Total',
+        'Total Order Items', 'Total order items',
+        'Total Order Items - Total', 'total order items',
     ],
 }
 
 
 def _normalise_header(h: str) -> str:
-    """Normalise dashes and whitespace in header names for matching."""
+    """Normalise dashes, whitespace, and case in header names for matching."""
     # Replace en dash (U+2013) and em dash (U+2014) with regular dash
-    return h.strip().replace('\u2013', '-').replace('\u2014', '-').lower()
+    return h.strip().replace('\u2013', '-').replace('\u2014', '-').replace('\u00a0', ' ').lower()
 
 
 def _build_column_map(headers: list[str]) -> dict[str, int]:
