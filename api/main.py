@@ -721,6 +721,76 @@ async def chat_stream(
     )
 
 
+class ChatStreamRequest(BaseModel):
+    """POST body for /chat/stream — avoids URL length limits."""
+    model_config = ConfigDict(protected_namespaces=())
+
+    project: str
+    session_id: str
+    message: str
+    channel: str = 'web'
+    mentions: Optional[str] = None
+    skill_ids: Optional[str] = None
+    model_override: Optional[str] = None
+    subproject_id: Optional[str] = None
+
+
+@app.post("/chat/stream")
+async def chat_stream_post(
+    body: ChatStreamRequest,
+    _: bool = Depends(verify_api_key),
+):
+    """POST variant of SSE stream — accepts message in body, no URL length limit."""
+    import json as _json
+
+    parsed_mentions = []
+    parsed_skill_ids: list[str] = []
+    if body.mentions:
+        try:
+            parsed_mentions = _json.loads(body.mentions)
+        except Exception:
+            pass
+    if body.skill_ids:
+        try:
+            parsed_skill_ids = [str(item) for item in _json.loads(body.skill_ids)]
+        except Exception:
+            parsed_skill_ids = [
+                item.strip() for item in body.skill_ids.split(',') if item.strip()
+            ]
+
+    agent = get_agent(body.project)
+
+    envelope = MessageEnvelope(
+        content=body.message,
+        channel=Channel(body.channel),
+        project_id=body.project,
+        session_id=body.session_id,
+        subproject_id=body.subproject_id,
+        mentions=parsed_mentions,
+        skill_ids=parsed_skill_ids,
+        model_override=body.model_override,
+    )
+
+    async def event_generator():
+        try:
+            async for event in agent.process_streaming(envelope):
+                yield f'data: {_json.dumps(event)}\n\n'
+        except Exception as exc:
+            yield f'data: {_json.dumps({"type": "error", "message": str(exc)})}\n\n'
+        finally:
+            yield 'data: {"type": "done"}\n\n'
+
+    return StreamingResponse(
+        event_generator(),
+        media_type='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no',
+            'Connection': 'keep-alive',
+        },
+    )
+
+
 # ─── Subproject endpoints ─────────────────────────────────────────────────────
 
 @app.get("/projects/{project}/subprojects")

@@ -185,7 +185,7 @@ Rules:
 
 `
 
-export async function GET(req: NextRequest) {
+export async function POST(req: NextRequest) {
   const cookieStore = await cookies()
   const accessToken = cookieStore.get(AUTH_COOKIE_NAME)?.value
 
@@ -197,9 +197,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Token expired' }, { status: 401 })
   }
 
-  // Build upstream URL — inject personality + module context + CRM search into the message
-  const params = new URLSearchParams(req.nextUrl.searchParams)
-  const originalMessage = params.get('message') ?? ''
+  let body: { project?: string; session_id?: string; message?: string; channel?: string }
+  try {
+    body = await req.json()
+  } catch {
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
+  }
+
+  const originalMessage = body.message ?? ''
 
   // Fetch live module context, CRM search, and wiki context in parallel
   const [moduleContext, crmContext, wikiContext] = await Promise.all([
@@ -208,17 +213,23 @@ export async function GET(req: NextRequest) {
     fetchWikiContext(originalMessage),
   ])
 
-  params.set('message', CAIRN_PERSONALITY + moduleContext + crmContext + wikiContext + originalMessage)
-
-  const upstreamUrl = `${CAIRN_API_URL}/chat/stream?${params.toString()}`
+  const enrichedMessage = CAIRN_PERSONALITY + moduleContext + crmContext + wikiContext + originalMessage
 
   let upstreamRes: Response
   try {
-    upstreamRes = await fetch(upstreamUrl, {
+    upstreamRes = await fetch(`${CAIRN_API_URL}/chat/stream`, {
+      method: 'POST',
       headers: {
         'X-API-Key': CAIRN_API_KEY,
+        'Content-Type': 'application/json',
         Accept: 'text/event-stream',
       },
+      body: JSON.stringify({
+        project: body.project ?? 'nbne',
+        session_id: body.session_id ?? '',
+        message: enrichedMessage,
+        channel: body.channel ?? 'web',
+      }),
       cache: 'no-store',
     })
   } catch {

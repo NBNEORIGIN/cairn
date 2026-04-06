@@ -479,66 +479,100 @@ function AskPageInner() {
       router.replace(`/ask?s=${sessionId}`, { scroll: false })
     }
 
-    const params = new URLSearchParams({
-      project: 'nbne',
-      session_id: sessionId,
-      message: fileContext + text,
-      channel: 'web',
-    })
+    // Use POST + streaming fetch instead of EventSource to avoid URL length limits
+    const abortController = new AbortController()
+    esRef.current = { close: () => abortController.abort() } as EventSource
 
-    const es = new EventSource(`/api/chat/stream?${params.toString()}`)
-    esRef.current = es
+    try {
+      const streamRes = await fetch('/api/chat/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project: 'nbne',
+          session_id: sessionId,
+          message: fileContext + text,
+          channel: 'web',
+        }),
+        signal: abortController.signal,
+      })
 
-    es.onmessage = (event) => {
-      try {
-        const parsed = JSON.parse(event.data)
-        const type: string = parsed.type ?? ''
-
-        if (type === 'response_delta') {
-          const chunk: string = parsed.text ?? ''
-          if (chunk) {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantId ? { ...m, content: m.content + chunk } : m
-              )
-            )
-          }
-        } else if (type === 'complete') {
-          setMessages((prev) =>
-            prev.map((m) => {
-              if (m.id !== assistantId) return m
-              if (m.content) return m
-              return { ...m, content: parsed.response ?? '' }
-            })
+      if (!streamRes.ok || !streamRes.body) {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId ? { ...m, content: 'Failed to reach the server.', isError: true } : m
           )
-          es.close()
-          esRef.current = null
-          setSending(false)
-          if (pendingAutoSpeakRef.current === assistantId) {
-            pendingAutoSpeakRef.current = null
-            setTimeout(() => speakMessage(assistantId), 100)
-          }
-        } else if (type === 'error') {
-          const errMsg: string = parsed.message ?? parsed.error ?? 'An error occurred'
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId ? { ...m, content: errMsg, isError: true } : m
-            )
-          )
-          es.close()
-          esRef.current = null
-          setSending(false)
-        } else if (type === 'done') {
-          es.close()
-          esRef.current = null
-          setSending(false)
-        }
-      } catch {
-        // Non-JSON — ignore
+        )
+        setSending(false)
+        return
       }
-    }
 
-    es.onerror = () => { es.close(); esRef.current = null; setSending(false) }
+      const reader = streamRes.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const jsonStr = line.slice(6).trim()
+          if (!jsonStr) continue
+
+          try {
+            const parsed = JSON.parse(jsonStr)
+            const type: string = parsed.type ?? ''
+
+            if (type === 'response_delta') {
+              const chunk: string = parsed.text ?? ''
+              if (chunk) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantId ? { ...m, content: m.content + chunk } : m
+                  )
+                )
+              }
+            } else if (type === 'complete') {
+              setMessages((prev) =>
+                prev.map((m) => {
+                  if (m.id !== assistantId) return m
+                  if (m.content) return m
+                  return { ...m, content: parsed.response ?? '' }
+                })
+              )
+              if (pendingAutoSpeakRef.current === assistantId) {
+                pendingAutoSpeakRef.current = null
+                setTimeout(() => speakMessage(assistantId), 100)
+              }
+            } else if (type === 'error') {
+              const errMsg: string = parsed.message ?? parsed.error ?? 'An error occurred'
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantId ? { ...m, content: errMsg, isError: true } : m
+                )
+              )
+            }
+          } catch {
+            // Non-JSON line — ignore
+          }
+        }
+      }
+    } catch (err) {
+      if ((err as Error).name !== 'AbortError') {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId && !m.content ? { ...m, content: 'Connection lost.', isError: true } : m
+          )
+        )
+      }
+    } finally {
+      esRef.current = null
+      setSending(false)
+    }
   }, [input, sending, sessionId, router, speakMessage, voiceMode])
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
