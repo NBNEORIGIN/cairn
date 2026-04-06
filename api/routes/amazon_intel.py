@@ -3,7 +3,7 @@ Amazon Listing Intelligence API routes.
 
 Mounted at /ami/* in the Cairn FastAPI app.
 """
-from fastapi import APIRouter, UploadFile, File, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, UploadFile, File, HTTPException, Query
 from typing import Optional
 
 router = APIRouter(prefix="/ami", tags=["Amazon Intelligence"])
@@ -223,3 +223,127 @@ async def cairn_context():
     """Module context endpoint per CAIRN_MODULES.md spec."""
     from core.amazon_intel.reports import build_cairn_context
     return build_cairn_context()
+
+
+# ── SP-API Automated Sync ─────────────────────────────────────────────────────
+
+@router.get("/spapi/status")
+async def spapi_status():
+    """Recent SP-API sync log entries."""
+    from core.amazon_intel.spapi.scheduler import get_sync_status
+    return {'syncs': get_sync_status(limit=40)}
+
+
+@router.post("/spapi/sync")
+async def spapi_sync(
+    background_tasks: BackgroundTasks,
+    region: Optional[str] = Query(None, description="EU, NA, FE — default: all active"),
+    force: bool = Query(False, description="Ignore 6hr interval check"),
+):
+    """
+    Trigger SP-API sync (inventory + analytics + advertising).
+    Runs in background — returns immediately with job info.
+    Poll /ami/spapi/status for results.
+    """
+    from core.amazon_intel.spapi.scheduler import run_full_sync, ACTIVE_REGIONS
+
+    regions = [region] if region else None  # type: ignore[list-item]
+    background_tasks.add_task(run_full_sync, regions=regions, force=force)
+    return {
+        'status': 'started',
+        'regions': regions or ACTIVE_REGIONS,
+        'force': force,
+        'message': 'Sync running in background. Poll /ami/spapi/status for results.',
+    }
+
+
+@router.post("/spapi/sync/inventory")
+async def spapi_sync_inventory(
+    background_tasks: BackgroundTasks,
+    region: str = Query('EU'),
+):
+    """Pull All Listings Report for a region via SP-API."""
+    from core.amazon_intel.spapi.inventory import sync_inventory
+    background_tasks.add_task(sync_inventory, region=region)
+    return {'status': 'started', 'region': region, 'type': 'inventory'}
+
+
+@router.post("/spapi/sync/analytics")
+async def spapi_sync_analytics(
+    background_tasks: BackgroundTasks,
+    region: str = Query('EU'),
+    days: int = Query(30, le=60),
+):
+    """Pull 30-day Sales & Traffic report via SP-API."""
+    from core.amazon_intel.spapi.analytics import sync_analytics
+    background_tasks.add_task(sync_analytics, region=region, days=days)
+    return {'status': 'started', 'region': region, 'type': 'analytics', 'days': days}
+
+
+@router.post("/spapi/sync/advertising")
+async def spapi_sync_advertising(
+    background_tasks: BackgroundTasks,
+    region: str = Query('EU'),
+    profile_id: Optional[str] = Query(None),
+    days: int = Query(30, le=60),
+):
+    """Pull Sponsored Products search term report via Ads API."""
+    from core.amazon_intel.spapi.advertising import sync_advertising
+    background_tasks.add_task(sync_advertising, region=region,
+                               profile_id=profile_id, days=days)
+    return {'status': 'started', 'region': region, 'type': 'advertising', 'days': days}
+
+
+@router.get("/spapi/advertising/profiles")
+async def spapi_advertising_profiles(region: str = Query('EU')):
+    """
+    Discover advertising profile IDs for a region.
+    Run this once per region, then store the profileId in .env as
+    AMAZON_ADS_PROFILE_ID_{EU/NA/AU}.
+    """
+    from core.amazon_intel.spapi.advertising import get_advertising_profiles
+    profiles = get_advertising_profiles(region=region)
+    return {'region': region, 'profiles': profiles}
+
+
+# ── Listings Write API ────────────────────────────────────────────────────────
+
+@router.get("/spapi/listings/{sku}")
+async def get_listing(sku: str, region: str = Query('EU')):
+    """Retrieve current listing attributes for a SKU from Amazon."""
+    from core.amazon_intel.spapi.listings import get_listing as _get
+    return _get(sku=sku, region=region)  # type: ignore[arg-type]
+
+
+@router.patch("/spapi/listings/{sku}/price")
+async def patch_listing_price(
+    sku: str,
+    price: float = Query(...),
+    currency: str = Query('GBP'),
+    region: str = Query('EU'),
+):
+    """Update the price for a SKU on Amazon."""
+    from core.amazon_intel.spapi.listings import update_price
+    return update_price(sku=sku, price=price, currency=currency, region=region)  # type: ignore[arg-type]
+
+
+@router.patch("/spapi/listings/{sku}/bullets")
+async def patch_listing_bullets(
+    sku: str,
+    region: str = Query('EU'),
+    bullets: list[str] = Query(...),
+):
+    """Update bullet points for a SKU on Amazon (max 5)."""
+    from core.amazon_intel.spapi.listings import update_bullets
+    return update_bullets(sku=sku, bullets=bullets, region=region)  # type: ignore[arg-type]
+
+
+@router.patch("/spapi/listings/{sku}/title")
+async def patch_listing_title(
+    sku: str,
+    title: str = Query(...),
+    region: str = Query('EU'),
+):
+    """Update the listing title for a SKU on Amazon."""
+    from core.amazon_intel.spapi.listings import update_title
+    return update_title(sku=sku, title=title, region=region)  # type: ignore[arg-type]

@@ -236,6 +236,20 @@ CREATE TABLE IF NOT EXISTS ami_weekly_reports (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ami_report_date_mkt
     ON ami_weekly_reports(report_date, marketplace);
+
+-- SP-API automated sync log
+CREATE TABLE IF NOT EXISTS ami_spapi_sync_log (
+    id              SERIAL PRIMARY KEY,
+    sync_type       VARCHAR(50) NOT NULL,  -- 'inventory', 'analytics', 'advertising'
+    region          VARCHAR(10) NOT NULL,  -- 'EU', 'NA', 'FE'
+    status          VARCHAR(20) DEFAULT 'running',  -- 'running', 'complete', 'error'
+    started_at      TIMESTAMP DEFAULT NOW(),
+    completed_at    TIMESTAMP,
+    result_json     JSONB,
+    error           TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ami_sync_type_region
+    ON ami_spapi_sync_log(sync_type, region, completed_at DESC);
 """
 
 
