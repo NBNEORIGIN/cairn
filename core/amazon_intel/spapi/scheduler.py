@@ -69,10 +69,11 @@ def _run_logged(sync_type: str, region: str, fn: Callable, **kwargs):
     """
     Wrapper used by individual sync endpoints to get the same logging
     and status tracking as the full scheduler.
+    Passes region to fn automatically — do not include it in kwargs.
     """
     log_id = _log_start(sync_type, region)
     try:
-        result = fn(**kwargs)
+        result = fn(region=region, **kwargs)
         _log_complete(log_id, result)
     except Exception as e:
         _log_error(log_id, traceback.format_exc())

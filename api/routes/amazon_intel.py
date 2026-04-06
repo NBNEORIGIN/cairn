@@ -276,7 +276,7 @@ async def spapi_sync_inventory(
     """Pull All Listings Report for a region via SP-API."""
     from core.amazon_intel.spapi.scheduler import _run_logged
     from core.amazon_intel.spapi.inventory import sync_inventory
-    background_tasks.add_task(_run_logged, 'inventory', region, sync_inventory, region=region)
+    background_tasks.add_task(_run_logged, 'inventory', region, sync_inventory)
     return {'status': 'started', 'region': region, 'type': 'inventory',
             'message': 'Poll /ami/spapi/status for result. Amazon report generation: 5-20 min.'}
 
@@ -290,8 +290,7 @@ async def spapi_sync_analytics(
     """Pull 30-day Sales & Traffic report via SP-API."""
     from core.amazon_intel.spapi.scheduler import _run_logged
     from core.amazon_intel.spapi.analytics import sync_analytics
-    background_tasks.add_task(_run_logged, 'analytics', region, sync_analytics,
-                               region=region, days=days)
+    background_tasks.add_task(_run_logged, 'analytics', region, sync_analytics, days=days)
     return {'status': 'started', 'region': region, 'type': 'analytics', 'days': days,
             'message': 'Poll /ami/spapi/status for result.'}
 
