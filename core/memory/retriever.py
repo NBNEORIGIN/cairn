@@ -45,6 +45,10 @@ class RetrievedChunk:
     chunk_name: str | None = None
 
     @property
+    def is_wiki(self) -> bool:
+        return self.chunk_type == 'wiki'
+
+    @property
     def match_quality(self) -> str:
         if self.bm25_rank is not None and self.cosine_rank is not None:
             return 'exact+semantic'
@@ -56,6 +60,21 @@ class RetrievedChunk:
     def dedupe_key(self) -> str:
         head = self.content[:120]
         return f'{self.file}:{self.chunk_type}:{head}'
+
+    @property
+    def wiki_entity(self) -> str | None:
+        """Extract the entity identifier from a wiki article path.
+
+        For example, 'wiki/modules/phloe.md' returns 'phloe'.
+        Returns None for non-wiki chunks.
+        """
+        if not self.is_wiki:
+            return None
+        # wiki/modules/phloe.md -> phloe
+        name = self.file.rsplit('/', 1)[-1]
+        if name.endswith('.md'):
+            name = name[:-3]
+        return name.lower()
 
 
 class HybridRetriever:
@@ -271,6 +290,10 @@ class HybridRetriever:
             for key in ordered
         ]
 
+    # ── Wiki boost configuration ──────────────────────────────────
+    WIKI_BOOST_FACTOR = 1.5
+    WIKI_BACKLINK_BUDGET = 3
+
     def retrieve(
         self,
         task: str,
@@ -301,21 +324,171 @@ class HybridRetriever:
 
         if bm25_results and cosine_results:
             merged = self._rrf_merge(bm25_results, cosine_results)
-            return [self._to_dict(chunk) for chunk in merged[:self.context_engine.MAX_TIER2_CHUNKS]]
+        elif bm25_results:
+            merged = bm25_results
+        elif cosine_results:
+            merged = cosine_results
+        else:
+            if cosine_error:
+                logger.warning(
+                    '[retriever] cosine retrieval failed for %s: %s',
+                    self.context_engine.project_id,
+                    cosine_error,
+                )
+            return self.context_engine._retrieve_by_keyword(task, subproject_id)
 
-        if bm25_results:
-            return [self._to_dict(chunk) for chunk in bm25_results[:self.context_engine.MAX_TIER2_CHUNKS]]
+        boosted = self._apply_wiki_boost(merged)
+        top_k = self.context_engine.MAX_TIER2_CHUNKS
+        final = self._follow_backlinks(boosted[:top_k])
+        return [self._to_dict(chunk) for chunk in final[:top_k]]
 
-        if cosine_results:
-            return [self._to_dict(chunk) for chunk in cosine_results[:self.context_engine.MAX_TIER2_CHUNKS]]
+    # ── Wiki layer methods ─────────────────────────────────────
 
-        if cosine_error:
-            logger.warning(
-                '[retriever] cosine retrieval failed for %s: %s',
-                self.context_engine.project_id,
-                cosine_error,
+    def _apply_wiki_boost(
+        self, results: list[RetrievedChunk]
+    ) -> list[RetrievedChunk]:
+        """Apply score boost to wiki chunks and deduplicate.
+
+        Wiki articles get a 1.5x score multiplier. When a wiki article
+        and a raw chunk cover the same entity (matched by file-path
+        entity extraction), the wiki article wins and the raw chunk
+        is dropped.
+
+        Safe for projects with no wiki articles — the loop simply finds
+        nothing to boost and returns the list re-sorted.
+        """
+        # Boost wiki scores
+        boosted: list[RetrievedChunk] = []
+        for chunk in results:
+            if chunk.is_wiki:
+                boosted.append(replace(chunk, score=chunk.score * self.WIKI_BOOST_FACTOR))
+            else:
+                boosted.append(chunk)
+
+        # Re-sort by boosted score
+        boosted.sort(key=lambda c: c.score, reverse=True)
+
+        # Deduplicate: wiki wins over raw for the same entity
+        seen_entities: set[str] = set()
+        deduped: list[RetrievedChunk] = []
+        for chunk in boosted:
+            entity = chunk.wiki_entity
+            if entity:
+                # This is a wiki chunk — claim the entity
+                seen_entities.add(entity)
+                deduped.append(chunk)
+            else:
+                # Raw chunk — check if a wiki article already covers this entity
+                raw_entity = self._extract_entity_from_raw(chunk)
+                if raw_entity and raw_entity in seen_entities:
+                    continue  # wiki already covers this
+                deduped.append(chunk)
+
+        return deduped
+
+    @staticmethod
+    def _extract_entity_from_raw(chunk: RetrievedChunk) -> str | None:
+        """Try to extract a module/entity name from a raw chunk's file path.
+
+        Maps paths like 'core/etsy_intel/sync.py' to 'etsy-intelligence',
+        or 'projects/phloe/core.md' to 'phloe'. Returns None if no
+        meaningful entity can be extracted.
+        """
+        path = chunk.file.lower().replace('\\', '/')
+        # Direct project paths
+        if path.startswith('projects/') and '/' in path[len('projects/'):]:
+            return path.split('/')[1]
+        # Module code paths
+        module_map = {
+            'core/amazon_intel': 'amazon-intelligence',
+            'core/etsy_intel': 'etsy-intelligence',
+            'api/routes/amazon_intel': 'amazon-intelligence',
+            'api/routes/etsy_intel': 'etsy-intelligence',
+        }
+        for prefix, entity in module_map.items():
+            if path.startswith(prefix):
+                return entity
+        return None
+
+    def _follow_backlinks(
+        self, results: list[RetrievedChunk]
+    ) -> list[RetrievedChunk]:
+        """Follow [[backlinks]] from wiki articles, one level deep.
+
+        For each wiki article in the results, extract [[path]] links
+        and load the linked wiki articles from the database. Adds up
+        to WIKI_BACKLINK_BUDGET linked articles to the results.
+
+        Safe for projects with no wiki articles — finds no backlinks.
+        """
+        budget = self.WIKI_BACKLINK_BUDGET
+        if budget <= 0:
+            return results
+
+        seen_files = {chunk.file for chunk in results}
+        extra: list[RetrievedChunk] = []
+
+        for chunk in results:
+            if budget <= 0:
+                break
+            if not chunk.is_wiki:
+                continue
+            links = self._extract_backlinks(chunk.content)
+            for link in links:
+                if budget <= 0:
+                    break
+                # Normalise link to file_path format
+                file_path = link if link.endswith('.md') else f'{link}.md'
+                if not file_path.startswith('wiki/'):
+                    file_path = f'wiki/{file_path}'
+                if file_path in seen_files:
+                    continue
+                linked = self._load_wiki_chunk(file_path)
+                if linked:
+                    extra.append(linked)
+                    seen_files.add(file_path)
+                    budget -= 1
+
+        return results + extra
+
+    @staticmethod
+    def _extract_backlinks(content: str) -> list[str]:
+        """Extract [[wiki/path]] links from markdown content."""
+        return re.findall(r'\[\[([^\]]+)\]\]', content)
+
+    def _load_wiki_chunk(self, file_path: str) -> RetrievedChunk | None:
+        """Load a single wiki article from the database by file_path."""
+        try:
+            conn = self.context_engine._get_connection()
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT file_path, chunk_content, chunk_type, chunk_name
+                    FROM claw_code_chunks
+                    WHERE project_id = %s
+                      AND chunk_type = 'wiki'
+                      AND file_path = %s
+                    LIMIT 1
+                    """,
+                    (self.context_engine.project_id, file_path),
+                )
+                row = cur.fetchone()
+            if not row:
+                return None
+            return RetrievedChunk(
+                file=row[0],
+                content=row[1],
+                chunk_type=row[2],
+                chunk_name=row[3],
+                score=0.5,  # backlinked articles get a neutral score
             )
-        return self.context_engine._retrieve_by_keyword(task, subproject_id)
+        except Exception as exc:
+            logger.debug(
+                '[retriever] backlink load failed for %s: %s',
+                file_path,
+                exc,
+            )
+            return None
 
     def _to_dict(self, chunk: RetrievedChunk) -> dict:
         return {
