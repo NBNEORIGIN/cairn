@@ -30,6 +30,16 @@ retrieve_codebase_context(query=<task description>, project=<project>, limit=10)
 retrieve_chat_history(query=<task description>, project=<project>, limit=10)
 ```
 
+Also pull compiled wiki context for structured background:
+```
+GET http://localhost:8765/api/wiki/search?q=<brief description of the task>&top_k=3
+```
+
+Wiki articles contain pre-compiled, cross-referenced knowledge about each
+module and how they interconnect. They are more useful than raw chunks for
+understanding architecture and status. If a wiki article exists for the
+module you're working on, prefer it over raw chunk context.
+
 Ask yourself:
 - Has this problem been solved before?
 - Was a similar approach tried and rejected?
@@ -134,6 +144,12 @@ update_memory(
 
 The `rejected` field is as important as `decision`. An empty rejected field is a
 red flag — you almost always considered at least one alternative.
+
+**Wiki maintenance:** If this task changed a module's architecture, status,
+connections, key concepts, or tech stack:
+1. Update the wiki article: `wiki/modules/{module}.md`
+2. Trigger re-embedding: `POST http://localhost:8765/api/wiki/compile?scope=modules`
+3. This keeps the staff-facing knowledge base current with developer changes.
 
 ---
 
