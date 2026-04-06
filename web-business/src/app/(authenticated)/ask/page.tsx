@@ -245,7 +245,7 @@ function AskPageInner() {
 
   const [uploadState, setUploadState] = useState<'idle' | 'uploading'>('idle')
   const [uploadFilename, setUploadFilename] = useState('')
-  const [pendingFile, setPendingFile] = useState<File | null>(null)
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const pendingAutoSpeakRef = useRef<string | null>(null)
@@ -257,21 +257,25 @@ function AskPageInner() {
   const isNewSession = useRef(!urlSessionId)
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+    const files = Array.from(e.target.files ?? [])
+    if (files.length === 0) return
     e.target.value = ''
-    setPendingFile(file)
-    // Pre-fill a helpful prompt if the input is empty
+    setPendingFiles((prev) => [...prev, ...files])
     if (!input.trim()) {
-      setInput(`Analyse this file and summarise the key findings`)
+      setInput(files.length === 1
+        ? 'Analyse this file and summarise the key findings'
+        : `Analyse these ${files.length} files and summarise the key findings`)
     }
   }, [input])
 
-  const handleRemoveFile = useCallback(() => {
-    setPendingFile(null)
+  const handleRemoveFile = useCallback((index: number) => {
+    setPendingFiles((prev) => prev.filter((_, i) => i !== index))
   }, [])
 
-  // Handle drag and drop on the whole chat area
+  const handleClearFiles = useCallback(() => {
+    setPendingFiles([])
+  }, [])
+
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
@@ -280,11 +284,14 @@ function AskPageInner() {
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    const file = e.dataTransfer.files?.[0]
-    if (file) {
-      setPendingFile(file)
+    const files = Array.from(e.dataTransfer.files ?? [])
+    if (files.length > 0) {
+      setPendingFiles((prev) => [...prev, ...files])
       if (!input.trim()) {
-        setInput(`Analyse this file and summarise the key findings`)
+        const total = files.length
+        setInput(total === 1
+          ? 'Analyse this file and summarise the key findings'
+          : `Analyse these ${total} files and summarise the key findings`)
       }
     }
   }, [input])
@@ -423,8 +430,10 @@ function AskPageInner() {
     const text = (overrideText ?? input).trim()
     if (!text || sending) return
 
-    // Show user message (include file indicator if attached)
-    const fileLabel = pendingFile ? `📎 ${pendingFile.name}\n` : ''
+    // Show user message (include file indicators if attached)
+    const fileLabel = pendingFiles.length > 0
+      ? pendingFiles.map((f) => `📎 ${f.name}`).join('\n') + '\n'
+      : ''
     const userMsg: Message = { id: `u-${Date.now()}`, role: 'user', content: fileLabel + text }
     setMessages((prev) => [...prev, userMsg])
     setInput('')
@@ -432,28 +441,31 @@ function AskPageInner() {
 
     if (esRef.current) { esRef.current.close(); esRef.current = null }
 
-    // If there's a pending file, upload it first and prepend the result to the message
+    // If there are pending files, upload them sequentially and prepend results
     let fileContext = ''
-    if (pendingFile) {
+    if (pendingFiles.length > 0) {
       setUploadState('uploading')
-      setUploadFilename(pendingFile.name)
-      try {
-        const formData = new FormData()
-        formData.append('file', pendingFile)
-        const uploadRes = await fetch('/api/chat/upload', { method: 'POST', body: formData })
-        const uploadData = await uploadRes.json()
-        if (uploadData.success) {
-          fileContext = `[FILE UPLOADED: ${pendingFile.name} — ${uploadData.summary}]\n\n`
-        } else {
-          fileContext = `[FILE UPLOAD FAILED: ${pendingFile.name} — ${uploadData.summary}]\n\n`
+      const results: string[] = []
+      for (const file of pendingFiles) {
+        setUploadFilename(file.name)
+        try {
+          const formData = new FormData()
+          formData.append('file', file)
+          const uploadRes = await fetch('/api/chat/upload', { method: 'POST', body: formData })
+          const uploadData = await uploadRes.json()
+          if (uploadData.success) {
+            results.push(`[FILE UPLOADED: ${file.name} — ${uploadData.summary}]`)
+          } else {
+            results.push(`[FILE UPLOAD FAILED: ${file.name} — ${uploadData.summary}]`)
+          }
+        } catch {
+          results.push(`[FILE UPLOAD FAILED: ${file.name} — could not reach server]`)
         }
-      } catch {
-        fileContext = `[FILE UPLOAD FAILED: ${pendingFile.name} — could not reach server]\n\n`
-      } finally {
-        setUploadState('idle')
-        setUploadFilename('')
-        setPendingFile(null)
       }
+      fileContext = results.join('\n') + '\n\n'
+      setUploadState('idle')
+      setUploadFilename('')
+      setPendingFiles([])
     }
 
     const assistantId = `a-${Date.now()}`
@@ -736,15 +748,25 @@ function AskPageInner() {
               </div>
             )}
 
-            {/* Pending file indicator */}
-            {pendingFile && uploadState !== 'uploading' && (
-              <div className="flex items-center justify-between px-3 py-2 mb-2 bg-slate-50 border border-slate-200 rounded-lg max-w-3xl mx-auto w-full">
-                <div className="flex items-center gap-2 text-xs text-slate-600 font-medium">
-                  <span>📎</span>
-                  <span className="truncate max-w-[200px] md:max-w-[400px]">{pendingFile.name}</span>
-                  <span className="text-slate-400">({(pendingFile.size / 1024).toFixed(0)} KB)</span>
-                </div>
-                <button onClick={handleRemoveFile} className="text-xs text-slate-400 hover:text-red-500 ml-2">Remove</button>
+            {/* Pending files indicator */}
+            {pendingFiles.length > 0 && uploadState !== 'uploading' && (
+              <div className="px-3 py-2 mb-2 bg-slate-50 border border-slate-200 rounded-lg max-w-3xl mx-auto w-full space-y-1">
+                {pendingFiles.map((file, i) => (
+                  <div key={`${file.name}-${i}`} className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-xs text-slate-600 font-medium">
+                      <span>📎</span>
+                      <span className="truncate max-w-[200px] md:max-w-[400px]">{file.name}</span>
+                      <span className="text-slate-400">({(file.size / 1024).toFixed(0)} KB)</span>
+                    </div>
+                    <button onClick={() => handleRemoveFile(i)} className="text-xs text-slate-400 hover:text-red-500 ml-2">✕</button>
+                  </div>
+                ))}
+                {pendingFiles.length > 1 && (
+                  <div className="flex justify-between items-center pt-1 border-t border-slate-100">
+                    <span className="text-xs text-slate-400">{pendingFiles.length} files attached</span>
+                    <button onClick={handleClearFiles} className="text-xs text-slate-400 hover:text-red-500">Remove all</button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -765,6 +787,7 @@ function AskPageInner() {
               <input
                 ref={fileInputRef}
                 type="file"
+                multiple
                 className="hidden"
                 accept=".csv,.xlsm,.xlsx,.tsv,.txt,.md,.pdf,.docx"
                 onChange={handleFileSelect}
