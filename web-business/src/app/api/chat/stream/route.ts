@@ -108,10 +108,13 @@ async function fetchWikiContext(query: string): Promise<string> {
 
     const sections: string[] = []
     for (const article of data.articles) {
-      sections.push(article.content)
+      // Truncate to first 500 chars to prevent URL length issues
+      const trimmed = (article.content ?? '').slice(0, 500)
+      if (trimmed) sections.push(trimmed)
     }
 
-    return '\n\n[WIKI CONTEXT — compiled knowledge articles relevant to this query]\n' +
+    if (sections.length === 0) return ''
+    return '\n\n[WIKI CONTEXT — relevant knowledge (summaries)]\n' +
       sections.join('\n---\n') +
       '\n[END WIKI CONTEXT]\n\n'
   } catch {
@@ -148,7 +151,8 @@ async function fetchCrmSearch(query: string): Promise<string> {
     for (const r of data.results) {
       const meta = r.metadata ?? {}
       const label = meta.project_name || meta.name || meta.title || meta.subject || ''
-      sections.push(`[${r.source_type.toUpperCase()}] ${label}\n${r.content}`)
+      const content = (r.content ?? '').slice(0, 300)
+      sections.push(`[${r.source_type.toUpperCase()}] ${label}\n${content}`)
     }
 
     return '\n\n[CRM DATA — projects, clients, emails, materials matched to this query]\n' +
