@@ -10,7 +10,9 @@ and HMRC 6-year retention tracking.
 
 ## Who Uses It
 - **Toby Fletcher** — financial oversight, revenue analysis, cash management, P&L review
+- **Jo Tompkins** — expenditure entry, invoice scanning, cost tracking (mobile via PWA)
 - **Cairn Business Brain** — polls Ledger's context endpoint for live financial data in dashboard
+- **Cairn Chat** — full Cairn brain accessible from within Ledger at /chat
 
 ## Tech Stack
 - Backend: FastAPI (Python) + PostgreSQL 16 + SQLAlchemy + Alembic migrations
@@ -34,7 +36,8 @@ and HMRC 6-year retention tracking.
   cash position (multi-account), CSV imports (Amazon/Etsy/eBay with dedup + FX),
   invoice OCR + S3 archival, P&L reports, procurement alerts + AI chat, Cairn integration,
   dark mode, PWA, mobile-responsive
-- Planned: Phloe revenue integration (Phase 7), direct Xero API sync
+- Planned: Phloe revenue integration, direct Xero API sync, Ledger Lite for Phloe tenants
+- Planned next: Ledger Lite (Phloe tenant module — simplified bookkeeping for micro-businesses)
 - Known issues: Single-tenant only (NBNE), no multi-tenant support yet
 
 ## Key Concepts
@@ -42,7 +45,7 @@ and HMRC 6-year retention tracking.
 - **Multi-currency:** Auto FX conversion via Frankfurter API, manual override, batch recalculation
 - **Import dedup:** Order-ID primary key + content hash for null-order-id rows prevents duplicates
 - **Invoice OCR:** Claude Vision extracts supplier, date, amounts, line items, VAT, currency from PDFs/images
-- **HMRC retention:** 6-year document retention calculation per tax year
+- **HMRC retention:** 7-year document retention calculation per UK tax year (6 Apr to 5 Apr)
 - **Fixed costs:** Recurring monthly expenses (rent, wages, insurance) with smart P&L logic — not double-counted when actual expenditure exists
 - **Procurement alerts:** Items below reorder point flagged, AI chat for inventory questions
 - **Context endpoint:** Polled by Cairn every 60 minutes for business brain dashboard

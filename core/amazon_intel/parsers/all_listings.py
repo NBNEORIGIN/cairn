@@ -2,6 +2,7 @@
 Amazon All Listings Report parser.
 
 Source: Seller Central → Inventory → Inventory Reports → All Listings Report
+         (also labelled "Active Listings Report" in some Seller Central versions)
 Format: TSV (tab-delimited text file)
 
 This is the key lookup table — every active listing with its seller-sku
@@ -9,18 +10,50 @@ mapped to asin1. It bridges the gap between flatfile SKUs (which often
 lack ASINs) and business report ASINs.
 
 Key columns:
-  seller-sku  — the SKU used in flatfiles and the stock sheet
-  asin1       — the primary ASIN for this listing
-  product-id  — usually same as asin1
-  item-name   — listing title
-  price       — current price
+  seller-sku          — the SKU used in flatfiles and the stock sheet
+  asin1               — the primary ASIN for this listing
+  product-id          — usually same as asin1
+  item-name           — listing title
+  price               — current price
+  open-date           — listing creation date (DD/MM/YYYY HH:MM:SS GMT/BST)
   fulfillment-channel — DEFAULT (MFN) or AMAZON_NA/AMAZON_EU (FBA)
-  status      — Active, Inactive, etc.
+  status              — Active, Inactive, etc.
 """
 import csv
 import io
 import re
+from datetime import datetime, timezone, timedelta
 from core.amazon_intel.db import get_conn, insert_upload, update_upload
+
+
+def _parse_open_date(val: str | None) -> str | None:
+    """
+    Parse Amazon's open-date format into ISO timestamp string.
+    Handles: '19/03/2021 13:39:42 GMT', '15/04/2021 13:17:19 BST'
+    BST = UTC+1, GMT = UTC+0. Returns UTC string without tzinfo for DB storage.
+    """
+    if not val:
+        return None
+    val = val.strip()
+    # Split off timezone suffix (GMT/BST/UTC)
+    tz_offset = timedelta(0)
+    for suffix, offset_hours in [('BST', 1), ('GMT', 0), ('UTC', 0)]:
+        if val.upper().endswith(suffix):
+            val = val[:-len(suffix)].strip()
+            tz_offset = timedelta(hours=offset_hours)
+            break
+    try:
+        dt = datetime.strptime(val, '%d/%m/%Y %H:%M:%S')
+        # Adjust to UTC
+        dt_utc = dt - tz_offset
+        return dt_utc.strftime('%Y-%m-%d %H:%M:%S')
+    except (ValueError, AttributeError):
+        pass
+    # Try ISO format as fallback
+    try:
+        return datetime.fromisoformat(val.replace('Z', '+00:00')).strftime('%Y-%m-%d %H:%M:%S')
+    except (ValueError, AttributeError):
+        return None
 
 
 def parse_all_listings_report(content: bytes, filename: str) -> list[dict]:
@@ -55,6 +88,7 @@ def parse_all_listings_report(content: bytes, filename: str) -> list[dict]:
             'price': _parse_price(line.get('price')),
             'status': (line.get('status') or '').strip() or None,
             'fulfillment_channel': (line.get('fulfillment-channel') or '').strip() or None,
+            'listing_created_at': _parse_open_date(line.get('open-date')),
         })
 
     return rows
@@ -117,14 +151,24 @@ def parse_and_store_all_listings(content: bytes, filename: str,
                     conn.rollback()
                     continue
 
-                # Update flatfile data where ASIN is missing
+                # Update flatfile data: enrich ASIN and listing_created_at
                 cur.execute(
                     """UPDATE ami_flatfile_data
-                       SET asin = %s
+                       SET asin = %s,
+                           listing_created_at = COALESCE(listing_created_at, %s)
                        WHERE sku = %s AND (asin IS NULL OR asin = '')""",
-                    (row['asin'], row['sku']),
+                    (row['asin'], row.get('listing_created_at'), row['sku']),
                 )
                 flatfile_enriched += cur.rowcount
+
+                # Also fill listing_created_at on rows that already have ASIN
+                if row.get('listing_created_at'):
+                    cur.execute(
+                        """UPDATE ami_flatfile_data
+                           SET listing_created_at = %s
+                           WHERE sku = %s AND listing_created_at IS NULL""",
+                        (row['listing_created_at'], row['sku']),
+                    )
 
             conn.commit()
 

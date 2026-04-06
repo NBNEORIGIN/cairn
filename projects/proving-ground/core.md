@@ -6,15 +6,40 @@ Automated, repeatable stress testing of the entire Phloe platform across a synth
 population of 100+ tenant configurations, simulating real-world usage patterns to find
 failure points before real clients do.
 
-## Dependency
+## Phase 1 Status — LIVE (2026-03-31)
 
-**Proving Ground depends on Ark Phase 3 (re-provisioning script) before it can run
-properly.** It needs a staging environment that can be reliably provisioned and torn
-down. That staging environment is what the Ark restore script creates. Do not begin
-Proving Ground implementation until Ark Phase 3 is stable.
+8 public synthetic demo tenants are live on nbne1 (local Ubuntu server, exposed via
+Cloudflare Tunnel "signmaker"):
 
-Proving Ground also requires a second Hetzner server (staging). Estimated cost: €5–10/month
-for a CX22/CX32. This server is shared with Ark recovery drills.
+| Slug | Name | URL | Paradigm |
+|------|------|-----|----------|
+| pg-salon | The Colour Room | pg-salon.phloe.co.uk | appointment (salon) |
+| pg-osteopath | Hartley Osteopathic Clinic | pg-osteopath.phloe.co.uk | appointment (solo) |
+| pg-yoga | Sunstone Yoga | pg-yoga.phloe.co.uk | class/timetable |
+| pg-cookery | The Larder Cookery School | pg-cookery.phloe.co.uk | class (one-off) |
+| pg-bistro | Le Petit Marché | pg-bistro.phloe.co.uk | table/reservation |
+| pg-chippy | Harbour Lights | pg-chippy.phloe.co.uk | food ordering |
+| pg-craft | Clay & Fire Ceramics Studio | pg-craft.phloe.co.uk | class (capacity-limited) |
+| pg-spa | Botanica Day Spa | pg-spa.phloe.co.uk | appointment (multi-service) |
+
+All login: `<slug>-owner@demo.nbne.uk` / `demo1234!`
+
+Infrastructure:
+- Server: nbne1, 192.168.1.228, /data/nbne/instances/<slug>/, ports 3021-3028/8021-8028
+- Cloudflare Tunnel: signmaker tunnel (704e2e68-cd86-439c-a0c2-7a9565ae9868)
+- nginx: /etc/nginx/sites-available/pg-*.conf → proxies to frontend port
+- Seed command: `backend/bookings/management/commands/seed_pg_demo.py`
+- Docker data: moved from /mnt/data/docker (root disk) to /data/docker (RAID array)
+
+Known issue: `bookings_classsession.location` column absent from fresh DBs (not in migrations).
+Fixed by ALTER TABLE on pg-yoga, pg-craft, pg-cookery. Must resolve upstream (add migration
+or apply column on fresh provisioning).
+
+## Original Dependency Note (superseded)
+
+~~Proving Ground depends on Ark Phase 3~~ — Ark Phase 3 is complete (2026-03-31).
+Phase 1 uses a local Ubuntu server (nbne1) instead of Hetzner staging, avoiding ongoing
+cost for demo sites. Playwright/k6 testing layer (Phase 2) still planned.
 
 ## Architecture Overview
 

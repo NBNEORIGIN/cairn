@@ -144,3 +144,10 @@ Tools registered for this project. Risk levels:
 - Established pattern: validation systems require substantive output to succeed
 - Discovered gotcha: automated checks can fail on minimal or placeholder content
 - Architectural rule: implement meaningful fallback content to avoid validation failures
+
+## Session 2026-03-30 — claw
+- Fixed git_commit tool chain: _continue_with_tool_result now passes available tools to the model
+- Root cause: after approving git_add, the continuation call passed tools=None, preventing the model from requesting git_commit as a follow-up
+- Fix: continuation now provides tools, executes SAFE follow-ups inline, surfaces REVIEW/DESTRUCTIVE follow-ups for approval
+- Prior fix (b1abfeb) was incomplete — it fed results back but without tools
+- Appended Phloe strategic decisions to projects/phloe/core.md (booking paradigm insight, conversational AI direction)
