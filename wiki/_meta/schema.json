@@ -1,0 +1,38 @@
+{
+  "version": "1.0",
+  "article_types": {
+    "module": {
+      "sections": ["What It Does", "Who Uses It", "Tech Stack", "Connections", "Current Status", "Key Concepts", "Related"],
+      "compilation_model": "claude-sonnet",
+      "frequency": "manual"
+    },
+    "product": {
+      "sections": ["Overview", "Performance", "Issues", "Recommendations", "Related"],
+      "compilation_model": "deepseek-chat",
+      "frequency": "weekly"
+    },
+    "blank": {
+      "sections": ["Overview", "Products", "Production Notes", "Related"],
+      "compilation_model": "deepseek-chat",
+      "frequency": "weekly"
+    },
+    "marketplace": {
+      "sections": ["Overview", "Performance Summary", "Top Products", "Issues", "Related"],
+      "compilation_model": "deepseek-chat",
+      "frequency": "weekly"
+    },
+    "client": {
+      "sections": ["Relationship Summary", "Project History", "Recent Communications", "Next Steps", "Related"],
+      "compilation_model": "openrouter",
+      "frequency": "weekly"
+    },
+    "process": {
+      "sections": ["Overview", "Steps", "Responsible", "Related"],
+      "compilation_model": "claude-sonnet",
+      "frequency": "manual"
+    }
+  },
+  "backlink_format": "[[relative/path]]",
+  "chunk_type": "wiki",
+  "retrieval_boost": 1.5
+}

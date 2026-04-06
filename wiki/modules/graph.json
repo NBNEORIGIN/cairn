@@ -1,0 +1,107 @@
+{
+  "nodes": [
+    {
+      "id": "phloe",
+      "label": "Phloe",
+      "description": "Multi-tenant booking platform",
+      "status": "production",
+      "article_path": "wiki/modules/phloe.md",
+      "category": "sell"
+    },
+    {
+      "id": "manufacture",
+      "label": "Manufacture",
+      "description": "Production intelligence and make-list",
+      "status": "production",
+      "article_path": "wiki/modules/manufacture.md",
+      "category": "make"
+    },
+    {
+      "id": "ledger",
+      "label": "Ledger",
+      "description": "Financial management and accounts",
+      "status": "development",
+      "article_path": "wiki/modules/ledger.md",
+      "category": "measure"
+    },
+    {
+      "id": "cairn",
+      "label": "Cairn",
+      "description": "AI memory and orchestration",
+      "status": "production",
+      "article_path": "wiki/modules/cairn.md",
+      "category": "brain"
+    },
+    {
+      "id": "amazon-intelligence",
+      "label": "Amazon Intelligence",
+      "description": "Listing health and performance analysis",
+      "status": "production",
+      "article_path": "wiki/modules/amazon-intelligence.md",
+      "category": "sell"
+    },
+    {
+      "id": "etsy-intelligence",
+      "label": "Etsy Intelligence",
+      "description": "Etsy listing health and sales intelligence",
+      "status": "production",
+      "article_path": "wiki/modules/etsy-intelligence.md",
+      "category": "sell"
+    },
+    {
+      "id": "crm",
+      "label": "CRM",
+      "description": "Client relationships and B2B pipeline",
+      "status": "production",
+      "article_path": "wiki/modules/crm.md",
+      "category": "sell"
+    },
+    {
+      "id": "render",
+      "label": "Render",
+      "description": "Product publishing across marketplaces",
+      "status": "development",
+      "article_path": "wiki/modules/render.md",
+      "category": "make"
+    },
+    {
+      "id": "ledger-light",
+      "label": "Ledger-Light",
+      "description": "Lightweight tenant bookkeeping",
+      "status": "planned",
+      "article_path": null,
+      "category": "measure"
+    },
+    {
+      "id": "meridian",
+      "label": "Meridian",
+      "description": "AI-powered trading bot",
+      "status": "planned",
+      "article_path": null,
+      "category": "brain"
+    }
+  ],
+  "edges": [
+    {"from": "phloe", "to": "ledger", "label": "booking revenue"},
+    {"from": "phloe", "to": "cairn", "label": "context endpoint"},
+    {"from": "manufacture", "to": "cairn", "label": "context endpoint"},
+    {"from": "manufacture", "to": "amazon-intelligence", "label": "M-number + margin data"},
+    {"from": "ledger", "to": "cairn", "label": "context endpoint"},
+    {"from": "amazon-intelligence", "to": "cairn", "label": "context endpoint"},
+    {"from": "amazon-intelligence", "to": "render", "label": "improvement queue"},
+    {"from": "etsy-intelligence", "to": "cairn", "label": "context endpoint"},
+    {"from": "etsy-intelligence", "to": "manufacture", "label": "M-number mapping"},
+    {"from": "crm", "to": "cairn", "label": "semantic search"},
+    {"from": "crm", "to": "ledger", "label": "margin data"},
+    {"from": "crm", "to": "manufacture", "label": "capacity check"},
+    {"from": "render", "to": "manufacture", "label": "ASIN mapping"},
+    {"from": "ledger-light", "to": "phloe", "label": "tenant bookkeeping"},
+    {"from": "ledger-light", "to": "ledger", "label": "financial data"}
+  ],
+  "categories": {
+    "make": {"colour": "#4A90D9", "label": "Make"},
+    "measure": {"colour": "#50C878", "label": "Measure"},
+    "sell": {"colour": "#E8913A", "label": "Sell"},
+    "brain": {"colour": "#9B59B6", "label": "Brain"}
+  }
+}
