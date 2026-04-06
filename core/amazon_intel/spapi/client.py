@@ -60,9 +60,9 @@ SELLER_IDS: dict[str, str] = {
     'FE': os.getenv('AMAZON_SELLER_ID_AU', 'A35C7AI7WDWERB'),
 }
 
-CLIENT_ID = os.getenv(
-    'AMAZON_CLIENT_ID',
-    'amzn1.application-oa2-client.be933583cbc1430cb46386de8df677cf',
+CLIENT_ID = (
+    os.getenv('AMAZON_CLIENT_ID')
+    or 'amzn1.application-oa2-client.be933583cbc1430cb46386de8df677cf'
 )
 
 # In-memory token cache: {region: (access_token, expires_at)}
