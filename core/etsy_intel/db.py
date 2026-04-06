@@ -81,10 +81,11 @@ CREATE INDEX IF NOT EXISTS idx_etsy_listings_score
 CREATE INDEX IF NOT EXISTS idx_etsy_listings_state
     ON etsy_listings(state);
 
--- Etsy sales / receipts
+-- Etsy sales / transactions (one row per line item, not per receipt)
 CREATE TABLE IF NOT EXISTS etsy_sales (
     id              SERIAL PRIMARY KEY,
-    receipt_id      BIGINT UNIQUE NOT NULL,
+    transaction_id  BIGINT UNIQUE NOT NULL,
+    receipt_id      BIGINT NOT NULL,
     shop_id         BIGINT REFERENCES etsy_shops(shop_id),
     listing_id      BIGINT,
     buyer_email     TEXT,
@@ -222,8 +223,8 @@ def upsert_sales(sales: list[dict]) -> int:
 
     values = [
         (
-            s['receipt_id'], s['shop_id'], s.get('listing_id'),
-            s.get('buyer_email'), s.get('sale_date'),
+            s['transaction_id'], s['receipt_id'], s['shop_id'],
+            s.get('listing_id'), s.get('buyer_email'), s.get('sale_date'),
             s.get('quantity', 0), s.get('price'),
             s.get('shipping', 0), s.get('discount', 0),
             s.get('total'), s.get('status'),
@@ -232,10 +233,11 @@ def upsert_sales(sales: list[dict]) -> int:
     ]
 
     sql = """INSERT INTO etsy_sales
-                 (receipt_id, shop_id, listing_id, buyer_email, sale_date,
-                  quantity, price, shipping, discount, total, status, last_synced)
+                 (transaction_id, receipt_id, shop_id, listing_id, buyer_email,
+                  sale_date, quantity, price, shipping, discount, total, status,
+                  last_synced)
              VALUES %s
-             ON CONFLICT (receipt_id)
+             ON CONFLICT (transaction_id)
              DO UPDATE SET
                  listing_id = EXCLUDED.listing_id,
                  quantity = EXCLUDED.quantity,
@@ -246,7 +248,7 @@ def upsert_sales(sales: list[dict]) -> int:
                  status = EXCLUDED.status,
                  last_synced = CURRENT_TIMESTAMP"""
 
-    template = "(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)"
+    template = "(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)"
 
     with get_conn() as conn:
         with conn.cursor() as cur:

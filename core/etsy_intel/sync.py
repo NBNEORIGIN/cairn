@@ -237,6 +237,7 @@ def _parse_receipts(raw_receipts: list[dict], shop_id: int) -> list[dict]:
 
             create_ts = r.get('create_timestamp')
             sales.append({
+                'transaction_id': txn.get('transaction_id'),
                 'receipt_id': r['receipt_id'],
                 'shop_id': shop_id,
                 'listing_id': txn.get('listing_id'),
