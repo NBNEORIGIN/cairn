@@ -503,8 +503,8 @@ Rules:
                 cur.execute(
                     """INSERT INTO claw_code_chunks
                        (project_id, file_path, chunk_content, chunk_type, chunk_name,
-                        content_hash, embedding, last_modified, indexed_at)
-                       VALUES (%s, %s, %s, 'wiki', %s, %s, %s::vector, NOW(), NOW())""",
+                        content_hash, embedding, indexed_at)
+                       VALUES (%s, %s, %s, 'wiki', %s, %s, %s::vector, NOW())""",
                     ('claw', rel_path, content, chunk_name, content_hash, embedding),
                 )
             conn.commit()
