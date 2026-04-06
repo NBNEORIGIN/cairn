@@ -2309,3 +2309,7 @@ app.include_router(ami_router)
 # Register Etsy Intelligence routes
 from api.routes.etsy_intel import router as etsy_router
 app.include_router(etsy_router)
+
+# Register Wiki Layer routes
+from api.routes.wiki import router as wiki_router
+app.include_router(wiki_router)

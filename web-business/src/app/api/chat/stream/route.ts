@@ -78,6 +78,49 @@ async function fetchModuleContext(): Promise<string> {
 }
 
 /**
+ * Wiki context — searches compiled wiki articles for structured knowledge.
+ * Wiki articles provide complete, contextualised information rather than
+ * disconnected raw chunks.
+ */
+async function fetchWikiContext(query: string): Promise<string> {
+  if (!query.trim()) return ''
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 3000)
+
+  try {
+    const res = await fetch(
+      `${CAIRN_API_URL}/api/wiki/search?q=${encodeURIComponent(query)}&top_k=3`,
+      {
+        signal: controller.signal,
+        cache: 'no-store',
+        headers: {
+          'X-API-Key': CAIRN_API_KEY,
+          'Authorization': `Bearer ${CAIRN_API_KEY}`,
+        },
+      }
+    )
+    clearTimeout(timer)
+    if (!res.ok) return ''
+
+    const data = await res.json()
+    if (!data.articles || data.articles.length === 0) return ''
+
+    const sections: string[] = []
+    for (const article of data.articles) {
+      sections.push(article.content)
+    }
+
+    return '\n\n[WIKI CONTEXT — compiled knowledge articles relevant to this query]\n' +
+      sections.join('\n---\n') +
+      '\n[END WIKI CONTEXT]\n\n'
+  } catch {
+    clearTimeout(timer)
+    return ''
+  }
+}
+
+/**
  * Query-aware CRM search — searches projects, clients, emails, materials, and
  * knowledge base using the user's actual question. Returns relevant CRM data
  * to inject into the chat context.
@@ -154,13 +197,14 @@ export async function GET(req: NextRequest) {
   const params = new URLSearchParams(req.nextUrl.searchParams)
   const originalMessage = params.get('message') ?? ''
 
-  // Fetch live module context and CRM search in parallel
-  const [moduleContext, crmContext] = await Promise.all([
+  // Fetch live module context, CRM search, and wiki context in parallel
+  const [moduleContext, crmContext, wikiContext] = await Promise.all([
     fetchModuleContext(),
     fetchCrmSearch(originalMessage),
+    fetchWikiContext(originalMessage),
   ])
 
-  params.set('message', CAIRN_PERSONALITY + moduleContext + crmContext + originalMessage)
+  params.set('message', CAIRN_PERSONALITY + moduleContext + crmContext + wikiContext + originalMessage)
 
   const upstreamUrl = `${CAIRN_API_URL}/chat/stream?${params.toString()}`
 
