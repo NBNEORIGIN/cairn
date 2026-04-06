@@ -34,66 +34,59 @@ async def wiki_search(
     top_k: int = Query(5, ge=1, le=20, description="Max results"),
     project: str = Query("claw", description="Project scope"),
 ):
-    """Hybrid search with wiki boost.
+    """Semantic wiki search via pgvector cosine similarity.
 
-    Delegates to the existing HybridRetriever which already applies
-    wiki boost and backlink following. Filters to wiki chunks only
-    for this endpoint.
+    Embeds the query using the same provider as wiki compilation
+    (Ollama -> OpenAI -> DeepSeek), then does cosine similarity
+    against wiki chunks in pgvector. Falls back to keyword search
+    on disk files if embedding or DB is unavailable.
     """
     import os
-    from core.context.engine import ContextEngine
 
     db_url = os.getenv('DATABASE_URL', '')
-    if not db_url:
-        raise HTTPException(502, "Database not configured")
 
-    engine = ContextEngine(project_id=project, db_url=db_url)
+    # Try semantic search first
+    if db_url:
+        try:
+            from core.wiki.embeddings import get_embed_fn
+            embed_fn = get_embed_fn()
 
-    try:
-        conn = engine._get_connection()
-        with conn.cursor() as cur:
-            # Direct search in wiki chunks — BM25-style keyword + rank
-            search_terms = q.lower().split()
-            if not search_terms:
-                return {"articles": [], "total": 0}
+            if embed_fn:
+                import psycopg2
+                from pgvector.psycopg2 import register_vector
 
-            conditions = " OR ".join(
-                ["chunk_content ILIKE %s" for _ in search_terms]
-            )
-            params = (
-                [project]
-                + [f'%{term}%' for term in search_terms]
-                + [top_k]
-            )
-            cur.execute(f"""
-                SELECT file_path, chunk_content, chunk_name
-                FROM claw_code_chunks
-                WHERE project_id = %s
-                  AND chunk_type = 'wiki'
-                  AND ({conditions})
-                ORDER BY length(chunk_content) DESC
-                LIMIT %s
-            """, params)
-            rows = cur.fetchall()
+                query_embedding = embed_fn(q[:2000])
+                conn = psycopg2.connect(db_url, connect_timeout=5)
+                register_vector(conn)
 
-        articles = []
-        for row in rows:
-            articles.append({
-                "path": row[0],
-                "content": row[1],
-                "name": row[2],
-            })
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT file_path, chunk_content, chunk_name,
+                               1 - (embedding <=> %s::vector) AS score
+                        FROM claw_code_chunks
+                        WHERE project_id = %s
+                          AND chunk_type = 'wiki'
+                          AND embedding IS NOT NULL
+                        ORDER BY embedding <=> %s::vector
+                        LIMIT %s
+                    """, (query_embedding, project, query_embedding, top_k))
+                    rows = cur.fetchall()
+                conn.close()
 
-        # If no DB results, fall back to reading wiki files directly
-        if not articles:
-            articles = _search_wiki_files(q, top_k)
+                if rows:
+                    articles = [{
+                        "path": row[0],
+                        "content": row[1],
+                        "name": row[2],
+                        "score": round(float(row[3]), 3),
+                    } for row in rows]
+                    return {"articles": articles, "total": len(articles), "method": "semantic"}
+        except Exception as exc:
+            logger.warning("Semantic wiki search failed: %s", exc)
 
-        return {"articles": articles, "total": len(articles)}
-
-    except Exception as exc:
-        logger.warning("Wiki search failed, falling back to file search: %s", exc)
-        articles = _search_wiki_files(q, top_k)
-        return {"articles": articles, "total": len(articles)}
+    # Fall back to keyword search on disk files
+    articles = _search_wiki_files(q, top_k)
+    return {"articles": articles, "total": len(articles), "method": "keyword"}
 
 
 def _search_wiki_files(query: str, top_k: int) -> list[dict]:

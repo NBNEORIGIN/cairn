@@ -447,8 +447,9 @@ Rules:
             logger.warning("Cannot connect to DB for wiki embedding: %s", exc)
             return 0
 
-        # Get embedding function
-        embed_fn = self._get_embed_fn()
+        # Get embedding function (shared utility)
+        from core.wiki.embeddings import get_embed_fn
+        embed_fn = get_embed_fn()
         if not embed_fn:
             conn.close()
             return 0
@@ -512,96 +513,6 @@ Rules:
 
         conn.close()
         return embedded
-
-    def _get_embed_fn(self):
-        """Get an embedding function.
-
-        Tries in order:
-          1. Ollama nomic-embed-text (local, free)
-          2. OpenAI text-embedding-3-small via API (~£0.01/1M tokens)
-          3. DeepSeek embedding via API (if available)
-
-        Returns a callable(text) -> list[float] or None.
-        """
-        # 1. Try Ollama (local, free)
-        try:
-            from core.models.ollama_client import OllamaClient
-            client = OllamaClient(
-                base_url=os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434'),
-                model='nomic-embed-text',
-            )
-            test = client.embed("test")
-            if test and len(test) > 0:
-                logger.info("Wiki embedding: using Ollama nomic-embed-text")
-                return client.embed
-        except Exception:
-            pass
-
-        # 2. Try OpenAI text-embedding-3-small (768-dim to match nomic)
-        openai_key = os.getenv('OPENAI_API_KEY', '')
-        if openai_key:
-            try:
-                import httpx
-
-                def openai_embed(text: str) -> list[float]:
-                    resp = httpx.post(
-                        'https://api.openai.com/v1/embeddings',
-                        headers={
-                            'Authorization': f'Bearer {openai_key}',
-                            'Content-Type': 'application/json',
-                        },
-                        json={
-                            'model': 'text-embedding-3-small',
-                            'input': text[:8000],
-                            'dimensions': 768,
-                        },
-                        timeout=15,
-                    )
-                    resp.raise_for_status()
-                    return resp.json()['data'][0]['embedding']
-
-                # Test it
-                test = openai_embed("test")
-                if test and len(test) == 768:
-                    logger.info("Wiki embedding: using OpenAI text-embedding-3-small (768-dim)")
-                    return openai_embed
-            except Exception as exc:
-                logger.debug("OpenAI embedding unavailable: %s", exc)
-
-        # 3. Try DeepSeek embedding
-        if self._deepseek_key:
-            try:
-                import httpx
-
-                def deepseek_embed(text: str) -> list[float]:
-                    resp = httpx.post(
-                        'https://api.deepseek.com/embeddings',
-                        headers={
-                            'Authorization': f'Bearer {self._deepseek_key}',
-                            'Content-Type': 'application/json',
-                        },
-                        json={
-                            'model': 'deepseek-chat',
-                            'input': text[:8000],
-                        },
-                        timeout=15,
-                    )
-                    resp.raise_for_status()
-                    data = resp.json()['data'][0]['embedding']
-                    # Pad/truncate to 768 dims to match pgvector schema
-                    if len(data) < 768:
-                        data.extend([0.0] * (768 - len(data)))
-                    return data[:768]
-
-                test = deepseek_embed("test")
-                if test and len(test) == 768:
-                    logger.info("Wiki embedding: using DeepSeek embedding (768-dim)")
-                    return deepseek_embed
-            except Exception as exc:
-                logger.debug("DeepSeek embedding unavailable: %s", exc)
-
-        logger.warning("No embedding provider available — wiki articles will not be embedded")
-        return None
 
     def _update_meta(self, results: dict) -> None:
         """Update compilation metadata files."""
