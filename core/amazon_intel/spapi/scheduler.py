@@ -159,6 +159,27 @@ def sync_region(region: Region, force: bool = False) -> dict:
     else:
         results['advertising'] = {'status': 'skipped', 'reason': 'no profile id configured'}
 
+    # Rebuild snapshots if any data sync completed
+    data_synced = any(
+        results.get(t, {}).get('status') == 'complete'
+        for t in ('inventory', 'analytics', 'advertising')
+    )
+    if data_synced:
+        log_id = _log_start('snapshots', region)
+        try:
+            import asyncio
+            from core.amazon_intel.snapshots import build_snapshots
+            snap_result = asyncio.run(build_snapshots(marketplace=None))
+            _log_complete(log_id, snap_result if isinstance(snap_result, dict) else {})
+            results['snapshots'] = {'status': 'complete', **snap_result}
+            logger.info("SP-API post-sync snapshots built: %s", snap_result)
+        except Exception as e:
+            err = traceback.format_exc()
+            _log_error(log_id, err)
+            results['snapshots'] = {'status': 'error', 'error': str(e)}
+    else:
+        results['snapshots'] = {'status': 'skipped', 'reason': 'no data synced'}
+
     return {'region': region, 'syncs': results}
 
 
