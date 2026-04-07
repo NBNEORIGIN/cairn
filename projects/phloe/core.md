@@ -46,7 +46,7 @@ core/             Shared middleware, tenant resolution, utils
 
 ## Current module registry
 customer_facing: website, bookings, shop, crm, disclaimer, cms, community
-finance: payments, orders
+finance: payments, orders, ledger_lite
 operations: staff, comms, documents, digest
 compliance: compliance
 
@@ -73,7 +73,10 @@ backend/[module]/manifest.json    Module contract
 - Community module designed, not yet built
 - Brain module designed, not yet built
 - Events module shipped to production (2026-03-30) — Ganbarukai first client
+- Ledger Lite module shipped to production (2026-04-06) — Ganbarukai first client
 - Ganbarukai Stripe integration pending (Chrissie Howard's account details needed)
+- Babel fallback (.babelrc) applied platform-wide to bypass SWC regression in Next.js 14.2.x
+  See: phloe/skills/phloe-deployment/decisions.md for full rationale and config
 
 ## Strategic Decisions
 
@@ -239,6 +242,56 @@ See `projects/ark/core.md`.
 **Rationale**: This is the single highest-priority infrastructure gap. Cannot responsibly
 onboard more paying tenants without it.
 **Rejected**: Deferral. Every day without backups is uninsured risk.
+
+### 2026-04-07 — Per-Tenant Owner Notification Preferences
+
+**Context:** DemNurse pre-launch revealed that the existing notification model
+(client gets all events, owner gets nothing) doesn't suit low-volume, high-stakes
+tenants. Amy Holtom (DemNurse) needs to know about every booking and change.
+Additionally, Postmark was configured today — the first time email delivery is
+actually reliable — making owner notifications viable.
+
+**Decision:** Added `notification_preferences` JSONField to `TenantSettings` with
+`default=dict`. Fallback values in `bookings/emails.py` default owner flags to
+False (preserving the "no owner email" behaviour that was the de-facto state while
+SMTP was broken). DemNurse is explicitly opted in with all owner flags True.
+
+Added three owner notification functions:
+- `send_admin_booking_notification` — existing, now preference-gated
+- `send_owner_change_notification` — new, fires on PATCH if start_time changes
+- `send_owner_cancellation_notification` — new, fires on cancel action
+
+**Rationale:** Single JSON field per tenant rather than global change preserves
+existing tenant behaviour while enabling per-tenant configuration. The default is
+the high-volume pattern (owner flags all False) so no existing tenants are affected.
+JSONField allows future expansion (daily_digest, notification methods, per-staff
+routing) without schema changes.
+
+**Rejected:**
+- Global owner notifications: would overwhelm high-volume tenants (Pizza Shack,
+  busy salons get dozens of bookings per day)
+- Hardcoded per-tenant if/else in emails.py: not scalable, creates maintenance debt
+- Separate NotificationRule model with foreign keys: overkill for current scope;
+  JSONField on TenantSettings is sufficient and extensible
+
+### 2026-04-07 — DemNurse Pre-Launch UI Changes
+
+**Context:** Pre-launch review feedback from Amy Holtom and Amy Law (Alncom Group).
+Nine change requests received 6 April 2026.
+
+**Changes shipped:**
+- New hero image (070426_HERO.webp — consultation scene with three figures)
+- Phone 01665 661751 + email info@demnurse.com added to nav header
+- Strapline "Promoting living well with a diagnosis" added to hero section
+  (stored in `tenants_landing_page.footer_tagline`, rendered in hero)
+- "for professionals looking for guidance" removed from FAQ answer
+- Service ordering fixed: Free Call → Level 1 → Level 2 (via DB sort_order)
+
+**Pending (not blocking launch):**
+- Carers Northumberland logo (Amy H hasn't sent it)
+- Level 1 and Level 2 description rewrites (Amy H still drafting)
+- DBS and charity logos (post-launch)
+- Stripe live publishable key (Amy Law sending separately)
 
 ### 2026-03-31 — Proving Ground Stress Testing Project Registered
 
