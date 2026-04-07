@@ -190,23 +190,16 @@ def _safe_pct_dt(val) -> float | None:
     return round(f / 100.0, 6) if f > 1.0 else round(f, 6)
 
 
-def parse_daily_traffic_json(content: bytes, region: str) -> list[dict]:
+def parse_daily_traffic_json(content: bytes, region: str, report_date: str = None) -> list[dict]:
     """
     Parse GET_SALES_AND_TRAFFIC_REPORT with dateGranularity=DAY, asinGranularity=CHILD.
 
-    SP-API structure (day granularity):
-      {
-        "salesAndTrafficByAsin": [
-          {
-            "parentAsin": "B0...",
-            "childAsin": "B0...",
-            "date": "2026-04-01",
-            "trafficByAsin": { sessions, pageViews, buyBoxPercentage, ... },
-            "salesByAsin": { unitsOrdered, orderedProductSales, ... }
-          },
-          ...
-        ]
-      }
+    Actual SP-API structure confirmed 2026-04-07:
+      - salesAndTrafficByDate: daily marketplace totals (no per-ASIN breakdown)
+      - salesAndTrafficByAsin: per-ASIN totals aggregated over the date range (no date per item)
+
+    We use salesAndTrafficByAsin for per-product sessions/traffic.
+    report_date is the report end date (used as the date key for upsert).
     """
     from .client import REGION_MARKETPLACE_CODE
     marketplace = REGION_MARKETPLACE_CODE.get(region, region)
@@ -214,13 +207,13 @@ def parse_daily_traffic_json(content: bytes, region: str) -> list[dict]:
     data = json.loads(content.decode('utf-8'))
     rows = []
 
+    # report_date: use provided date, or today as fallback
+    from datetime import date as _date
+    row_date = report_date or str(_date.today())
+
     for item in data.get('salesAndTrafficByAsin', []):
         child_asin = (item.get('childAsin') or '').strip()
         if not child_asin:
-            continue
-
-        row_date = (item.get('date') or '').strip()
-        if not row_date:
             continue
 
         traffic = item.get('trafficByAsin') or {}
@@ -334,8 +327,8 @@ def sync_daily_traffic(region: Region = 'EU', days_back: int = 7) -> dict:
         data_end_time=end.strftime('%Y-%m-%dT23:59:59Z'),
     )
 
-    rows = parse_daily_traffic_json(content, region)
-    logger.info("Daily traffic parsed: %d ASIN-day rows for %s", len(rows), region)
+    rows = parse_daily_traffic_json(content, region, report_date=str(end.date()))
+    logger.info("Daily traffic parsed: %d ASIN rows for %s", len(rows), region)
 
     upserted = _upsert_daily_traffic(rows)
 

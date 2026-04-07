@@ -263,23 +263,21 @@ CREATE INDEX IF NOT EXISTS idx_ami_sync_type_region
 
 -- ── Sprint 1: Revenue Truth Engine ────────────────────────────────────────────
 
--- Atomic order lines. One row = one unit of one product in one order.
+-- Atomic order lines. One row = one SKU line in one order.
 -- Source of truth for all revenue. Never SUM from ami_business_report_legacy.
+-- UNIQUE on (amazon_order_id, merchant_sku) — report is order+sku level, no order_item_id.
 CREATE TABLE IF NOT EXISTS ami_orders (
     id                      SERIAL PRIMARY KEY,
     amazon_order_id         VARCHAR(50)     NOT NULL,
-    order_item_id           VARCHAR(50)     NOT NULL,
+    merchant_sku            VARCHAR(200)    NOT NULL,
     marketplace             VARCHAR(10)     NOT NULL,
     region                  VARCHAR(5)      NOT NULL,
     asin                    VARCHAR(20),
-    merchant_sku            VARCHAR(200),
     m_number                VARCHAR(20),
     product_name            VARCHAR(500),
     order_date              DATE            NOT NULL,
     purchase_date           TIMESTAMPTZ,
     quantity                INTEGER         NOT NULL DEFAULT 1,
-    quantity_shipped        INTEGER,
-    quantity_to_ship        INTEGER,
     item_price_amount       NUMERIC(12,4),
     item_price_currency     VARCHAR(5),
     item_tax_amount         NUMERIC(12,4),
@@ -292,7 +290,7 @@ CREATE TABLE IF NOT EXISTS ami_orders (
     ship_country            VARCHAR(5),
     shipment_status         VARCHAR(30),
     synced_at               TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
-    CONSTRAINT ami_orders_unique UNIQUE (amazon_order_id, order_item_id)
+    CONSTRAINT ami_orders_unique UNIQUE (amazon_order_id, merchant_sku)
 );
 CREATE INDEX IF NOT EXISTS ami_orders_date_idx ON ami_orders (order_date);
 CREATE INDEX IF NOT EXISTS ami_orders_marketplace_idx ON ami_orders (marketplace, order_date);

@@ -2,14 +2,17 @@
 Orders flat file sync via SP-API.
 
 Report: GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL
-Format: TSV (tab-separated), gzip compressed
+Format: TSV (tab-separated), plain text (not gzip in practice)
 Window: 90 days on first run (backfill), 2 days rolling (subsequent runs)
 
 Stores order lines idempotently in ami_orders.
-UNIQUE on (amazon_order_id, order_item_id) — running multiple times is safe.
+UNIQUE on (amazon_order_id, merchant_sku) — report is order+SKU level.
+Note: no order-item-id in this report; SKU provides item-level granularity.
 
 PII rule: buyer name, email, address, phone are NEVER stored. Skipped at
 parse time. ship_country is retained for marketplace inference only.
+
+Actual column layout confirmed 2026-04-07 from live report (57 columns).
 """
 import csv
 import gzip
@@ -27,56 +30,65 @@ from .client import Region, REGION_MARKETPLACE, run_report
 log = logging.getLogger(__name__)
 
 # TSV column → DB column. Value '_skip' means never store (PII or unused).
+# Confirmed against live GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL output.
 ORDERS_COLUMN_MAP = {
-    'amazon-order-id':          'amazon_order_id',
-    'order-item-id':            'order_item_id',
-    'purchase-date':            'purchase_date',
-    'payments-date':            '_skip',
-    'reporting-date':           'order_date',
-    'promise-date':             '_skip',
-    'days-past-promise':        '_skip',
-    'buyer-email':              '_skip',   # PII
-    'buyer-name':               '_skip',   # PII
-    'buyer-phone-number':       '_skip',   # PII
-    'sku':                      'merchant_sku',
-    'product-name':             'product_name',
-    'quantity-purchased':       'quantity',
-    'quantity-shipped':         'quantity_shipped',
-    'quantity-to-ship':         'quantity_to_ship',
-    'ship-service-level':       'ship_service_level',
-    'recipient-name':           '_skip',   # PII
-    'ship-address-1':           '_skip',   # PII
-    'ship-address-2':           '_skip',   # PII
-    'ship-address-3':           '_skip',   # PII
-    'ship-city':                '_skip',   # PII
-    'ship-state':               '_skip',   # PII
-    'ship-postal-code':         '_skip',   # PII
-    'ship-country':             'ship_country',
-    'ship-phone-number':        '_skip',   # PII
-    'item-price':               'item_price_amount',
-    'item-tax':                 'item_tax_amount',
-    'shipping-price':           'shipping_price_amount',
-    'shipping-tax':             '_skip',
-    'gift-wrap-price':          'gift_wrap_price_amount',
-    'gift-wrap-tax':            '_skip',
-    'item-promotion-discount':  'item_promotion_discount',
-    'ship-promotion-discount':  '_skip',
-    'carrier':                  '_skip',
-    'tracking-number':          '_skip',
-    'estimated-arrival-date':   '_skip',
-    'order-channel':            'fulfillment_channel',
-    'order-channel-instance':   '_skip',
-    'delivery-start-date':      '_skip',
-    'delivery-end-date':        '_skip',
-    'delivery-time-zone':       '_skip',
-    'delivery-instructions':    '_skip',
-    'order-amazon-fees':        '_skip',
-    'is-business-order':        'is_b2b',
-    'purchase-order-number':    '_skip',
-    'price-designation':        '_skip',
-    'fulfilled-by':             '_skip',
-    'shipment-status':          'shipment_status',
-    'asin':                     'asin',
+    'amazon-order-id':                  'amazon_order_id',
+    'merchant-order-id':                '_skip',   # same as amazon-order-id
+    'purchase-date':                    'order_date',      # → DATE (also → purchase_date as TIMESTAMPTZ)
+    'last-updated-date':                '_skip',
+    'order-status':                     'shipment_status',
+    'fulfillment-channel':              'fulfillment_channel',
+    'sales-channel':                    '_skip',
+    'order-channel':                    '_skip',
+    'ship-service-level':               'ship_service_level',
+    'product-name':                     'product_name',
+    'sku':                              'merchant_sku',
+    'asin':                             'asin',
+    'number-of-items':                  '_skip',
+    'item-status':                      '_skip',
+    'tax-collection-model':             '_skip',
+    'tax-collection-responsible-party': '_skip',
+    'quantity':                         'quantity',
+    'currency':                         'item_price_currency',
+    'item-price':                       'item_price_amount',
+    'item-tax':                         'item_tax_amount',
+    'shipping-price':                   'shipping_price_amount',
+    'shipping-tax':                     '_skip',
+    'gift-wrap-price':                  'gift_wrap_price_amount',
+    'gift-wrap-tax':                    '_skip',
+    'item-promotion-discount':          'item_promotion_discount',
+    'ship-promotion-discount':          '_skip',
+    'address-type':                     '_skip',
+    'ship-city':                        '_skip',   # PII
+    'ship-state':                       '_skip',   # PII
+    'ship-postal-code':                 '_skip',   # PII
+    'ship-country':                     'ship_country',
+    'promotion-ids':                    '_skip',
+    'payment-method-details':           '_skip',
+    'item-extensions-data':             '_skip',
+    'is-business-order':                'is_b2b',
+    'purchase-order-number':            '_skip',
+    'price-designation':                '_skip',
+    'fulfilled-by':                     '_skip',
+    'buyer-company-name':               '_skip',   # Business PII
+    'buyer-tax-registration-country':   '_skip',
+    'buyer-tax-registration-type':      '_skip',
+    'is-heavy-or-bulky':                '_skip',
+    'is-replacement-order':             '_skip',
+    'is-exchange-order':                '_skip',
+    'original-order-id':                '_skip',
+    'is-amazon-invoiced':               '_skip',
+    'vat-exclusive-item-price':         '_skip',
+    'vat-exclusive-shipping-price':     '_skip',
+    'vat-exclusive-giftwrap-price':     '_skip',
+    'license-state':                    '_skip',
+    'license-expiration-date':          '_skip',
+    'is-iba':                           '_skip',
+    'is-buyer-requested-cancellation':  '_skip',
+    'buyer-requested-cancel-reason':    '_skip',
+    'is-transparency':                  '_skip',
+    'ioss-number':                      '_skip',
+    'order-invoice-type':               '_skip',
 }
 
 # Infer marketplace from ship-country (two-letter codes stored in DB)
@@ -172,14 +184,26 @@ def _parse_datetime(raw: str) -> Optional[datetime]:
             return None
 
 
+def _parse_decimal(raw: str) -> Optional[Decimal]:
+    """Parse plain decimal string (e.g. '14.99'). Returns None if empty or invalid."""
+    if not raw or not raw.strip():
+        return None
+    try:
+        return Decimal(raw.strip())
+    except InvalidOperation:
+        return None
+
+
 def _map_row(raw: dict, region: str) -> Optional[dict]:
     """
     Map raw TSV row to DB-ready dict.
-    Returns None if amazon_order_id or order_item_id is missing.
+    Returns None if amazon_order_id, merchant_sku, or order_date is missing.
     PII fields are dropped silently.
+
+    Price fields are plain decimals (e.g. '14.99') in this report.
+    Currency comes from the separate 'currency' column.
     """
     mapped: dict = {'region': region}
-    currency_detected: Optional[str] = None
 
     for tsv_col, db_col in ORDERS_COLUMN_MAP.items():
         if db_col == '_skip':
@@ -192,18 +216,15 @@ def _map_row(raw: dict, region: str) -> Optional[dict]:
         if db_col in ('item_price_amount', 'item_tax_amount',
                       'shipping_price_amount', 'gift_wrap_price_amount',
                       'item_promotion_discount'):
-            amount, currency = _parse_currency_amount(raw_val)
-            mapped[db_col] = amount
-            if currency and not currency_detected:
-                currency_detected = currency
+            mapped[db_col] = _parse_decimal(raw_val)
 
         elif db_col == 'order_date':
+            # purchase-date is a datetime, take the date part for order_date
             mapped[db_col] = _parse_date(raw_val)
+            # Also store full datetime as purchase_date
+            mapped['purchase_date'] = _parse_datetime(raw_val)
 
-        elif db_col == 'purchase_date':
-            mapped[db_col] = _parse_datetime(raw_val)
-
-        elif db_col in ('quantity', 'quantity_shipped', 'quantity_to_ship'):
+        elif db_col == 'quantity':
             try:
                 mapped[db_col] = int(raw_val)
             except (ValueError, TypeError):
@@ -221,11 +242,14 @@ def _map_row(raw: dict, region: str) -> Optional[dict]:
         elif db_col == 'merchant_sku':
             mapped[db_col] = raw_val[:200]
 
+        elif db_col == 'item_price_currency':
+            mapped[db_col] = raw_val[:5].upper()
+
         else:
             mapped[db_col] = raw_val[:500] if isinstance(raw_val, str) else raw_val
 
     # Require non-negotiable keys
-    if not mapped.get('amazon_order_id') or not mapped.get('order_item_id'):
+    if not mapped.get('amazon_order_id') or not mapped.get('merchant_sku'):
         return None
     if not mapped.get('order_date'):
         return None
@@ -234,12 +258,12 @@ def _map_row(raw: dict, region: str) -> Optional[dict]:
     ship_country = mapped.get('ship_country') or ''
     mapped['marketplace'] = SHIP_COUNTRY_TO_MARKETPLACE.get(ship_country, region)
 
-    # Store detected currency on item_price
-    mapped['item_price_currency'] = (
-        currency_detected
-        or MARKETPLACE_CURRENCY.get(mapped['marketplace'])
-        or REGION_DEFAULT_CURRENCY.get(region, 'GBP')
-    )
+    # Fill currency from marketplace if not present in row
+    if not mapped.get('item_price_currency'):
+        mapped['item_price_currency'] = (
+            MARKETPLACE_CURRENCY.get(mapped['marketplace'])
+            or REGION_DEFAULT_CURRENCY.get(region, 'GBP')
+        )
 
     # Default quantity to 1
     if mapped.get('quantity') is None:
@@ -276,10 +300,10 @@ def _upsert_rows(rows: list[dict]) -> tuple[int, int]:
         return 0, 0
 
     DB_COLS = [
-        'amazon_order_id', 'order_item_id', 'marketplace', 'region',
-        'asin', 'merchant_sku', 'product_name',
+        'amazon_order_id', 'merchant_sku', 'marketplace', 'region',
+        'asin', 'm_number', 'product_name',
         'order_date', 'purchase_date',
-        'quantity', 'quantity_shipped', 'quantity_to_ship',
+        'quantity',
         'item_price_amount', 'item_price_currency',
         'item_tax_amount', 'shipping_price_amount',
         'gift_wrap_price_amount', 'item_promotion_discount',
@@ -298,9 +322,9 @@ def _upsert_rows(rows: list[dict]) -> tuple[int, int]:
     sql = f"""
         INSERT INTO ami_orders ({col_list})
         VALUES %s
-        ON CONFLICT (amazon_order_id, order_item_id) DO UPDATE SET
+        ON CONFLICT (amazon_order_id, merchant_sku) DO UPDATE SET
             shipment_status   = EXCLUDED.shipment_status,
-            quantity_shipped  = EXCLUDED.quantity_shipped,
+            quantity          = EXCLUDED.quantity,
             synced_at         = NOW()
     """
 
