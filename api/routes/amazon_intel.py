@@ -353,6 +353,143 @@ async def patch_listing_bullets(
     return update_bullets(sku=sku, bullets=bullets, region=region)  # type: ignore[arg-type]
 
 
+# ── Generic Report Endpoints (used by Manufacture restock adapter) ────────────
+
+@router.post("/spapi/report/request")
+async def spapi_report_request(
+    report_type: str,
+    region: str = "EU",
+    marketplace_ids: list[str] = None,
+):
+    """
+    Request a generic SP-API report. Returns reportId immediately.
+    The report is queued by Amazon — poll /ami/spapi/report/{id}/status for completion.
+
+    Used by: Manufacture restock module (GET_FBA_INVENTORY_PLANNING_DATA)
+    """
+    import asyncio
+    from core.amazon_intel.spapi.client import create_report, REGION_MARKETPLACE
+
+    region = region.upper()
+    mp_id = (marketplace_ids or [None])[0] or REGION_MARKETPLACE.get(region)
+
+    try:
+        report_id = await asyncio.to_thread(
+            create_report, region, report_type, mp_id
+        )
+        return {'report_id': report_id, 'region': region, 'status': 'IN_QUEUE'}
+    except Exception as exc:
+        raise HTTPException(500, f"Failed to request report: {exc}")
+
+
+@router.get("/spapi/report/{report_id}/status")
+async def spapi_report_status(report_id: str, region: str = "EU"):
+    """
+    Check the processing status of a report.
+    Returns: {processing_status, document_id}
+    Status values: IN_QUEUE | IN_PROGRESS | DONE | CANCELLED | FATAL
+    """
+    import asyncio
+    from core.amazon_intel.spapi.client import spapi_get
+
+    region = region.upper()
+    try:
+        data = await asyncio.to_thread(
+            spapi_get, region, f'/reports/2021-06-30/reports/{report_id}'
+        )
+        return {
+            'report_id': report_id,
+            'processing_status': data.get('processingStatus', ''),
+            'document_id': data.get('reportDocumentId'),
+            'region': region,
+        }
+    except Exception as exc:
+        raise HTTPException(500, f"Failed to check report status: {exc}")
+
+
+@router.get("/spapi/report/{report_id}/download")
+async def spapi_report_download(report_id: str, region: str = "EU"):
+    """
+    Download a completed report as raw bytes.
+    Returns 404 if report is not yet DONE.
+    Used by: Manufacture restock adapter (polls status separately, calls this when DONE).
+    """
+    import asyncio
+    from fastapi.responses import Response as FastAPIResponse
+    from core.amazon_intel.spapi.client import spapi_get, download_report_document
+
+    region = region.upper()
+    try:
+        # Check status first
+        data = await asyncio.to_thread(
+            spapi_get, region, f'/reports/2021-06-30/reports/{report_id}'
+        )
+        status = data.get('processingStatus', '')
+        if status != 'DONE':
+            raise HTTPException(404, f"Report not ready: processingStatus={status}")
+
+        doc_id = data.get('reportDocumentId')
+        if not doc_id:
+            raise HTTPException(500, "Report DONE but no documentId")
+
+        content = await asyncio.to_thread(download_report_document, region, doc_id)
+        return FastAPIResponse(
+            content=content,
+            media_type='text/csv',
+            headers={'Content-Disposition': f'attachment; filename=restock_{region}_{report_id}.csv'},
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(500, f"Failed to download report: {exc}")
+
+
+# ── SKU Mapping Lookup (used by Manufacture restock assembler) ────────────────
+
+@router.get("/sku-mapping/lookup")
+async def sku_mapping_lookup(
+    sku: str = Query(..., description="Merchant SKU to look up"),
+    marketplace: Optional[str] = Query(None, description="Marketplace code e.g. GB, US"),
+):
+    """
+    Look up M-number for a merchant SKU.
+    Returns {sku, m_number, asin, country} or 404 if not found.
+    """
+    from core.amazon_intel.db import get_conn
+
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                if marketplace:
+                    cur.execute(
+                        """
+                        SELECT sku, m_number, asin, country
+                        FROM ami_sku_mapping
+                        WHERE sku = %s AND (country ILIKE %s OR country IS NULL)
+                        LIMIT 1
+                        """,
+                        (sku, marketplace),
+                    )
+                else:
+                    cur.execute(
+                        "SELECT sku, m_number, asin, country FROM ami_sku_mapping WHERE sku = %s LIMIT 1",
+                        (sku,),
+                    )
+                row = cur.fetchone()
+    except Exception as exc:
+        raise HTTPException(500, f"DB error: {exc}")
+
+    if not row:
+        raise HTTPException(404, f"SKU not found: {sku}")
+
+    return {
+        'sku': row[0],
+        'm_number': row[1],
+        'asin': row[2],
+        'country': row[3],
+    }
+
+
 @router.patch("/spapi/listings/{sku}/title")
 async def patch_listing_title(
     sku: str,
