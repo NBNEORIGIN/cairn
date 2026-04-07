@@ -295,9 +295,18 @@ def _upsert_rows(rows: list[dict]) -> tuple[int, int]:
     """
     Batch upsert via execute_values. Returns (inserted_or_updated, skipped).
     Only mutable status fields update on conflict — revenue fields are immutable.
+    Deduplicates within batch on (amazon_order_id, merchant_sku) to avoid
+    CardinalityViolation when the same SKU appears twice in one order row.
     """
     if not rows:
         return 0, 0
+
+    # Deduplicate on unique key — keep last occurrence
+    seen: dict = {}
+    for row in rows:
+        key = (row.get('amazon_order_id'), row.get('merchant_sku'))
+        seen[key] = row
+    rows = list(seen.values())
 
     DB_COLS = [
         'amazon_order_id', 'merchant_sku', 'marketplace', 'region',

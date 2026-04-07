@@ -250,10 +250,18 @@ def _upsert_daily_traffic(rows: list[dict]) -> int:
     """
     Batch upsert to ami_daily_traffic.
     UNIQUE on (marketplace, asin, date) — idempotent regardless of sync frequency.
+    Deduplicates within batch to avoid CardinalityViolation.
     Returns count of rows affected.
     """
     if not rows:
         return 0
+
+    # Deduplicate on unique key — keep last occurrence
+    seen: dict = {}
+    for row in rows:
+        key = (row.get('marketplace'), row.get('asin'), row.get('date'))
+        seen[key] = row
+    rows = list(seen.values())
 
     DB_COLS = [
         'marketplace', 'region', 'asin', 'parent_asin', 'date',
