@@ -413,7 +413,11 @@ def sync_orders(region: Region, days_back: int = 2) -> dict:
     return result
 
 
-def backfill_orders(region: Region, days_back: int = 90) -> dict:
-    """Initial 90-day population. Call once manually via API endpoint."""
+def backfill_orders(region: Region, days_back: int = 31) -> dict:
+    """
+    Historical population. Default 31 days — SP-API data unavailable before auth date.
+    Reports return empty beyond ~31 days for this account (authorized 2026-03-07).
+    Call once manually via POST /ami/analytics/backfill.
+    """
     log.info("Orders BACKFILL %s: %d days", region, days_back)
     return sync_orders(region, days_back=days_back)
