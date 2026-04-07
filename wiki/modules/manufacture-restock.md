@@ -14,7 +14,7 @@ create production orders directly in the Manufacture pipeline.
 ## Tech Stack
 - Backend: Django 5.x at `manufacture/backend/restock/`
 - Algorithm: Newsvendor model (`newsvendor.py`) — no scipy, uses rational approximation
-- SP-API: Delegates to Cairn AMI at `/ami/spapi/report/*` — no Amazon API credentials in Manufacture
+- SP-API: Direct LWA calls — `spapi_client.py` calls Amazon directly. Cairn HTTP unreachable from Manufacture container.
 - SKU resolution: Local Manufacture `SKU` table first, Cairn `/ami/sku-mapping/lookup` fallback
 - UI: Next.js at `frontend/src/app/restock/page.tsx`
 
@@ -45,7 +45,7 @@ User edits "Send qty" per item, selects rows →
 ```
 
 ## Connections
-- **Reads from**: Cairn AMI `/ami/spapi/report/*` (SP-API report download)
+- **Calls**: Amazon SP-API directly using LWA credentials
 - **Reads from**: Manufacture `SKU` + `Product` tables (SKU→M-number, margin when available)
 - **Falls back to**: Cairn `/ami/sku-mapping/lookup` (for SKUs not in local Manufacture DB)
 - **Writes to**: Manufacture `ProductionOrder` + `ProductionStage` tables
@@ -61,6 +61,7 @@ GET  /api/restock/{mp}/                 latest plan + items (filterable)
 POST /api/restock/approve/              store approved quantities
 POST /api/restock/create-production/    create production orders
 POST /api/restock/upload/               manual CSV upload (no SP-API)
+GET/POST/DELETE /api/restock/exclusions/   D2C exclusion list
 ```
 
 ## Supported Marketplaces
@@ -77,9 +78,14 @@ Alert values: `out_of_stock`, `reorder_now`, blank
 
 ## Decision Log
 
-### 2026-04-07 — SP-API delegation via Cairn HTTP
-Direct SP-API calls from Manufacture would duplicate credentials and infrastructure.
-All Amazon API calls go via Cairn AMI HTTP endpoints. Manufacture has no `AMAZON_*` vars.
+### 2026-04-07 — Direct SP-API (Cairn HTTP not reachable)
+Cairn container is on deploy_default network, Manufacture backend on same network, but HTTP responses timeout cross-network despite TCP connectivity. Root cause unknown (possibly iptables). Rewrote spapi_client.py to call Amazon SP-API directly using LWA credentials stored in Manufacture .env.
+
+### 2026-04-07 — Actual CSV format is TSV not CSV
+GET_FBA_INVENTORY_PLANNING_DATA returns tab-separated data with lowercase-hyphenated headers. Marketplace column contains 'UK' not 'GB'. Alert column contains velocity alerts (Low traffic, Low conversion), not restock alerts (out_of_stock, reorder_now). Restock alert derived from days_of_supply < 30 + recommended_qty > 0.
+
+### 2026-04-07 — D2C exclusion list
+Personalised items (made-to-order) should never be FBA restocked. RestockExclusion model lets staff permanently exclude M-numbers. Pre-seeded: M0634, M0683, M0682.
 
 ### 2026-04-07 — Local SKU table first, Cairn fallback
 Manufacture's own `SKU` model already has the SKU→M-number mapping (seeded from spreadsheet).
