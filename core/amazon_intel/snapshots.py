@@ -174,32 +174,36 @@ def _get_latest_flatfile_data() -> list[dict]:
 
 
 def _get_latest_business_data() -> dict[str, dict]:
-    """Get business report data from the most recent upload, keyed by child ASIN."""
+    """
+    Get traffic data per ASIN, keyed by ASIN.
+
+    Reads from ami_daily_traffic (7-day aggregate, DAY granularity from SP-API).
+    Falls back to empty dict if no data yet — callers handle missing gracefully.
+
+    Retired: ami_business_report_legacy (manual CSV uploads, Sprint 1 legacy).
+    """
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT id FROM ami_uploads
-                   WHERE file_type = 'business_report' AND status = 'complete'
-                   ORDER BY uploaded_at DESC LIMIT 1"""
-            )
-            row = cur.fetchone()
-            if not row:
-                return {}
-            upload_id = row[0]
-
-            cur.execute(
-                """SELECT upload_id, child_asin, sessions, page_views,
-                          buy_box_percentage, units_ordered,
-                          unit_session_percentage, ordered_product_sales
-                   FROM ami_business_report_legacy
-                   WHERE upload_id = %s""",
-                (upload_id,),
+                """SELECT
+                       asin,
+                       SUM(sessions)                                    AS sessions,
+                       SUM(page_views)                                  AS page_views,
+                       AVG(buy_box_percentage)                          AS buy_box_percentage,
+                       SUM(units_ordered)                               AS units_ordered,
+                       CASE WHEN SUM(sessions) > 0
+                            THEN SUM(units_ordered)::numeric / SUM(sessions)
+                            ELSE 0 END                                  AS unit_session_percentage,
+                       SUM(ordered_product_sales)                       AS ordered_product_sales
+                   FROM ami_daily_traffic
+                   WHERE date >= CURRENT_DATE - 7
+                   GROUP BY asin"""
             )
             cols = [d[0] for d in cur.description]
             result = {}
             for row in cur.fetchall():
                 d = dict(zip(cols, row))
-                result[d['child_asin']] = d
+                result[d['asin']] = d
             return result
 
 
