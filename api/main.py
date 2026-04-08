@@ -167,6 +167,14 @@ async def lifespan(app: FastAPI):
     except Exception as email_err:
         print(f'[CLAW startup] Email Ingest schema failed: {email_err}')
 
+    # ── Wiki Generation schema ─────────────────────────────────────────
+    try:
+        from core.wiki_gen.db import ensure_schema as wiki_gen_ensure_schema
+        wiki_gen_ensure_schema()
+        print('[CLAW startup] Wiki Generation schema ready')
+    except Exception as wiki_gen_err:
+        print(f'[CLAW startup] Wiki Generation schema failed: {wiki_gen_err}')
+
     # ── Auto-index empty projects ───────────────────────────────────────
     skip_auto_index = os.getenv('CAIRN_SKIP_AUTO_INDEX', '').lower() in {
         '1', 'true', 'yes',
@@ -2496,3 +2504,7 @@ app.include_router(render_router)
 # Register Email Ingestion routes
 from api.routes.email import router as email_router
 app.include_router(email_router)
+
+# Register Wiki Generation routes
+from api.routes.wiki_gen import router as wiki_gen_router
+app.include_router(wiki_gen_router)

@@ -139,6 +139,61 @@ if (-not (Test-Path $InboxScript)) {
     }
 }
 
+
+# CairnWikiCandidates — process wiki_candidate emails every 20 minutes
+
+$WikiScript = Join-Path $ClawDir "scripts\process_wiki_candidates.py"
+
+if (-not (Test-Path $WikiScript)) {
+    Write-Warning "Wiki script not found at $WikiScript — skipping CairnWikiCandidates"
+} else {
+    Write-Host "Installing Cairn wiki candidates scheduled task..."
+
+    $existingWiki = Get-ScheduledTask -TaskName "CairnWikiCandidates" -ErrorAction SilentlyContinue
+    if ($existingWiki) {
+        Unregister-ScheduledTask -TaskName "CairnWikiCandidates" -Confirm:$false
+        Write-Host "  Removed existing task"
+    }
+
+    $wikiAction = New-ScheduledTaskAction `
+        -Execute $PythonExe `
+        -Argument $WikiScript `
+        -WorkingDirectory $ClawDir
+
+    $wikiTrigger = New-ScheduledTaskTrigger `
+        -Once `
+        -At (Get-Date) `
+        -RepetitionInterval (New-TimeSpan -Minutes 20) `
+        -RepetitionDuration (New-TimeSpan -Days 3650)
+
+    $wikiSettings = New-ScheduledTaskSettingsSet `
+        -ExecutionTimeLimit (New-TimeSpan -Minutes 15) `
+        -RestartCount 1 `
+        -RestartInterval (New-TimeSpan -Minutes 5) `
+        -StartWhenAvailable `
+        -MultipleInstances IgnoreNew
+
+    Register-ScheduledTask `
+        -TaskName "CairnWikiCandidates" `
+        -TaskPath "\Cairn\" `
+        -Action $wikiAction `
+        -Trigger $wikiTrigger `
+        -Settings $wikiSettings `
+        -Principal $principal `
+        -Description "Cairn: generate wiki articles from cairn@ direct notes. Every 20 minutes." `
+        | Out-Null
+
+    $registeredWiki = Get-ScheduledTask -TaskName "CairnWikiCandidates" -ErrorAction SilentlyContinue
+    if ($registeredWiki) {
+        Write-Host "  [OK] CairnWikiCandidates registered" -ForegroundColor Green
+        Write-Host "  Trigger: every 20 minutes"
+        Write-Host "  Script: $WikiScript"
+        Write-Host "  Logs: $ClawDir\logs\wiki_gen\wiki_candidates.log"
+    } else {
+        Write-Warning "CairnWikiCandidates registration failed — check PowerShell permissions"
+    }
+}
+
 Write-Host ""
 Write-Host "NOTE: claw-api NSSM service requires Administrator." -ForegroundColor Yellow
 Write-Host "Run install_services.ps1 as Admin to make the API survive reboots."
