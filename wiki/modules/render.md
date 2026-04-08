@@ -87,14 +87,14 @@ products." This is the most critical piece of software NBNE has developed.
 ## EAN Pool
 - Seeded via: `docker exec render-app-1 flask seed-eans /tmp/eans.csv`
 - Copy CSV: `docker cp eans.csv render-app-1:/tmp/eans.csv`
-- **EAN pool is currently empty** — must seed before first Amazon publish
+- **2,222 EANs live in pool** (seeded 2026-04-08 from GS1 account CSV; 7,778 already assigned to existing products)
 - Assignment is atomic (SELECT FOR UPDATE SKIP LOCKED); EAN_ALREADY_IN_USE errors must be reported to Toby
 
 ## Current Status
 - Build phase: Production (Hetzner port 8025), migration to nbne1 still pending
-- Last significant change: Amazon SP-API publisher + catalogue schema (2026-04-08)
-- render-db-1 container is idle (not yet decommissioned — confirm data migration complete first)
-- Known issues: eBay OAuth re-auth pending; EAN pool empty
+- Last significant change: Amazon SP-API publisher + catalogue schema + EAN pool seeded (2026-04-08)
+- render-db-1 decommissioned 2026-04-08 — data verified and migrated to Cairn PG
+- Known issues: eBay OAuth re-auth pending
 
 ## Key Concepts
 - **Product publishing pipeline:** Concept → SVG render → AI content → QA approve → auto-publish to all channels
