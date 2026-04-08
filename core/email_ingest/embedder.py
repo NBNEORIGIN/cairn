@@ -48,30 +48,47 @@ def _chunk_email(body_text: str, window_words: int = 500, overlap_words: int = 5
     return chunks
 
 
+_indexer = None
+
+
 def _get_indexer():
-    """Instantiate a CodeIndexer for embedding only (path is not used)."""
-    from core.context.indexer import CodeIndexer
-    return CodeIndexer(
-        project_id=EMBED_PROJECT_ID,
-        codebase_path=os.getenv('CLAW_DATA_DIR', 'D:/claw'),
-        db_url=get_db_url(),
-    )
+    """Singleton CodeIndexer — avoids reconnecting on every batch call."""
+    global _indexer
+    if _indexer is None:
+        from core.context.indexer import CodeIndexer
+        _indexer = CodeIndexer(
+            project_id=EMBED_PROJECT_ID,
+            codebase_path=os.getenv('CLAW_DATA_DIR', 'D:/claw'),
+            db_url=get_db_url(),
+        )
+    return _indexer
 
 
-def embed_email_batch(batch_size: int = 50) -> dict:
+def embed_email_batch(batch_size: int = 200) -> dict:
     """
     Embed up to batch_size stored emails into claw_code_chunks.
-    Returns summary: {embedded, errors, chunks_written}.
 
-    Safe to call repeatedly — is_embedded flag prevents double-embedding.
+    Uses embed_batch() so OpenAI processes up to 100 chunks per API call —
+    dramatically faster than one embed() call per chunk.
+
+    Strategy:
+      1. Fetch batch_size emails from cairn_email_raw
+      2. Chunk each email body
+      3. Build content strings + content_hashes for all chunks
+      4. Filter out already-embedded hashes (single bulk query)
+      5. embed_batch() all remaining content strings in one call
+      6. INSERT all rows + mark emails as embedded
+
+    Safe to call repeatedly — is_embedded + content_hash prevent double work.
     """
+    from pgvector.psycopg2 import register_vector
+
     indexer = _get_indexer()
     embedded = 0
     errors = 0
     chunks_written = 0
 
     with get_conn() as conn:
-        from pgvector.psycopg2 import register_vector
         register_vector(conn)
 
         with conn.cursor() as cur:
@@ -87,95 +104,112 @@ def embed_email_batch(batch_size: int = 50) -> dict:
             )
             emails = cur.fetchall()
 
+        if not emails:
+            return {'embedded': 0, 'errors': 0, 'chunks_written': 0}
+
         logger.info('embed_email_batch: %d emails to process', len(emails))
+
+        # ── Phase 1: build all (email_id, chunk_index, content, content_hash) ──
+        all_items = []  # (email_id, mailbox, subject, received_at, chunk_index, content, hash)
+        empty_email_ids = []
 
         for row in emails:
             email_id, mailbox, sender, subject, body_text, received_at = row
             chunks = _chunk_email(body_text or '')
 
             if not chunks:
-                # Mark as embedded (no content to embed)
-                with conn.cursor() as cur:
-                    cur.execute(
-                        'UPDATE cairn_email_raw SET is_embedded=TRUE WHERE id=%s',
-                        (email_id,),
-                    )
-                    conn.commit()
-                embedded += 1
+                empty_email_ids.append(email_id)
                 continue
 
+            date_str = received_at.date().isoformat() if received_at else 'unknown'
+            for chunk_index, chunk in enumerate(chunks):
+                content = (
+                    f'Email from {sender} ({date_str})\n'
+                    f'Subject: {subject}\n\n{chunk}'
+                )
+                content_hash = hashlib.sha256(content.encode()).hexdigest()
+                all_items.append((
+                    email_id, mailbox, subject or '', received_at,
+                    chunk_index, content, content_hash,
+                ))
+
+        # ── Phase 2: bulk-check which hashes already exist ──
+        if all_items:
+            all_hashes = [item[6] for item in all_items]
+            with conn.cursor() as cur:
+                cur.execute(
+                    'SELECT content_hash FROM claw_code_chunks '
+                    'WHERE project_id = %s AND content_hash = ANY(%s)',
+                    (EMBED_PROJECT_ID, all_hashes),
+                )
+                existing_hashes = {row[0] for row in cur.fetchall()}
+
+            new_items = [item for item in all_items if item[6] not in existing_hashes]
+            logger.info(
+                '%d total chunks, %d already embedded, %d to embed',
+                len(all_items), len(all_hashes) - len(new_items), len(new_items),
+            )
+        else:
+            new_items = []
+
+        # ── Phase 3: batch embed all new chunks in one API call ──
+        if new_items:
+            texts = [item[5] for item in new_items]
             try:
-                date_str = received_at.date().isoformat() if received_at else 'unknown'
-                file_path = f'email/{mailbox}/{email_id}'
-
-                with conn.cursor() as cur:
-                    for chunk_index, chunk in enumerate(chunks):
-                        content = (
-                            f'Email from {sender} ({date_str})\n'
-                            f'Subject: {subject}\n\n{chunk}'
-                        )
-                        content_hash = hashlib.sha256(content.encode()).hexdigest()
-
-                        # Skip if this exact chunk is already in the vector store
-                        cur.execute(
-                            'SELECT 1 FROM claw_code_chunks WHERE content_hash=%s AND project_id=%s',
-                            (content_hash, EMBED_PROJECT_ID),
-                        )
-                        if cur.fetchone():
-                            continue
-
-                        try:
-                            embedding = indexer.embed(content)
-                        except Exception as exc:
-                            logger.error(
-                                'embed failed for email_id=%d chunk=%d: %s',
-                                email_id, chunk_index, exc,
-                            )
-                            raise
-
-                        cur.execute(
-                            """
-                            INSERT INTO claw_code_chunks
-                                (project_id, file_path, chunk_content, chunk_type,
-                                 chunk_name, content_hash, embedding, last_modified,
-                                 subproject_id)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                            """,
-                            (
-                                EMBED_PROJECT_ID,
-                                f'{file_path}/{chunk_index}',
-                                content,
-                                'email',
-                                (subject or '')[:200],
-                                content_hash,
-                                embedding,
-                                received_at,
-                                mailbox,
-                            ),
-                        )
-                        chunks_written += 1
-
-                    cur.execute(
-                        'UPDATE cairn_email_raw SET is_embedded=TRUE WHERE id=%s',
-                        (email_id,),
-                    )
-
-                conn.commit()
-                embedded += 1
-
-                if embedded % 50 == 0:
-                    logger.info(
-                        'embed_email_batch: %d embedded, %d chunks written so far',
-                        embedded, chunks_written,
-                    )
-
+                embeddings = indexer.embed_batch(texts)
             except Exception as exc:
-                logger.error('Failed to embed email id=%d: %s', email_id, exc, exc_info=True)
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
-                errors += 1
+                logger.error('embed_batch failed: %s', exc, exc_info=True)
+                # Fall back to per-item embed so partial progress is saved
+                embeddings = []
+                for text in texts:
+                    try:
+                        embeddings.append(indexer.embed(text))
+                    except Exception as e:
+                        logger.error('Single embed failed: %s', e)
+                        embeddings.append(None)
+
+            # ── Phase 4: insert all chunks ──
+            with conn.cursor() as cur:
+                for item, embedding in zip(new_items, embeddings):
+                    if embedding is None:
+                        errors += 1
+                        continue
+                    email_id, mailbox, subject, received_at, chunk_index, content, content_hash = item
+                    file_path = f'email/{mailbox}/{email_id}/{chunk_index}'
+                    cur.execute(
+                        """
+                        INSERT INTO claw_code_chunks
+                            (project_id, file_path, chunk_content, chunk_type,
+                             chunk_name, content_hash, embedding, last_modified,
+                             subproject_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT DO NOTHING
+                        """,
+                        (
+                            EMBED_PROJECT_ID,
+                            file_path,
+                            content,
+                            'email',
+                            subject[:200],
+                            content_hash,
+                            embedding,
+                            received_at,
+                            mailbox,
+                        ),
+                    )
+                    chunks_written += 1
+
+        # ── Phase 5: mark all emails as embedded (empty + newly done) ──
+        processed_email_ids = list({item[0] for item in all_items}) + empty_email_ids
+        if processed_email_ids:
+            with conn.cursor() as cur:
+                cur.execute(
+                    'UPDATE cairn_email_raw SET is_embedded=TRUE WHERE id = ANY(%s)',
+                    (processed_email_ids,),
+                )
+
+        conn.commit()
+        embedded = len(processed_email_ids) + len(empty_email_ids)
 
     result = {'embedded': embedded, 'errors': errors, 'chunks_written': chunks_written}
     logger.info('embed_email_batch complete: %s', result)
