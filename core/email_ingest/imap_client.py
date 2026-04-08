@@ -11,6 +11,7 @@ Handles:
 import os
 import imaplib
 import email
+import email.message
 import logging
 from email.header import decode_header as _decode_header
 from email.utils import parseaddr, parsedate_to_datetime

@@ -154,6 +154,115 @@ def _create_log_entry(conn, mailbox_name: str) -> int:
         return log_id
 
 
+def _try_select_folder(imap, mailbox_name: str, folder: str) -> list[bytes]:
+    """
+    Try to select a folder and return UIDs.
+    IONOS uses non-standard Sent folder names — tries common variants.
+    Returns empty list if folder does not exist.
+    """
+    # For Sent, try common IONOS variants before giving up
+    candidates = [folder]
+    if folder.lower() == 'sent':
+        candidates = ['Sent', 'Sent Items', 'INBOX.Sent', 'Sent Messages']
+
+    for name in candidates:
+        try:
+            uids = fetch_all_uids(imap, name)
+            logger.info('[%s] %s: %d UIDs', mailbox_name, name, len(uids))
+            return uids
+        except Exception:
+            continue
+
+    logger.info('[%s] No accessible folder matching %r — skipping', mailbox_name, folder)
+    return []
+
+
+def _process_uid(
+    imap,
+    uid: bytes,
+    mailbox_name: str,
+    existing_ids: set,
+    conn,
+    total_processed: int,
+    total_uids: int,
+) -> tuple[str, str]:
+    """
+    Fetch and process a single UID. Returns (outcome, message_id).
+    outcome: 'stored' | 'skipped' | 'duplicate' | 'error'
+    """
+    import email as _email
+    import hashlib
+    from core.email_ingest.imap_client import decode_header_value
+    from email.utils import parseaddr
+
+    # Header-only fetch for quick duplicate check
+    _, hdr_data = imap.fetch(uid, '(BODY[HEADER.FIELDS (MESSAGE-ID)])')
+    raw_hdr = hdr_data[0][1] if hdr_data and hdr_data[0] else b''
+    hdr_msg = _email.message_from_bytes(raw_hdr)
+    msg_id_hdr = (hdr_msg.get('Message-ID', '') or '').strip()[:500]
+
+    if msg_id_hdr and msg_id_hdr in existing_ids:
+        return 'duplicate', msg_id_hdr
+
+    # Relevance pre-filter for toby@ only (partial body fetch)
+    if mailbox_name == 'toby' and msg_id_hdr:
+        preview = fetch_body_preview(imap, uid, 500)
+        _, full_hdr_data = imap.fetch(uid, '(BODY[HEADER.FIELDS (MESSAGE-ID SUBJECT FROM)])')
+        raw_full_hdr = full_hdr_data[0][1] if full_hdr_data and full_hdr_data[0] else b''
+        full_hdr_msg = _email.message_from_bytes(raw_full_hdr)
+        subj = decode_header_value(full_hdr_msg.get('Subject', ''))
+        _, sender_addr = parseaddr(full_hdr_msg.get('From', ''))
+        relevant, reason = is_business_relevant(sender_addr, subj, preview)
+        if not relevant:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO cairn_email_raw
+                        (message_id, mailbox, sender, subject,
+                         recipients, is_embedded, skip_reason, word_count)
+                    VALUES (%s,%s,%s,%s,'{}', FALSE, %s, 0)
+                    ON CONFLICT (message_id) DO NOTHING
+                    """,
+                    (msg_id_hdr, mailbox_name, sender_addr, subj,
+                     f'not_business_relevant:{reason}'),
+                )
+                conn.commit()
+            existing_ids.add(msg_id_hdr)
+            return 'skipped', msg_id_hdr
+
+    # Full message fetch
+    msg = fetch_message(imap, uid)
+    if msg is None:
+        return 'error', msg_id_hdr
+
+    parsed = parse_message(msg, mailbox_name)
+
+    if not parsed['message_id']:
+        parsed['message_id'] = (
+            f'<synthetic-{mailbox_name}-{uid.decode()}-'
+            f'{hashlib.md5((parsed.get("subject") or "").encode()).hexdigest()[:8]}@cairn>'
+        )
+
+    skip, skip_reason = should_skip_email(
+        parsed['sender'] or '', parsed['subject'] or ''
+    )
+    if skip:
+        _store_skipped(conn, parsed, skip_reason)
+        conn.commit()
+        existing_ids.add(parsed['message_id'])
+        return 'skipped', parsed['message_id']
+
+    if parsed['body_text']:
+        parsed['body_text'] = sanitise_email_content(parsed['body_text'])
+    if parsed['subject']:
+        parsed['subject'] = sanitise_email_content(parsed['subject'])
+
+    inserted = _upsert_email(conn, parsed, [])
+    conn.commit()
+    existing_ids.add(parsed['message_id'])
+    return ('stored' if inserted else 'duplicate'), parsed['message_id']
+
+
 def ingest_mailbox(
     mailbox_name: str,
     sleep_between: float = DEFAULT_SLEEP_BETWEEN_FETCHES,
@@ -161,7 +270,10 @@ def ingest_mailbox(
 ) -> dict:
     """
     Bulk-ingest a single mailbox (INBOX + Sent by default).
-    Returns a summary dict.
+
+    Processes each folder completely before moving to the next — this keeps
+    the IMAP connection in SELECTED state for all fetches within a folder.
+    A failed SELECT for one folder does not affect subsequent folders.
     """
     if folders is None:
         folders = ['INBOX', 'Sent']
@@ -176,6 +288,7 @@ def ingest_mailbox(
     total_skipped = 0
     total_errors = 0
     last_message_id = ''
+    global_i = 0
 
     with get_conn() as conn:
         log_id = _create_log_entry(conn, mailbox_name)
@@ -188,133 +301,69 @@ def ingest_mailbox(
             return {'mailbox': mailbox_name, 'status': 'error', 'reason': str(exc)}
 
         try:
-            all_uids: list[bytes] = []
             for folder in folders:
-                try:
-                    uids = fetch_all_uids(imap, folder)
-                    all_uids.extend(uids)
-                    logger.info('[%s] %s: %d UIDs', mailbox_name, folder, len(uids))
-                except Exception as exc:
-                    logger.warning('[%s] Could not select folder %s: %s', mailbox_name, folder, exc)
+                # _try_select_folder leaves the connection in SELECTED state for
+                # that folder, so all FETCH calls below are valid.
+                uids = _try_select_folder(imap, mailbox_name, folder)
+                if not uids:
+                    continue
 
-            logger.info('[%s] Total UIDs to process: %d', mailbox_name, len(all_uids))
-
-            for i, uid in enumerate(all_uids, start=1):
-                try:
-                    # Fetch headers only first (faster) for resume check
-                    _, hdr_data = imap.fetch(uid, '(BODY[HEADER.FIELDS (MESSAGE-ID)])')
-                    raw_hdr = hdr_data[0][1] if hdr_data and hdr_data[0] else b''
-                    import email as _email
-                    hdr_msg = _email.message_from_bytes(raw_hdr)
-                    msg_id_hdr = (hdr_msg.get('Message-ID', '') or '').strip()[:500]
-
-                    if msg_id_hdr and msg_id_hdr in existing_ids:
-                        total_fetched += 1
-                        if i % 500 == 0:
-                            logger.info('[%s] %d/%d (%.0f%%) — skipping known',
-                                        mailbox_name, i, len(all_uids), 100*i/len(all_uids))
-                        continue
-
-                    # Relevance pre-filter for toby@ (uses partial body fetch)
-                    if mailbox_name == 'toby' and msg_id_hdr:
-                        preview = fetch_body_preview(imap, uid, 500)
-                        # Need subject for relevance check; fetch full headers
-                        _, full_hdr_data = imap.fetch(uid, '(BODY[HEADER.FIELDS (MESSAGE-ID SUBJECT FROM)])')
-                        raw_full_hdr = full_hdr_data[0][1] if full_hdr_data and full_hdr_data[0] else b''
-                        full_hdr_msg = _email.message_from_bytes(raw_full_hdr)
-                        from core.email_ingest.imap_client import decode_header_value
-                        from email.utils import parseaddr
-                        subj = decode_header_value(full_hdr_msg.get('Subject', ''))
-                        _, sender_addr = parseaddr(full_hdr_msg.get('From', ''))
-                        relevant, reason = is_business_relevant(sender_addr, subj, preview)
-                        if not relevant:
-                            # Store minimal record with skip reason, no body
-                            with conn.cursor() as cur:
-                                cur.execute(
-                                    """
-                                    INSERT INTO cairn_email_raw
-                                        (message_id, mailbox, sender, subject,
-                                         recipients, is_embedded, skip_reason, word_count)
-                                    VALUES (%s,%s,%s,%s,'{}', FALSE, %s, 0)
-                                    ON CONFLICT (message_id) DO NOTHING
-                                    """,
-                                    (msg_id_hdr, mailbox_name, sender_addr, subj,
-                                     f'not_business_relevant:{reason}'),
-                                )
-                                conn.commit()
-                            existing_ids.add(msg_id_hdr)
-                            total_fetched += 1
-                            total_skipped += 1
-                            if sleep_between:
-                                time.sleep(sleep_between)
-                            continue
-
-                    # Fetch full message
-                    msg = fetch_message(imap, uid)
-                    if msg is None:
-                        total_errors += 1
-                        continue
-
-                    parsed = parse_message(msg, mailbox_name)
-
-                    if not parsed['message_id']:
-                        # Generate synthetic ID if missing
-                        import hashlib
-                        synthetic = f'<synthetic-{mailbox_name}-{uid.decode()}-{hashlib.md5((parsed.get("subject") or "").encode()).hexdigest()[:8]}@cairn>'
-                        parsed['message_id'] = synthetic
-
-                    total_fetched += 1
-                    last_message_id = parsed['message_id']
-
-                    # should_skip_email check
-                    skip, skip_reason = should_skip_email(
-                        parsed['sender'] or '', parsed['subject'] or ''
-                    )
-                    if skip:
-                        _store_skipped(conn, parsed, skip_reason)
-                        conn.commit()
-                        existing_ids.add(parsed['message_id'])
-                        total_skipped += 1
-                    else:
-                        # Sanitise before storage
-                        if parsed['body_text']:
-                            parsed['body_text'] = sanitise_email_content(parsed['body_text'])
-                        if parsed['subject']:
-                            parsed['subject'] = sanitise_email_content(parsed['subject'])
-
-                        inserted = _upsert_email(conn, parsed, [])
-                        conn.commit()
-                        if inserted:
-                            existing_ids.add(parsed['message_id'])
-                            total_stored += 1
-
-                    if i % CHECKPOINT_EVERY == 0:
-                        _write_checkpoint(
-                            conn, log_id, last_message_id,
-                            total_fetched, total_stored, total_skipped, total_errors,
-                        )
-                        logger.info(
-                            '[%s] Checkpoint %d/%d — stored=%d skipped=%d errors=%d',
-                            mailbox_name, i, len(all_uids),
-                            total_stored, total_skipped, total_errors,
-                        )
-
-                    if sleep_between:
-                        time.sleep(sleep_between)
-
-                except Exception as exc:
-                    logger.error('[%s] Error on uid=%s: %s', mailbox_name, uid, exc, exc_info=True)
-                    total_errors += 1
+                for i, uid in enumerate(uids, start=1):
+                    global_i += 1
                     try:
-                        conn.rollback()
-                    except Exception:
-                        pass
+                        outcome, msg_id = _process_uid(
+                            imap, uid, mailbox_name, existing_ids,
+                            conn, global_i, len(uids),
+                        )
+                        if outcome == 'stored':
+                            total_stored += 1
+                            total_fetched += 1
+                            last_message_id = msg_id
+                        elif outcome == 'skipped':
+                            total_skipped += 1
+                            total_fetched += 1
+                            last_message_id = msg_id
+                        elif outcome == 'duplicate':
+                            total_fetched += 1
+                        elif outcome == 'error':
+                            total_errors += 1
+
+                        if global_i % CHECKPOINT_EVERY == 0:
+                            _write_checkpoint(
+                                conn, log_id, last_message_id,
+                                total_fetched, total_stored, total_skipped, total_errors,
+                            )
+                            logger.info(
+                                '[%s] %s %d/%d — stored=%d skipped=%d errors=%d',
+                                mailbox_name, folder, i, len(uids),
+                                total_stored, total_skipped, total_errors,
+                            )
+
+                        if sleep_between:
+                            time.sleep(sleep_between)
+
+                    except Exception as exc:
+                        logger.error(
+                            '[%s] Error on uid=%s: %s', mailbox_name, uid, exc,
+                            exc_info=True,
+                        )
+                        total_errors += 1
+                        try:
+                            conn.rollback()
+                        except Exception:
+                            pass
 
         finally:
             try:
                 imap.logout()
             except Exception:
                 pass
+
+        _write_checkpoint(
+            conn, log_id, last_message_id,
+            total_fetched, total_stored, total_skipped, total_errors,
+            status='complete',
+        )
 
         _write_checkpoint(
             conn, log_id, last_message_id,
