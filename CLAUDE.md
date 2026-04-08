@@ -237,6 +237,22 @@ Cost data is written to two places:
 
 ---
 
+## Cost Discipline Addendum
+
+These rules apply on every prompt without exception.
+
+**Delegation justification** — before using the principal model (Sonnet/Opus) for
+any task, state in one sentence why it cannot be delegated to DeepSeek or a junior
+model. If you cannot justify it, delegate.
+
+**Retrieval limit** — maximum 5 memory retrievals per session. Prioritise quality
+of query over quantity of calls.
+
+**Session length** — be aware of turn count. At 25 turns, stop, write back to
+Cairn memory, and recommend Toby open a fresh session rather than continuing.
+
+---
+
 ### STEP 5 — Reindex if files changed
 
 If any files were modified, trigger reindex for the project:
