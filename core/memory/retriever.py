@@ -293,6 +293,58 @@ class HybridRetriever:
     # ── Wiki boost configuration ──────────────────────────────────
     WIKI_BOOST_FACTOR = 1.5
     WIKI_BACKLINK_BUDGET = 3
+    WIKI_GUARANTEED_K = 3   # always inject this many wiki results, bypass threshold
+
+    def _wiki_search(
+        self,
+        query: str,
+        embedding_fn: Callable,
+        top_k: int | None = None,
+    ) -> list[RetrievedChunk]:
+        """Dedicated wiki-only cosine search with NO similarity threshold.
+
+        This guarantees that relevant wiki articles surface even when they score
+        below the global SIMILARITY_THRESHOLD (0.65). Called separately from the
+        main cosine search so wiki knowledge is never crowded out by email/code chunks.
+        """
+        top_k = top_k or self.WIKI_GUARANTEED_K
+        try:
+            query_embedding = embedding_fn(query)
+            conn = self.context_engine._get_connection()
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT file_path, chunk_content, chunk_type, chunk_name,
+                           1 - (embedding <=> %s::vector) AS similarity
+                    FROM claw_code_chunks
+                    WHERE project_id = %s
+                      AND chunk_type = 'wiki'
+                      AND embedding IS NOT NULL
+                    ORDER BY embedding <=> %s::vector
+                    LIMIT %s
+                    """,
+                    (
+                        query_embedding,
+                        self.context_engine.project_id,
+                        query_embedding,
+                        top_k,
+                    ),
+                )
+                rows = cur.fetchall()
+            return [
+                RetrievedChunk(
+                    file=row[0],
+                    content=row[1],
+                    chunk_type=row[2],
+                    chunk_name=row[3],
+                    score=float(row[4]),
+                    cosine_rank=rank,
+                )
+                for rank, row in enumerate(rows)
+            ]
+        except Exception as exc:
+            logger.warning('[retriever] wiki_search failed: %s', exc)
+            return []
 
     def retrieve(
         self,
@@ -336,6 +388,18 @@ class HybridRetriever:
                     cosine_error,
                 )
             return self.context_engine._retrieve_by_keyword(task, subproject_id)
+
+        # ── Guaranteed wiki injection ─────────────────────────────────────────
+        # Wiki chunks that scored below SIMILARITY_THRESHOLD are excluded from
+        # cosine_results before they reach the boost step. Run a dedicated
+        # no-threshold wiki search and inject any wiki chunks not already present.
+        guaranteed_wiki = self._wiki_search(task, embedding_fn)
+        if guaranteed_wiki:
+            existing_files = {c.dedupe_key for c in merged}
+            for wiki_chunk in guaranteed_wiki:
+                if wiki_chunk.dedupe_key not in existing_files:
+                    merged.append(wiki_chunk)
+                    existing_files.add(wiki_chunk.dedupe_key)
 
         boosted = self._apply_wiki_boost(merged)
         top_k = self.context_engine.MAX_TIER2_CHUNKS
