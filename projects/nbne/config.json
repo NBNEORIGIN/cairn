@@ -29,5 +29,7 @@
     "auto_reindex": false,
     "exclude_paths": [],
     "include_extensions": [".md", ".txt"]
-  }
+  },
+
+  "wiki_source_projects": ["claw"]
 }

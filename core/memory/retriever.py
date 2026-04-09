@@ -300,24 +300,39 @@ class HybridRetriever:
         query: str,
         embedding_fn: Callable,
         top_k: int | None = None,
+        extra_project_ids: list[str] | None = None,
     ) -> list[RetrievedChunk]:
         """Dedicated wiki-only cosine search with NO similarity threshold.
 
         This guarantees that relevant wiki articles surface even when they score
         below the global SIMILARITY_THRESHOLD (0.65). Called separately from the
         main cosine search so wiki knowledge is never crowded out by email/code chunks.
+
+        extra_project_ids: additional projects to search for wiki chunks (e.g. 'claw'
+        chunks surfaced in the 'nbne' business interface). Configured via
+        wiki_source_projects in the project's config.json.
         """
         top_k = top_k or self.WIKI_GUARANTEED_K
+        project_ids = [self.context_engine.project_id] + (extra_project_ids or [])
+        # deduplicate while preserving order
+        seen: set[str] = set()
+        unique_pids: list[str] = []
+        for pid in project_ids:
+            if pid not in seen:
+                seen.add(pid)
+                unique_pids.append(pid)
+
+        placeholders = ', '.join(['%s'] * len(unique_pids))
         try:
             query_embedding = embedding_fn(query)
             conn = self.context_engine._get_connection()
             with conn.cursor() as cur:
                 cur.execute(
-                    """
+                    f"""
                     SELECT file_path, chunk_content, chunk_type, chunk_name,
                            1 - (embedding <=> %s::vector) AS similarity
                     FROM claw_code_chunks
-                    WHERE project_id = %s
+                    WHERE project_id IN ({placeholders})
                       AND chunk_type = 'wiki'
                       AND embedding IS NOT NULL
                     ORDER BY embedding <=> %s::vector
@@ -325,7 +340,7 @@ class HybridRetriever:
                     """,
                     (
                         query_embedding,
-                        self.context_engine.project_id,
+                        *unique_pids,
                         query_embedding,
                         top_k,
                     ),
@@ -387,19 +402,31 @@ class HybridRetriever:
                     self.context_engine.project_id,
                     cosine_error,
                 )
-            return self.context_engine._retrieve_by_keyword(task, subproject_id)
+            # Don't early-return here — wiki injection may still surface results
+            # from cross-project wiki_source_projects even when this project is empty.
+            merged = list(self.context_engine._retrieve_by_keyword(task, subproject_id))
 
         # ── Guaranteed wiki injection ─────────────────────────────────────────
         # Wiki chunks that scored below SIMILARITY_THRESHOLD are excluded from
         # cosine_results before they reach the boost step. Run a dedicated
         # no-threshold wiki search and inject any wiki chunks not already present.
-        guaranteed_wiki = self._wiki_search(task, embedding_fn)
+        # Also searches wiki_source_projects so business projects (e.g. 'nbne')
+        # can pull wiki articles stored under the developer project ('claw').
+        extra_wiki_pids: list[str] = self.context_engine._load_config().get(
+            'wiki_source_projects', []
+        )
+        guaranteed_wiki = self._wiki_search(
+            task, embedding_fn, extra_project_ids=extra_wiki_pids
+        )
         if guaranteed_wiki:
             existing_files = {c.dedupe_key for c in merged}
             for wiki_chunk in guaranteed_wiki:
                 if wiki_chunk.dedupe_key not in existing_files:
                     merged.append(wiki_chunk)
                     existing_files.add(wiki_chunk.dedupe_key)
+
+        if not merged:
+            return []
 
         boosted = self._apply_wiki_boost(merged)
         top_k = self.context_engine.MAX_TIER2_CHUNKS
