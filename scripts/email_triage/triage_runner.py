@@ -65,16 +65,24 @@ def fetch_candidate_emails(
     db_url: str,
     window_days: int,
     max_emails: int,
+    mailboxes: list[str] | None = None,
 ) -> list[dict]:
-    """Pull emails from cairn_email_raw inside the triage window."""
+    """Pull emails from cairn_email_raw inside the triage window.
+
+    ``mailboxes`` defaults to ALLOWED_MAILBOXES when None. Passing an
+    explicit list overrides the default — used by smoke tests to
+    exercise the pipeline against whatever mailboxes are actually
+    ingested to the current DB.
+    """
     cutoff = datetime.now(tz=timezone.utc) - timedelta(days=window_days)
+    whitelist = mailboxes if mailboxes else ALLOWED_MAILBOXES
     conn = psycopg2.connect(db_url, connect_timeout=8)
     try:
         with conn.cursor() as cur:
             cur.execute('SET statement_timeout = 60000')
             mailbox_filters = '(' + ' OR '.join(
-                ['email_mailbox = %s'] * len(ALLOWED_MAILBOXES)
-            ).replace('email_mailbox', 'mailbox') + ')'
+                ['mailbox = %s'] * len(whitelist)
+            ) + ')'
             # Note: loop prevention is done in Python below because
             # the sender field contains full addresses with mixed
             # case and display names, which is messy in SQL.
@@ -88,7 +96,7 @@ def fetch_candidate_emails(
                 ORDER BY received_at DESC
                 LIMIT %s
             """
-            params: list[Any] = list(ALLOWED_MAILBOXES) + [cutoff, max_emails * 3]
+            params: list[Any] = list(whitelist) + [cutoff, max_emails * 3]
             cur.execute(sql, params)
             rows = cur.fetchall()
             col_names = [d[0] for d in cur.description]
@@ -111,10 +119,13 @@ def run_triage(
     commit: bool,
     max_emails: int,
     window_days: int,
+    mailboxes: list[str] | None = None,
 ) -> int:
     """Execute one pass of the triage pipeline.
 
     Returns the number of rows written to email_triage (0 in dry-run).
+    ``mailboxes`` optionally overrides ALLOWED_MAILBOXES — used by smoke
+    tests to process whatever mailbox is actually ingested in the DB.
     """
     if not is_triage_enabled():
         log.warning(
@@ -136,7 +147,7 @@ def run_triage(
     except Exception as exc:
         log.warning('triage_runner: ensure_schema raised: %s', exc)
 
-    emails = fetch_candidate_emails(db_url, window_days, max_emails)
+    emails = fetch_candidate_emails(db_url, window_days, max_emails, mailboxes=mailboxes)
     log.info(
         'triage_runner: fetched %d candidate emails (window=%d days, cap=%d)',
         len(emails), window_days, max_emails,
@@ -302,12 +313,18 @@ def main(argv: list[str] | None = None) -> int:
                         help='Max emails to process per run (default 20)')
     parser.add_argument('--window-days', type=int, default=7,
                         help='Process emails received in the last N days (default 7)')
+    parser.add_argument('--mailbox', action='append', default=None,
+                        help='Override mailbox whitelist (repeatable). '
+                             'Defaults to toby+sales. Used by smoke tests to '
+                             'point the pipeline at whatever mailbox is '
+                             'actually ingested (e.g. --mailbox cairn).')
     args = parser.parse_args(argv)
 
     written = run_triage(
         commit=args.commit,
         max_emails=args.max_emails,
         window_days=args.window_days,
+        mailboxes=args.mailbox,
     )
     print(f'[triage_runner] done written={written} commit={args.commit}')
     return 0
