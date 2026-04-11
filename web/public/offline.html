@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="theme-color" content="#0f172a"/>
+<title>Cairn — Offline</title>
+<style>
+  :root {
+    color-scheme: dark;
+  }
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: #0f172a;
+    color: #f8fafc;
+    font-family: Inter, "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap {
+    min-height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem 1.5rem;
+    text-align: center;
+  }
+  .mark {
+    width: 96px;
+    height: 96px;
+    margin-bottom: 2rem;
+    opacity: 0.9;
+  }
+  h1 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin: 0 0 0.5rem;
+    letter-spacing: -0.01em;
+  }
+  p {
+    font-size: 0.9375rem;
+    max-width: 38ch;
+    margin: 0 0 1.75rem;
+    line-height: 1.55;
+    color: #cbd5e1;
+  }
+  button {
+    background: #f8fafc;
+    color: #0f172a;
+    border: 0;
+    padding: 0.65rem 1.25rem;
+    border-radius: 6px;
+    font: inherit;
+    font-weight: 500;
+    font-size: 0.875rem;
+    cursor: pointer;
+    transition: background 120ms ease;
+  }
+  button:hover { background: #e2e8f0; }
+  .meta {
+    margin-top: 1.75rem;
+    font-size: 0.75rem;
+    color: #64748b;
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <img src="/icon-192.png" alt="" class="mark"/>
+    <h1>You're offline</h1>
+    <p>Cairn needs a live connection to the agent back-end. Check your network, then retry.</p>
+    <button onclick="location.reload()">Retry</button>
+    <div class="meta">cairn.nbnesigns.co.uk</div>
+  </div>
+</body>
+</html>

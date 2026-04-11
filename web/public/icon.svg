@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Cairn monogram: four stacked rounded rectangles representing a cairn
+       of decreasing width, rotated slightly like real stacked stones. The
+       dark-on-light contrast is deliberately high so it reads at 16px. -->
+  <rect width="512" height="512" rx="96" fill="#0f172a"/>
+  <g fill="#f8fafc">
+    <!-- Largest stone, base -->
+    <rect x="96"  y="342" width="320" height="62" rx="22"/>
+    <!-- Second stone -->
+    <rect x="128" y="256" width="256" height="58" rx="20" transform="rotate(-2 256 285)"/>
+    <!-- Third stone -->
+    <rect x="160" y="176" width="192" height="54" rx="18" transform="rotate(1.5 256 203)"/>
+    <!-- Top stone -->
+    <rect x="196" y="108" width="120" height="50" rx="16" transform="rotate(-1 256 133)"/>
+  </g>
+</svg>

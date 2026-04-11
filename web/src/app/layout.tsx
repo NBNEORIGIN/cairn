@@ -1,10 +1,63 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
+import { Inter, JetBrains_Mono } from 'next/font/google'
+import Script from 'next/script'
 import './globals.css'
+
+// ── Typography ─────────────────────────────────────────────────────────
+// Inter for UI chrome, JetBrains Mono for code / identifiers / numerics.
+// Both loaded via next/font so they're self-hosted, pre-rendered, and
+// zero-layout-shift.
+
+const inter = Inter({
+  subsets: ['latin'],
+  variable: '--font-sans',
+  display: 'swap',
+})
+
+const jetbrains = JetBrains_Mono({
+  subsets: ['latin'],
+  variable: '--font-mono',
+  display: 'swap',
+})
+
+// ── Metadata ───────────────────────────────────────────────────────────
 
 export const metadata: Metadata = {
   title: 'Cairn — Sovereign AI Agent',
-  description: 'Sovereign AI agent for NBNE',
+  description:
+    'Counterfactual memory, email triage, principal-developer-grade code assistance for NBNE.',
+  applicationName: 'Cairn',
+  manifest: '/manifest.webmanifest',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'Cairn',
+  },
+  icons: {
+    icon: [
+      { url: '/favicon.ico', sizes: 'any' },
+      { url: '/favicon.png', type: 'image/png', sizes: '32x32' },
+      { url: '/icon-192.png', type: 'image/png', sizes: '192x192' },
+      { url: '/icon-512.png', type: 'image/png', sizes: '512x512' },
+    ],
+    apple: [{ url: '/apple-touch-icon.png', sizes: '180x180' }],
+  },
+  formatDetection: {
+    telephone: false,
+    email: false,
+    address: false,
+  },
 }
+
+export const viewport: Viewport = {
+  themeColor: '#0f172a',
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 5,
+  viewportFit: 'cover',
+}
+
+// ── Root layout ────────────────────────────────────────────────────────
 
 export default function RootLayout({
   children,
@@ -12,8 +65,27 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className="h-full">
-      <body className="h-full">{children}</body>
+    <html
+      lang="en"
+      className={`${inter.variable} ${jetbrains.variable} h-full`}
+      suppressHydrationWarning
+    >
+      <body className="h-full font-sans antialiased">
+        {children}
+        {/* Service worker registration — runs after hydration, strategy
+            "afterInteractive" so it never blocks the first paint. */}
+        <Script id="cairn-sw-register" strategy="afterInteractive">
+          {`
+            if ('serviceWorker' in navigator) {
+              window.addEventListener('load', function() {
+                navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function(err) {
+                  console.warn('Cairn SW registration failed:', err);
+                });
+              });
+            }
+          `}
+        </Script>
+      </body>
     </html>
   )
 }
