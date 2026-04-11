@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
   const cookieStore = await cookies();
   cookieStore.set(AUTH_COOKIE_NAME, access, {
     ...COOKIE_BASE,
-    maxAge: 60 * 60, // 1 hour — mirrors typical JWT access token lifetime
+    maxAge: 60 * 60 * 12, // 12 hours — mirrors Django ACCESS_TOKEN_LIFETIME
   });
   cookieStore.set(REFRESH_COOKIE_NAME, refresh, {
     ...COOKIE_BASE,

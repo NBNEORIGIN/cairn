@@ -61,7 +61,7 @@ export async function POST() {
 
   cookieStore.set(AUTH_COOKIE_NAME, data.access, {
     ...COOKIE_BASE,
-    maxAge: 60 * 60,
+    maxAge: 60 * 60 * 12, // 12 hours — mirrors Django ACCESS_TOKEN_LIFETIME
   });
 
   return NextResponse.json({ success: true });
