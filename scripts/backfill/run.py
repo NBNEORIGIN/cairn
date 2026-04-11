@@ -78,6 +78,9 @@ def _load_source(
             embed_fn=embed_fn,
             max_files=max_files,
         )
+    if name == 'xero':
+        from .sources.xero import XeroSource
+        return XeroSource(db_url=os.getenv('LEDGER_DATABASE_URL'))
     raise ValueError(
         f"unknown source '{name}' in _load_source — "
         'add the loader alongside the others above'
@@ -86,15 +89,15 @@ def _load_source(
 
 KNOWN_SOURCES = {
     # Phase 2
-    'synthetic': {'needs_llm': False, 'needs_data_file': None},
+    'synthetic': {'needs_llm': False, 'needs_data_file': None, 'needs_ledger_db': False},
     # Phase 3+ — stubs so preflight can flag unbuilt sources clearly.
-    'disputes':   {'needs_llm': True,  'needs_data_file': 'disputes.yml'},
-    'principles': {'needs_llm': True,  'needs_data_file': None},
-    'm_numbers':  {'needs_llm': False, 'needs_data_file': None},
-    'b2b_quotes': {'needs_llm': True,  'needs_data_file': 'b2b_quotes.yml'},
-    'emails':     {'needs_llm': True,  'needs_data_file': None},
-    'xero':       {'needs_llm': True,  'needs_data_file': None},
-    'amazon':     {'needs_llm': True,  'needs_data_file': None},
+    'disputes':   {'needs_llm': True,  'needs_data_file': 'disputes.yml',   'needs_ledger_db': False},
+    'principles': {'needs_llm': True,  'needs_data_file': None,             'needs_ledger_db': False},
+    'm_numbers':  {'needs_llm': False, 'needs_data_file': None,             'needs_ledger_db': False},
+    'b2b_quotes': {'needs_llm': True,  'needs_data_file': 'b2b_quotes.yml', 'needs_ledger_db': False},
+    'emails':     {'needs_llm': True,  'needs_data_file': None,             'needs_ledger_db': False},
+    'xero':       {'needs_llm': True,  'needs_data_file': None,             'needs_ledger_db': True},
+    'amazon':     {'needs_llm': True,  'needs_data_file': None,             'needs_ledger_db': False},
 }
 
 
@@ -169,7 +172,7 @@ def preflight(sources: list[str], data_dir: Path, commit_mode: bool) -> list[str
                 )
 
     # 6. Source must be built. Extend built_sources as each phase lands.
-    built_sources = {'synthetic', 'disputes', 'b2b_quotes', 'principles'}
+    built_sources = {'synthetic', 'disputes', 'b2b_quotes', 'principles', 'xero'}
     for source in sources:
         if source not in built_sources:
             failures.append(
@@ -177,6 +180,47 @@ def preflight(sources: list[str], data_dir: Path, commit_mode: bool) -> list[str
                 'currently built: ' + ', '.join(sorted(built_sources))
             )
 
+    # 7. Ledger DB reachable + Xero period populated, if xero is requested.
+    if any(KNOWN_SOURCES[s]['needs_ledger_db'] for s in sources):
+        ledger_failures = _probe_ledger_db()
+        failures.extend(ledger_failures)
+
+    return failures
+
+
+def _probe_ledger_db() -> list[str]:
+    """Confirm the Ledger DB is reachable and 2025 is populated."""
+    from .sources.xero import DEFAULT_LEDGER_URL
+    url = os.getenv('LEDGER_DATABASE_URL') or DEFAULT_LEDGER_URL
+    failures: list[str] = []
+    try:
+        import psycopg2
+        conn = psycopg2.connect(url, connect_timeout=5)
+    except Exception as exc:
+        return [
+            f'xero source: cannot connect to Ledger DB at {url}: {exc}'
+        ]
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT MIN(date), MAX(date), COUNT(*) "
+                "FROM revenue_transactions"
+            )
+            row = cur.fetchone()
+            if not row or row[2] == 0:
+                failures.append(
+                    'xero source: revenue_transactions table is empty — '
+                    'run D:/ledger/scripts/import_xero_invoices.py first'
+                )
+            else:
+                min_date, max_date, n = row
+                if min_date is None or min_date.year > 2025:
+                    failures.append(
+                        f'xero source: revenue_transactions starts at '
+                        f'{min_date}, expected <= 2025-01-01'
+                    )
+    finally:
+        conn.close()
     return failures
 
 
