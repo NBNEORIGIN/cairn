@@ -48,10 +48,21 @@ log = logging.getLogger('cairn.email_triage.runner')
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s %(message)s')
 
 
-ALLOWED_MAILBOXES = ['toby', 'sales']
+ALLOWED_MAILBOXES = ['cairn']
+# Note: cairn@ receives IONOS mail-forwarded copies of toby@ and
+# sales@ traffic, so the production whitelist is just ['cairn'].
+# Loop prevention still filters anything Cairn itself sends to
+# itself — see LOOP_PREVENTION_SENDER_PATTERNS below.
 LOOP_PREVENTION_SENDER_PATTERNS = [
     'cairn@nbnesigns.com',
     'cairn@nbnesigns.co.uk',
+    # Toby's own outbound replies shouldn't normally hit cairn@
+    # (IONOS forwards inbound only), but guard anyway in case a
+    # client CCs him and he replies-all.
+    'toby@nbnesigns.com',
+    'toby@nbnesigns.co.uk',
+    'sales@nbnesigns.com',
+    'sales@nbnesigns.co.uk',
 ]
 
 
