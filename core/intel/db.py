@@ -151,9 +151,20 @@ CREATE TABLE IF NOT EXISTS cairn_intel.email_triage (
     sent_to_toby_at       TIMESTAMPTZ,    -- when the digest email went out; NULL if not yet sent
     send_dry_run          BOOLEAN DEFAULT FALSE,  -- true if SMTP was unavailable and the "send" was logged only
     send_error            TEXT,            -- most recent send error, if any
+    send_attempts         INTEGER NOT NULL DEFAULT 0,  -- retry counter — capped at MAX_SEND_ATTEMPTS
+    last_send_attempt_at  TIMESTAMPTZ,    -- when we last tried to send (for backoff + give-up cap)
     crm_recommendation_id TEXT,            -- ID from CRM /api/cairn/memory response
     skip_reason           TEXT
 );
+
+-- Defensive migration for existing deployments that predate the
+-- retry columns. ALTER TABLE IF NOT EXISTS on columns was added in
+-- PG 9.6, so this runs on every startup but is a no-op after the
+-- first run.
+ALTER TABLE cairn_intel.email_triage
+    ADD COLUMN IF NOT EXISTS send_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE cairn_intel.email_triage
+    ADD COLUMN IF NOT EXISTS last_send_attempt_at TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS idx_email_triage_unsent
     ON cairn_intel.email_triage(processed_at DESC)
@@ -254,6 +265,13 @@ def upsert_email_triage(
     return int(new_id)
 
 
+# Give-up cap — after this many failed SMTP attempts on a single row
+# we stop retrying. The cron fires every 5 min so 5 attempts ≈ 25 min
+# of coverage for transient IONOS blips. Permanent failures (bad auth,
+# invalid sender) get escalated to Toby via the send_error column.
+MAX_SEND_ATTEMPTS = 5
+
+
 def load_unsent_triage_drafts(
     db_url: str | None = None,
     limit: int = 100,
@@ -263,22 +281,26 @@ def load_unsent_triage_drafts(
 
     Used by the digest sender cron. Only returns rows with a non-empty
     analyzer_brief OR rows classified as existing_project_reply (those
-    also get a summary email).
+    also get a summary email). Rows with send_attempts >= MAX_SEND_ATTEMPTS
+    are excluded so a permanent SMTP failure can't burn budget on
+    infinite retries.
     """
     sql = f"""
     SELECT id, email_message_id, email_mailbox, email_sender,
            email_subject, email_received_at, classification,
            classification_confidence, client_name_guess, project_id,
-           analyzer_brief, analyzer_job_size, processed_at
+           analyzer_brief, analyzer_job_size, processed_at,
+           send_attempts, send_error
     FROM {schema}.email_triage
     WHERE sent_to_toby_at IS NULL
       AND classification IN ('new_enquiry', 'existing_project_reply')
+      AND send_attempts < %s
     ORDER BY email_received_at DESC NULLS LAST
     LIMIT %s
     """
     with get_conn(db_url) as conn:
         with conn.cursor() as cur:
-            cur.execute(sql, (limit,))
+            cur.execute(sql, (MAX_SEND_ATTEMPTS, limit))
             col_names = [d[0] for d in cur.description]
             return [dict(zip(col_names, row)) for row in cur.fetchall()]
 
@@ -291,12 +313,26 @@ def mark_triage_sent(
     db_url: str | None = None,
     schema: str = 'cairn_intel',
 ) -> None:
-    """Mark a triage row as delivered to Toby (or dry-run logged)."""
+    """Mark a triage row as delivered to Toby (or dry-run logged).
+
+    Behaviour:
+        - Success (no error):   sent_to_toby_at = NOW(), increments send_attempts
+        - Dry-run (no SMTP):    sent_to_toby_at = NOW(), send_dry_run = TRUE
+        - Error (SMTP fail):    sent_to_toby_at stays NULL, send_error populated,
+                                 send_attempts incremented. Row re-enters the
+                                 queue next cron cycle until MAX_SEND_ATTEMPTS
+                                 is hit (then load_unsent_triage_drafts skips it).
+    """
+    # On failure, leave sent_to_toby_at NULL so the row retries.
+    # On success or dry-run, stamp it so it never re-delivers.
+    should_stamp_sent = send_error is None
     sql = f"""
     UPDATE {schema}.email_triage
-    SET sent_to_toby_at       = NOW(),
+    SET sent_to_toby_at       = CASE WHEN %s THEN NOW() ELSE sent_to_toby_at END,
         send_dry_run          = %s,
         send_error            = %s,
+        send_attempts         = send_attempts + 1,
+        last_send_attempt_at  = NOW(),
         crm_recommendation_id = COALESCE(%s, crm_recommendation_id)
     WHERE id = %s
     """
@@ -304,7 +340,8 @@ def mark_triage_sent(
         with conn.cursor() as cur:
             cur.execute(
                 sql,
-                (bool(dry_run), send_error, crm_recommendation_id, triage_id),
+                (should_stamp_sent, bool(dry_run), send_error,
+                 crm_recommendation_id, triage_id),
             )
             conn.commit()
 
