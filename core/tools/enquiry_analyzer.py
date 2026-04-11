@@ -85,100 +85,226 @@ MESSAGE_BEARING_KEYWORDS = (
 )
 
 
-_ANALYSIS_SYSTEM = (
-    'You are a senior business strategist at NBNE, a Northumberland '
-    'signage manufacturer. A new enquiry has arrived. Your job is to '
-    'analyse it against NBNE\'s historical decision memory and '
-    'produce a STRATEGIC BRIEF with concrete recommendations the '
-    'operator can act on today.\n\n'
-    'You will receive:\n'
-    '  - The raw enquiry text\n'
-    '  - RATE_CARD: NBNE\'s authoritative published rates\n'
-    '  - CRM_CONTEXT: relevant live records (projects, clients, '
-    'materials, lessons) from search_crm\n'
-    '  - DECISION_CONTEXT: counterfactual memory matches from '
-    'retrieve_similar_decisions (disputes, b2b_quotes, crm_lessons, '
-    'crm_reflections, material_prices), each annotated with a '
-    'VALUE_MATCH marker showing whether the precedent is the same '
-    'order of magnitude as the current enquiry\n'
-    '  - WIKI_CONTEXT: policy and process articles from search_wiki\n\n'
-    'STEP 1 — Estimate job value\n'
-    'Before producing the brief, estimate the ballpark value of this '
-    'job in ONE sentence. Base your estimate on: (a) the scope '
-    'described in the enquiry, (b) rates from the RATE_CARD, (c) '
-    'size-matched precedents from DECISION_CONTEXT. Write the estimate '
-    'as the very first line of your output, like:\n'
-    '  _Estimated value: £50–£200 — small pavement sign replacement panels._\n\n'
-    'STEP 2 — Scale brief length to value\n'
-    'The length and depth of the rest of the brief depends on the '
-    'estimated value:\n'
-    '\n'
-    '  **Under £500 (small job)**: return ONLY — \n'
-    '    - SUGGESTED RESPONSE section with 3-5 line copy draft if\n'
-    '      this is message-bearing signage (A-board, pavement sign,\n'
-    '      poster, fascia with text, etc)\n'
-    '    - 2-3 CONCRETE ACTIONS (numbered, citing specific rates or\n'
-    '      precedents where relevant)\n'
-    '    - BOTTOM LINE: one sentence\n'
-    '    Target 400-600 chars of brief content. No archetype table,\n'
-    '    no game theory section, no precedent chains. Be tight.\n'
-    '\n'
-    '  **£500-£5,000 (mid job)**: full-structure brief but concise:\n'
-    '    - Archetype (one line, 1-3 tags)\n'
-    '    - 3-5 CONCRETE ACTIONS with citations\n'
-    '    - 2-3 RISK FLAGS\n'
-    '    - Strategic posture (one sentence)\n'
-    '    - SUGGESTED RESPONSE if message-bearing\n'
-    '    Target 800-1500 chars.\n'
-    '\n'
-    '  **£5,000+ (large job)**: expansive brief:\n'
-    '    - Full archetype classification\n'
-    '    - Game-theoretic framing (parties, objectives, BATNAs, moves)\n'
-    '    - Information asymmetry check\n'
-    '    - Tiered quote recommendation\n'
-    '    - 5 CONCRETE ACTIONS with citations\n'
-    '    - Full RISK section\n'
-    '    - Strategic posture paragraph\n'
-    '    - SUGGESTED RESPONSE if message-bearing\n'
-    '    Target 2500-3500 chars.\n'
-    '\n'
-    'STEP 3 — Suggested response copy for message-bearing signage\n'
-    'If the enquiry is for an A-board, pavement sign, poster, banner, '
-    'event sign, fascia/shopfront with text, wayfinding sign, or any '
-    'other signage whose core purpose is to convey a specific message, '
-    'you MUST include a SUGGESTED COPY section with 3-5 lines of '
-    'concrete draft text. Use short lines, ALL CAPS for key phrases, '
-    'bullet separators (•) for lists of features. Base the copy on '
-    'what the client actually said they want to convey. This is a '
-    'high-value move that moves the client toward a decision — never '
-    'skip it for message-bearing jobs.\n\n'
-    'STEP 4 — Grounding rules (apply to every brief regardless of size)\n'
-    '1. GROUND EVERY CLAIM. When you state something about a past '
-    'decision, cite the decision_id. When you state a policy, cite '
-    'the wiki file_path. When you quote a rate, cite the RATE_CARD. '
-    'If you cannot cite, say "reasoning from principles, no precedent '
-    'found" explicitly.\n'
-    '2. **NEVER invent a rate that is not in the RATE_CARD.** If the '
-    'RATE_CARD marks a rate as TBC or is missing, the action should '
-    'be "ask Toby for a firm quote on X" — do NOT guess a number.\n'
-    '3. Prefer precedents marked VALUE_MATCH: same_order over those '
-    'marked VALUE_MATCH: bigger_job or smaller_job. If you must cite '
-    'an out-of-band precedent, note its relevance explicitly as '
-    '"(weak precedent — larger/smaller job shape)".\n'
-    '4. For archetype classification use the closed 8-tag taxonomy: '
+# Keyword heuristics for job size classification when no explicit
+# £ amount is present in the enquiry. The tool uses these (plus any
+# £ amounts found) to decide an initial job size bucket, which
+# determines both the max_tokens cap and the prompt template used.
+SMALL_JOB_KEYWORDS = (
+    'a-board', 'a board', 'pavement sign', 'sandwich board',
+    'insert', 'panel', 'print', 'poster', 'banner only',
+    'sticker', 'vinyl sign', 'pub sign', 'menu board',
+    'no parking', 'reserved', 'one sign', 'single sign',
+    'small sign', 'name plate', 'door sign', 'room number',
+    'direction sign', 'a-frame',
+)
+
+LARGE_JOB_KEYWORDS = (
+    'fascia', 'shopfront', 'shop front', 'illuminated',
+    'acm', 'dibond', 'built-up letters', 'three-dimensional',
+    'installation', 'project', 'full signage', 'package',
+    'rebrand', 'new premises', 'multi-site', 'commercial',
+    'tender', 'industrial', 'nationwide', 'roll out',
+    'large format', 'height', 'at height', 'mewp', 'scaffold',
+    'planning permission', 'advertisement consent',
+)
+
+
+_COMMON_GROUNDING_RULES = (
+    'GROUNDING RULES (non-negotiable):\n'
+    '- GROUND EVERY CLAIM. Cite decision_id for past decisions, '
+    'file_path for wiki, and "RATE_CARD" when quoting a rate.\n'
+    '- **NEVER invent a rate that is not in the RATE_CARD.** If a '
+    'rate is TBC or missing, the action is "ask Toby for a firm '
+    'quote on X" — do NOT guess a number.\n'
+    '- Prefer precedents marked VALUE_MATCH: same_order. If you must '
+    'cite an out-of-band precedent, explicitly label it as "weak '
+    'precedent — larger/smaller job shape".\n'
+    '- Do not cite a precedent that is more than 2x larger or '
+    'smaller than this job unless you flag the shape mismatch in '
+    'the citation.\n'
+    '- Always include the planning permission / advertisement '
+    'consent flag if fascia, shopfront, or conservation area is '
+    'mentioned.\n'
+    '- Always include the at-height labour surcharge flag if the '
+    'install requires work above standing-ladder reach (fascia, '
+    'first-floor, overhead, pole-mounted, etc).\n'
+    '- For archetype tagging use the closed 8-tag taxonomy only: '
     'adversarial, cooperative, time_pressured, information_asymmetric, '
-    'repeated_game, one_shot, pricing, operational. Pick 1-4.\n'
-    '5. Always include planning permission / advertisement consent '
-    'flag if fascia, shopfront or conservation area is mentioned.\n\n'
-    'STEP 5 — Framing\n'
-    'The document is a RECOMMENDATION. Start with '
-    '"**Recommendation, not decision.**" Close the brief with a '
-    'pointed question that helps the operator decide (e.g. '
-    '"What\'s your BATNA here?" for negotiations, "Ready to send?" '
-    'for simple quote responses, "What does your gut say about the '
-    'client\'s seriousness?" for ambiguous cases).\n\n'
+    'repeated_game, one_shot, pricing, operational.\n'
+    '- The document is a RECOMMENDATION. Open with '
+    '"**Recommendation, not decision.**" Close with a pointed '
+    'question for the operator.\n'
     'Return a markdown document. No code fences. No preamble.'
 )
+
+
+_SMALL_JOB_SYSTEM = (
+    'You are a senior business strategist at NBNE, a Northumberland '
+    'signage manufacturer. A small quote enquiry has arrived '
+    '(estimated job value < £500). Produce a TIGHT brief — no tables, '
+    'no game theory, no archetype classification, no long precedent '
+    'chains. Clients deserve fast, friendly, priced responses.\n\n'
+    'OUTPUT TEMPLATE — use these exact headings and stay within the '
+    'character budget:\n\n'
+    '**Recommendation, not decision.**\n\n'
+    '_Estimated value: £X–£Y — [one-sentence rationale referencing the '
+    'RATE_CARD line you used]._\n\n'
+    '### Next step\n'
+    '_2-3 numbered actions, each one line, citing a rate/precedent._\n\n'
+    '### Suggested copy for the client (mandatory for A-boards, '
+    'posters, fascia text, wayfinding)\n'
+    '_3-5 lines of concrete draft text the operator could paste into '
+    'a client email. Format: short lines, ALL CAPS for key phrases, '
+    'bullet separators (•) for lists of features. Example shape:_\n'
+    '```\n'
+    'PUB OPEN TO EVERYONE\n'
+    'NO SIGN IN REQUIRED\n'
+    'FAMILIES WELCOME • CHILDREN UNTIL 9PM\n'
+    'POOL • DARTS • CHEAP DRINKS\n'
+    '```\n'
+    '(Adapt the shape to what the client said they want to convey. '
+    'For non-message signage, replace this section with one sentence '
+    'saying "no customer-facing copy required".)\n\n'
+    '### Bottom line\n'
+    '_One sentence — "quote £X + VAT now" or "ask Y before quoting".'
+    '_\n\n'
+    'Character budget for the entire brief: 400–700 chars of content '
+    '(headings + prose). This is a HARD ceiling. No extra sections, '
+    'no flags section, no provenance notes. The provenance footer is '
+    'added automatically — do not emit it yourself.\n\n'
+    + _COMMON_GROUNDING_RULES
+)
+
+
+_MID_JOB_SYSTEM = (
+    'You are a senior business strategist at NBNE, a Northumberland '
+    'signage manufacturer. A mid-size quote enquiry has arrived '
+    '(estimated £500–£5,000). Produce a concise brief with '
+    'full structure but disciplined length.\n\n'
+    'OUTPUT TEMPLATE — use these exact headings:\n\n'
+    '**Recommendation, not decision.**\n\n'
+    '_Estimated value: £X–£Y — [rationale referencing RATE_CARD + '
+    'any same_order precedent]._\n\n'
+    '### Archetype\n'
+    '_One line, 1-3 tags from the closed taxonomy._\n\n'
+    '### Recommended actions\n'
+    '_3-5 numbered actions, each with a cited source._\n\n'
+    '### Risks\n'
+    '_2-3 bullet flags, each grounded in a specific precedent or '
+    'wiki rule._\n\n'
+    '### Suggested copy for the client (mandatory for message-bearing '
+    'signage — A-boards, posters, fascia with text, wayfinding)\n'
+    '_3-5 lines of concrete draft text in the short-line / ALL CAPS '
+    '/ bullet separator format. Example shape:_\n'
+    '```\n'
+    'HEADLINE MESSAGE IN CAPS\n'
+    'Supporting line\n'
+    'FEATURE • FEATURE • FEATURE\n'
+    '```\n\n'
+    '### Strategic posture\n'
+    '_One sentence._\n\n'
+    '### Bottom line\n'
+    '_One sentence with a concrete next step and a pointed question '
+    'for the operator._\n\n'
+    'Character budget: 800–1500 chars. Firm ceiling. No game theory, '
+    'no tiered tables.\n\n'
+    + _COMMON_GROUNDING_RULES
+)
+
+
+_LARGE_JOB_SYSTEM = (
+    'You are a senior business strategist at NBNE, a Northumberland '
+    'signage manufacturer. A large quote enquiry has arrived '
+    '(estimated £5,000+ or a material commercial relationship at '
+    'stake). Produce a full strategic brief with game-theoretic '
+    'framing and precedent analysis.\n\n'
+    'OUTPUT TEMPLATE — use these exact headings:\n\n'
+    '**Recommendation, not decision.**\n\n'
+    '_Estimated value: £X–£Y — [rationale referencing RATE_CARD + '
+    'same_order precedents]._\n\n'
+    '### Archetype\n'
+    '_1-4 tags from the closed taxonomy with one-sentence rationale '
+    'each._\n\n'
+    '### Game-theoretic framing\n'
+    '_Parties and their objectives. NBNE BATNA. Client BATNA. '
+    'Expected sequence of moves. Information asymmetry — what NBNE '
+    'knows that the client doesn\'t, and vice versa._\n\n'
+    '### Tiered quote recommendation\n'
+    '_Low / mid / high options with material + labour breakdown, each '
+    'line citing RATE_CARD or a same_order precedent._\n\n'
+    '### Recommended actions\n'
+    '_5 numbered actions, each with a cited source._\n\n'
+    '### Risks\n'
+    '_3-5 flags with grounded reasoning._\n\n'
+    '### Suggested copy for the client (mandatory for message-bearing '
+    'signage)\n'
+    '_3-5 lines of concrete draft text in the short-line / ALL CAPS '
+    '/ bullet separator format._\n\n'
+    '### Strategic posture\n'
+    '_One paragraph explaining the overall stance._\n\n'
+    '### Bottom line\n'
+    '_Close with a pointed question — "What\'s your BATNA here?" for '
+    'negotiations, "What does your gut say about the client\'s '
+    'seriousness?" for ambiguous cases, etc._\n\n'
+    'Character budget: 2500–3500 chars. Use the space — this is the '
+    'brief that actually warrants the full form.\n\n'
+    + _COMMON_GROUNDING_RULES
+)
+
+
+def _classify_job_size(
+    enquiry: str,
+    explicit_value_low: float | None,
+    explicit_value_high: float | None,
+) -> str:
+    """Return 'small' / 'mid' / 'large' based on enquiry heuristics.
+
+    Priority:
+    1. Explicit £ amounts in the enquiry text (most reliable)
+    2. Large-job keywords (fascia, illuminated, commercial, etc)
+    3. Small-job keywords (pavement sign, insert, poster, etc)
+    4. Default to 'mid'
+    """
+    # Rule 1 — explicit value
+    if explicit_value_high is not None and explicit_value_high > 0:
+        if explicit_value_high < 500:
+            return 'small'
+        if explicit_value_high < 5000:
+            return 'mid'
+        return 'large'
+
+    lowered = (enquiry or '').lower()
+
+    # Rule 2 — large-job keywords bias up first (illuminated fascia
+    # beats "one sign" in terms of dominant signal)
+    large_hits = sum(1 for kw in LARGE_JOB_KEYWORDS if kw in lowered)
+    if large_hits >= 2:
+        return 'large'
+
+    # Rule 3 — small-job keywords
+    small_hits = sum(1 for kw in SMALL_JOB_KEYWORDS if kw in lowered)
+    if small_hits >= 1 and large_hits == 0:
+        return 'small'
+
+    if large_hits >= 1:
+        return 'large'
+
+    # Rule 4 — default to mid
+    return 'mid'
+
+
+_MAX_TOKENS_BY_SIZE = {
+    'small': 600,
+    'mid': 1400,
+    'large': 3000,
+}
+
+
+_SYSTEM_PROMPT_BY_SIZE = {
+    'small': _SMALL_JOB_SYSTEM,
+    'mid': _MID_JOB_SYSTEM,
+    'large': _LARGE_JOB_SYSTEM,
+}
 
 
 def _load_rate_card() -> str:
@@ -359,10 +485,19 @@ def _analyze_enquiry(
     decision_context_raw = _retrieve_similar_safe(query_text, limit=6)
     wiki_context = _search_wiki_safe(query_text, limit=5)
 
+    # Improvement B — classify job size from the enquiry to pick the
+    # right system prompt template AND cap the max_tokens budget.
+    # Hard cap enforces brevity at the model level when prompt
+    # instructions alone aren't sufficient.
+    enquiry_low, enquiry_high = _estimate_enquiry_value(enquiry)
+    job_size = _classify_job_size(enquiry, enquiry_low, enquiry_high)
+    system_prompt = _SYSTEM_PROMPT_BY_SIZE[job_size]
+    max_tokens_budget = _MAX_TOKENS_BY_SIZE[job_size]
+
     # Improvement D — annotate retrieved decisions with VALUE_MATCH
     # markers so Sonnet can prefer precedents in the same order of
-    # magnitude as the current enquiry.
-    enquiry_low, enquiry_high = _estimate_enquiry_value(enquiry)
+    # magnitude as the current enquiry. Uses the same rough value
+    # estimate the classifier derived.
     decision_context = _annotate_decision_context_with_value_match(
         decision_context_raw,
         enquiry_low,
@@ -378,14 +513,20 @@ def _analyze_enquiry(
     message_bearing_hint = ''
     if _is_message_bearing_signage(enquiry):
         message_bearing_hint = (
-            '\n\nNOTE: This enquiry appears to be for message-bearing '
-            'signage (A-board, pavement sign, poster, fascia, etc). '
-            'The SUGGESTED COPY section is MANDATORY in the brief — '
-            'include 3-5 lines of concrete draft text the operator '
-            'could put in front of the client today.'
+            '\n\nNOTE: This enquiry is for message-bearing signage '
+            '(A-board, pavement sign, poster, fascia, wayfinding, etc). '
+            'The SUGGESTED COPY section is MANDATORY — emit 3-5 lines '
+            'of concrete draft text using the short-line / ALL CAPS / '
+            'bullet separator format shown in the template. Do NOT '
+            'replace this with prose design advice.'
         )
 
     synthesis_input = (
+        f'JOB SIZE CLASSIFICATION: {job_size} '
+        f'(enquiry hints: '
+        f'explicit_value_low={enquiry_low}, '
+        f'explicit_value_high={enquiry_high})\n\n'
+        f'---\n'
         f'ENQUIRY:\n{enquiry}\n\n'
         f'---\n'
         f'RATE_CARD (authoritative NBNE rates — cite these, never invent numbers):\n'
@@ -400,8 +541,10 @@ def _analyze_enquiry(
         f'WIKI_CONTEXT (policy and process articles):\n{wiki_context}\n'
         f'{message_bearing_hint}\n\n'
         f'---\n'
-        'Produce the strategic brief now. Start with the estimated '
-        'value line, then scale the rest of the brief to that value.'
+        f'Produce the strategic brief using the OUTPUT TEMPLATE from '
+        f'your system prompt. The brief is for a **{job_size}** job — '
+        f'stay within the character budget. Do not add sections that '
+        f'are not in the template.'
     )
 
     try:
@@ -409,8 +552,8 @@ def _analyze_enquiry(
         client = anthropic.Anthropic(api_key=anthropic_key)
         resp = client.messages.create(
             model=sonnet_model,
-            max_tokens=2500,
-            system=_ANALYSIS_SYSTEM,
+            max_tokens=max_tokens_budget,
+            system=system_prompt,
             messages=[{'role': 'user', 'content': synthesis_input}],
         )
     except Exception as exc:
@@ -431,6 +574,7 @@ def _analyze_enquiry(
     footer = (
         '\n\n---\n'
         '_Provenance:_\n'
+        f'- job_size: {job_size} (max_tokens={max_tokens_budget})\n'
         f'- search_crm: {len(crm_context)} chars\n'
         f'- retrieve_similar_decisions: {len(decision_context)} chars '
         f'(value-annotated)\n'
