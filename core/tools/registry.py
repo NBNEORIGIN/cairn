@@ -43,6 +43,7 @@ DEFAULT_PERMISSIONS = {
         'read_file', 'search_code',
         'query_amazon_intel',
         'get_module_snapshot', 'search_emails', 'search_wiki',
+        'retrieve_similar_decisions',
     ],
 }
 
@@ -358,6 +359,34 @@ TOOL_SCHEMAS: dict[str, dict] = {
                 'type': 'integer',
                 'description': 'Max results to return (default 5, max 20)',
                 'default': 5,
+            },
+        },
+        'required': ['query'],
+    },
+    'retrieve_similar_decisions': {
+        'type': 'object',
+        'properties': {
+            'query': {
+                'type': 'string',
+                'description': (
+                    'Free-text description of the new situation — a quote '
+                    'request, a dispute, a production choice, a pricing '
+                    'question.'
+                ),
+            },
+            'limit': {
+                'type': 'integer',
+                'description': 'Max past decisions to return (default 5, max 10)',
+                'default': 5,
+            },
+            'sources': {
+                'type': 'array',
+                'items': {'type': 'string'},
+                'description': (
+                    'Optional source_type filter — one or more of: '
+                    'dispute, b2b_quote, email, m_number, xero, amazon, '
+                    'principle. Omit to search all sources.'
+                ),
             },
         },
         'required': ['query'],

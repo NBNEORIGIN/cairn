@@ -175,6 +175,14 @@ async def lifespan(app: FastAPI):
     except Exception as wiki_gen_err:
         print(f'[CLAW startup] Wiki Generation schema failed: {wiki_gen_err}')
 
+    # ── Counterfactual Intelligence schema ─────────────────────────────
+    try:
+        from core.intel.db import ensure_schema as intel_ensure_schema
+        intel_ensure_schema()
+        print('[CLAW startup] Counterfactual Intel schema ready')
+    except Exception as intel_err:
+        print(f'[CLAW startup] Counterfactual Intel schema failed: {intel_err}')
+
     # ── Auto-index empty projects ───────────────────────────────────────
     skip_auto_index = os.getenv('CAIRN_SKIP_AUTO_INDEX', '').lower() in {
         '1', 'true', 'yes',

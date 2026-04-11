@@ -12,7 +12,8 @@
     "query_amazon_intel",
     "get_module_snapshot",
     "search_emails",
-    "search_wiki"
+    "search_wiki",
+    "retrieve_similar_decisions"
   ],
 
   "model_preferences": {

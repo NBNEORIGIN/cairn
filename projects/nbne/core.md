@@ -51,6 +51,7 @@ itself, not the host machine.** Use the right tool for each question.
 | **Amazon listing intelligence** — SKUs, ASINs, sales, ads, health | `query_amazon_intel(sql="SELECT ...")` | SQL against ami_* tables — 4000+ listings with revenue, conversion, ad spend, margins |
 | **Inbox** — cairn@nbnesigns.com messages, forwarded threads, direct notes | `search_emails(query="...")` | Hybrid semantic + lexical search over embedded email chunks, refreshed every 15 min |
 | **Wiki** — SOPs, supplier notes, decision logs, incident reports | `search_wiki(query="...")` | Hybrid search over ~300 compiled wiki articles |
+| **Past decisions** — "have we been here before?" — disputes, b2b quotes, principles, production history | `retrieve_similar_decisions(query="...")` | Cosine-similarity search over the cairn_intel counterfactual memory, returns chosen path + rejected alternatives + outcome + lesson |
 | **Codebase** — function lookups, config literals | `search_code(query="...")` | Ripgrep over project files |
 
 When answering business questions:
