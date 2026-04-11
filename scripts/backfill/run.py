@@ -41,6 +41,16 @@ def _load_source(name: str, data_dir: Path):
     if name == 'synthetic':
         from .sources.synthetic import SyntheticSource
         return SyntheticSource()
+    if name == 'disputes':
+        from .sources.disputes import DisputesSource
+        return DisputesSource(yaml_path=data_dir / 'disputes.yml')
+    if name == 'b2b_quotes':
+        from .sources.b2b_quotes import B2BQuotesSource
+        return B2BQuotesSource(
+            yaml_path=data_dir / 'b2b_quotes.yml',
+            enrich_from_emails=bool(os.getenv('DATABASE_URL')),
+            db_url=os.getenv('DATABASE_URL') or None,
+        )
     raise ValueError(f'unknown source: {name}')
 
 
@@ -128,8 +138,8 @@ def preflight(sources: list[str], data_dir: Path, commit_mode: bool) -> list[str
                     'this file before the importer runs'
                 )
 
-    # 6. Source must be built (Phase 2 only has synthetic).
-    built_sources = {'synthetic'}
+    # 6. Source must be built. Extend built_sources as each phase lands.
+    built_sources = {'synthetic', 'disputes', 'b2b_quotes'}
     for source in sources:
         if source not in built_sources:
             failures.append(

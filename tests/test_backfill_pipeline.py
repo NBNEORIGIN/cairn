@@ -412,8 +412,6 @@ def test_preflight_fails_when_data_file_missing(tmp_path):
     # disputes requires data/disputes.yml — pass an empty tmp_path
     failures = preflight(sources=['disputes'], data_dir=tmp_path, commit_mode=False)
     assert any('disputes.yml' in f for f in failures)
-    # And flags disputes as not yet implemented in Phase 2
-    assert any('not yet implemented' in f for f in failures)
 
 
 def test_preflight_passes_for_synthetic(tmp_path):
