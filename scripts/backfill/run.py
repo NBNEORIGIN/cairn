@@ -19,7 +19,7 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 
 from dotenv import load_dotenv
 
@@ -32,11 +32,20 @@ load_dotenv(override=True)
 # ── Source registry ────────────────────────────────────────────────────
 
 
-def _load_source(name: str, data_dir: Path):
+def _load_source(
+    name: str,
+    data_dir: Path,
+    tagger: Any = None,
+    embed_fn: Any = None,
+):
     """Instantiate a source adapter by short name.
 
     Extend this when a new source is built. Unknown names are a hard
     error — the CLI's ``--source`` flag is a closed set.
+
+    ``tagger`` and ``embed_fn`` are required for sources that do
+    their own LLM work (principles, amazon) and ignored otherwise.
+    Both are constructed in main() before _load_source is called.
     """
     if name == 'synthetic':
         from .sources.synthetic import SyntheticSource
@@ -51,7 +60,28 @@ def _load_source(name: str, data_dir: Path):
             enrich_from_emails=bool(os.getenv('DATABASE_URL')),
             db_url=os.getenv('DATABASE_URL') or None,
         )
-    raise ValueError(f'unknown source: {name}')
+    if name == 'principles':
+        from .sources.principles import PrinciplesSource
+        if tagger is None or embed_fn is None:
+            raise ValueError(
+                'principles source requires tagger + embed_fn — '
+                'caller must supply both'
+            )
+        wiki_dir = Path(
+            os.getenv('CAIRN_WIKI_DIR', str(Path(__file__).parent.parent.parent / 'wiki'))
+        )
+        max_files_env = os.getenv('CAIRN_PRINCIPLES_MAX_FILES')
+        max_files = int(max_files_env) if max_files_env else None
+        return PrinciplesSource(
+            wiki_dir=wiki_dir,
+            tagger=tagger,
+            embed_fn=embed_fn,
+            max_files=max_files,
+        )
+    raise ValueError(
+        f"unknown source '{name}' in _load_source — "
+        'add the loader alongside the others above'
+    )
 
 
 KNOWN_SOURCES = {
@@ -139,7 +169,7 @@ def preflight(sources: list[str], data_dir: Path, commit_mode: bool) -> list[str
                 )
 
     # 6. Source must be built. Extend built_sources as each phase lands.
-    built_sources = {'synthetic', 'disputes', 'b2b_quotes'}
+    built_sources = {'synthetic', 'disputes', 'b2b_quotes', 'principles'}
     for source in sources:
         if source not in built_sources:
             failures.append(
@@ -248,7 +278,12 @@ def main(argv: list[str] | None = None) -> int:
     samples: list[str] = []
 
     for source_name in sources:
-        source = _load_source(source_name, data_dir=data_dir)
+        source = _load_source(
+            source_name,
+            data_dir=data_dir,
+            tagger=tagger,
+            embed_fn=embed_fn,
+        )
         print(f'[backfill] source: {source_name}')
         for record in source.iter_records():
             result = process_record(
