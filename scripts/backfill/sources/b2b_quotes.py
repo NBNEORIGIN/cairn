@@ -272,8 +272,22 @@ def _coerce_date(raw: Any, where: str, yaml_path: Path) -> datetime:
         return datetime.combine(raw, time(0, 0), tzinfo=timezone.utc)
     if isinstance(raw, str):
         cleaned = raw.strip()
+        # Accept ISO date prefix followed by any trailing annotation
+        # (see disputes.py _coerce_date for the rationale).
+        import re
+        match = re.match(
+            r'^(\d{4}-\d{2}-\d{2}(?:[T\s]\d{2}:\d{2}(?::\d{2})?'
+            r'(?:\.\d+)?(?:Z|[+\-]\d{2}:?\d{2})?)?)',
+            cleaned,
+        )
+        if not match:
+            raise B2BQuoteYamlError(
+                f"{yaml_path}: {where} decided_at '{raw}' is not a valid "
+                'ISO date — it must start with YYYY-MM-DD'
+            )
+        iso_prefix = match.group(1).replace(' ', 'T', 1) if 'T' not in match.group(1) and ' ' in match.group(1) else match.group(1)
         try:
-            parsed = datetime.fromisoformat(cleaned)
+            parsed = datetime.fromisoformat(iso_prefix)
         except ValueError as exc:
             raise B2BQuoteYamlError(
                 f"{yaml_path}: {where} decided_at '{raw}' is not a valid ISO date"

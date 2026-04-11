@@ -254,9 +254,14 @@ def _build_phase_record(
 def _coerce_date(raw: Any, where: str, yaml_path: Path) -> datetime:
     """Normalise the YAML decided_at value to a tz-aware datetime.
 
-    PyYAML parses ISO date / datetime strings automatically, so we
-    accept ``datetime``, ``date``, or a string the user can still
-    quote freely.
+    PyYAML parses bare ``YYYY-MM-DD`` into a ``date`` object and
+    quoted ISO datetimes into a ``datetime``. We also accept a
+    string containing an ISO date prefix followed by any trailing
+    annotation (common in hand-authored files: ``2025-10-01 ~
+    approximate``, ``2024-03-15 (afternoon)``, etc). Only the ISO
+    prefix is used — the annotation is silently discarded here
+    because the narrative hedge belongs in the ``context`` field,
+    not in the date field.
     """
     if raw is None:
         raise DisputeYamlError(
@@ -270,8 +275,21 @@ def _coerce_date(raw: Any, where: str, yaml_path: Path) -> datetime:
         return datetime.combine(raw, time(0, 0), tzinfo=timezone.utc)
     if isinstance(raw, str):
         cleaned = raw.strip()
+        # Extract the ISO prefix so trailing annotations are tolerated.
+        import re
+        match = re.match(
+            r'^(\d{4}-\d{2}-\d{2}(?:[T\s]\d{2}:\d{2}(?::\d{2})?'
+            r'(?:\.\d+)?(?:Z|[+\-]\d{2}:?\d{2})?)?)',
+            cleaned,
+        )
+        if not match:
+            raise DisputeYamlError(
+                f"{yaml_path}: {where} decided_at '{raw}' is not a valid "
+                'ISO date/datetime — it must start with YYYY-MM-DD'
+            )
+        iso_prefix = match.group(1).replace(' ', 'T', 1) if 'T' not in match.group(1) and ' ' in match.group(1) else match.group(1)
         try:
-            parsed = datetime.fromisoformat(cleaned)
+            parsed = datetime.fromisoformat(iso_prefix)
         except ValueError as exc:
             raise DisputeYamlError(
                 f"{yaml_path}: {where} decided_at '{raw}' is not a valid "
