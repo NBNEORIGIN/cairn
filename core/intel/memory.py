@@ -269,6 +269,37 @@ class CounterfactualMemory:
                 cur.execute(sql, (decision_id, module, argued_for, argument))
             conn.commit()
 
+    def purge_outcomes_for_decision(self, decision_id: str) -> int:
+        """Delete all outcome rows for a decision.
+
+        Used by the backfill pipeline before re-inserting outcomes so
+        that a re-run produces the same row count instead of doubling
+        up. Not called by the live-write path.
+        """
+        sql = (
+            f'DELETE FROM {self.schema}.decision_outcomes '
+            f'WHERE decision_id = %s'
+        )
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (decision_id,))
+                n = cur.rowcount
+            conn.commit()
+        return int(n)
+
+    def purge_dissents_for_decision(self, decision_id: str) -> int:
+        """Delete all dissent rows for a decision. Used by backfill re-runs."""
+        sql = (
+            f'DELETE FROM {self.schema}.module_dissents '
+            f'WHERE decision_id = %s'
+        )
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (decision_id,))
+                n = cur.rowcount
+            conn.commit()
+        return int(n)
+
     def attach_lesson(
         self,
         outcome_id: int,
