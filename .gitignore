@@ -9,6 +9,13 @@ dist/
 build/
 *.egg-info/
 data/
+# Allow backfill templates through the data/ ignore. Real
+# scripts/backfill/data/*.yml files stay gitignored so Toby can
+# author commercial-sensitive material without leaking it.
+!scripts/backfill/data/
+scripts/backfill/data/*
+!scripts/backfill/data/*.template
+!scripts/backfill/data/README.md
 node_modules/
 .next/
 out/

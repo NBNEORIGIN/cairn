@@ -1,0 +1,123 @@
+# Cairn counterfactual memory — disputes.yml TEMPLATE
+#
+# Copy this file to disputes.yml and edit it. disputes.yml is
+# gitignored (see .gitignore) so you can author freely without
+# leaking commercial-sensitive material into the repo.
+#
+# How the importer reads this file
+# --------------------------------
+# Each top-level list item is ONE dispute case. A case has an ID,
+# some metadata, one or more phases (chronological steps of the
+# same dispute), and optionally a case-level lesson.
+#
+# Every phase becomes one row in cairn_intel.decisions. All phases
+# of the same case share a case_id so retrieval can pull them
+# together as a single narrative.
+#
+# The LAST phase of a case receives the case-level
+# `lessons_in_your_own_words` as its verbatim lesson. If you leave
+# `lessons_in_your_own_words` blank on a case, the pipeline upgrades
+# THAT SINGLE LESSON CALL to Claude Opus (not Sonnet). Opus is
+# expensive — leave it blank deliberately, not by default.
+#
+# Field reference
+# ---------------
+#   case_id                    Required. kebab-case. Unique within file.
+#                              Example: evri-clarion-2024
+#   parties                    List of names of the parties involved.
+#                              Example: [NBNE, Evri, Clarion]
+#   initial_claim_gbp          Optional. The opening figure in play.
+#   final_settlement_gbp       Optional. Where it ended up.
+#   phases                     Required list of phase objects.
+#     phase                    Required. snake_case phase label,
+#                              e.g. initial_response, escalation, settlement
+#     decided_at               Required. ISO date like 2024-03-15
+#     context                  Required. Your narrative of what happened
+#                              at this phase, 3–8 sentences, pipe-quoted
+#                              so YAML keeps the line breaks.
+#     chosen_path              Required. What you actually did.
+#     rejected_alternatives    Optional but VALUABLE. List of paths you
+#                              considered and ruled out, with reasons.
+#                              THIS IS THE COUNTERFACTUAL SIGNAL.
+#     outcome                  Optional. What happened next.
+#     chosen_path_score        Optional. -1.0 (disaster) to +1.0 (clear win).
+#                              Your own after-the-fact judgement.
+#     metrics                  Optional mapping of structured numbers.
+#   lessons_in_your_own_words  Optional. What you actually learned from
+#                              this case, in your own words. Attached
+#                              VERBATIM to the last phase's outcome —
+#                              Claude does NOT rewrite it. If blank,
+#                              Claude Opus generates a lesson instead.
+
+# ── Worked example 1: case with a verbatim lesson ───────────────────
+- case_id: evri-example-2024
+  parties: [NBNE, Evri, ExampleClient]
+  initial_claim_gbp: 1705
+  final_settlement_gbp: 350
+  phases:
+    - phase: initial_response
+      decided_at: 2024-03-15
+      context: |
+        The courier alleged damage on a high-value signage shipment
+        and demanded the full invoice value as a claim. Their first
+        settlement offer came in at roughly one fifth of the claim.
+        The insurance window was closing within days, so the
+        decision could not be deferred.
+      chosen_path: "Rejected the first settlement offer and countered at £GBP."
+      rejected_alternatives:
+        - path: "Accept the initial settlement offer immediately"
+          reason: "Would have set a precedent for future claims and signalled we'd capitulate under time pressure."
+        - path: "Escalate straight to formal legal action"
+          reason: "Too expensive for the size of the claim; also closes the door on a commercial resolution."
+      outcome: |
+        Settled six weeks later at roughly the middle of the range.
+      chosen_path_score: 0.7
+      metrics:
+        settlement_gbp: 350
+        days_to_resolve: 47
+    - phase: escalation
+      decided_at: 2024-04-05
+      context: |
+        After the first rejection the courier escalated and mentioned
+        passing the claim to a collections agency. We held position
+        and documented the case in writing, referencing the ombudsman.
+      chosen_path: "Held position, documented the case for ombudsman review, and waited."
+      outcome: |
+        Courier backed down and proposed a revised figure within ten days.
+      chosen_path_score: 0.6
+  lessons_in_your_own_words: |
+    Never accept the first settlement offer from a courier. Counter
+    ONCE at a credible figure and then wait — the cost of waiting
+    is almost always lower than the cost of capitulating. Silence
+    after the counter is a negotiating tool, not a sign of failure.
+
+# ── Worked example 2: case with NO verbatim lesson (Opus will write one) ──
+- case_id: retail-colour-drift-2024
+  parties: [NBNE, RetailClient]
+  phases:
+    - phase: initial_complaint
+      decided_at: 2024-07-02
+      context: |
+        A retail client disputed a batch of printed panels, claiming
+        colour drift. The photographic evidence they supplied was
+        inconclusive. They threatened to withhold payment across three
+        open invoices unless something was done.
+      chosen_path: "Offered a partial reprint on the worst panel and invoiced the rest normally."
+      rejected_alternatives:
+        - path: "Reprint everything free of charge"
+          reason: "Not justified by the available evidence; would have eaten the margin on three jobs."
+        - path: "Refuse entirely and hold firm on the invoices"
+          reason: "Would have ended a £40k/year relationship over a £1,500 job."
+      outcome: |
+        The client accepted the partial remedy and paid all three
+        invoices within the original terms. The relationship continued
+        the following year at the same volume.
+      chosen_path_score: 0.8
+      metrics:
+        invoice_total_gbp: 1500
+        partial_remedy_value_gbp: 400
+  # lessons_in_your_own_words intentionally omitted — Opus will
+  # generate a lesson from the context + chosen_path + outcome.
+
+# Delete the two examples above and replace them with your own cases.
+# Ten to twenty real cases is where retrieval starts paying off.

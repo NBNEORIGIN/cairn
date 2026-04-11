@@ -1,0 +1,145 @@
+# Cairn counterfactual memory — b2b_quotes.yml TEMPLATE
+#
+# Copy this file to b2b_quotes.yml and edit it. b2b_quotes.yml is
+# gitignored so you can name real clients and numbers without
+# leaking commercial-sensitive material into the repo.
+#
+# This file holds named B2B quote histories — the decisions you made
+# when pricing bespoke commercial work, who you were pricing it for,
+# what options you offered, which one the client took (or didn't),
+# and what you learned. It mirrors disputes.yml with three differences:
+#
+#   1. Every row is written with needs_privacy_scrub=True so the
+#      pipeline runs the regex PII pass over the context before it
+#      lands in the DB. Commercial counterparty names are fine in
+#      the DB; individual email addresses, phone numbers, postcodes
+#      and VAT numbers get redacted automatically.
+#
+#   2. Cases without a verbatim lesson get a Claude Sonnet lesson
+#      (not Opus). B2B quotes are high-volume-high-signal; disputes
+#      are low-volume-highest-signal, which is why disputes get Opus.
+#
+#   3. Phases are usually singular — one quote goes out, one outcome
+#      comes back. The multi-phase structure is available for long
+#      negotiations but most quotes only need phase: quote_sent.
+#
+# Field reference
+# ---------------
+#   case_id                    Required. kebab-case. Unique within file.
+#                              Usually client-something-YYYY.
+#   client                     Optional string. The client name —
+#                              passed into the email enrichment hook
+#                              and stored in raw_source_ref.client.
+#   quote_value_gbp            Optional number. Stored for report queries.
+#   phases                     Required. Usually one phase per case.
+#     phase                    Required. snake_case label.
+#     decided_at               Required. ISO date like 2024-09-10
+#     context                  Required. Situation, client, budget,
+#                              the tension that made this a decision.
+#                              3–8 sentences.
+#     chosen_path              Required. Which quote you actually led with.
+#     rejected_alternatives    Optional but VALUABLE. List the other
+#                              options you considered and the reason
+#                              each one was wrong for THIS client.
+#                              The canonical shape is a three-option
+#                              quote: cheap / middle / premium.
+#     outcome                  Optional. Accepted? Rejected? Ghosted?
+#     chosen_path_score        Optional. -1.0 (disaster) to +1.0 (clear win).
+#     metrics                  Optional mapping. margin_pct, days_to_decision,
+#                              referrals_materialised, whatever you can
+#                              measure.
+#   lessons_in_your_own_words  Optional. Attached VERBATIM to the last
+#                              phase's outcome. If blank, Sonnet (not
+#                              Opus) generates a lesson instead.
+
+# ── Worked example 1: canonical three-option quote ──────────────────
+- case_id: bakery-barn-2024
+  client: Bakery Barn
+  quote_value_gbp: 2400
+  phases:
+    - phase: quote_sent
+      decided_at: 2024-09-10
+      context: |
+        An independent bakery wanted a new illuminated shopfront sign.
+        The budget ceiling was firm and they were shopping around
+        three local signmakers. We presented three options: cheapest
+        (foamex only), middle (aluminium tray with vinyl graphics),
+        and premium (built-up illuminated letters).
+      chosen_path: "Led with the middle option at exactly their budget ceiling, framed the other two as context."
+      rejected_alternatives:
+        - path: "Lead with the foamex-only option"
+          reason: "Would not have lasted two winters outdoors in Northumberland — short-term saving, long-term complaint."
+        - path: "Lead with the premium built-up letters"
+          reason: "40% over their stated budget; would have got us rejected on price before the quality argument landed."
+      outcome: |
+        Client accepted the middle option and paid the deposit within
+        a week. Installed six weeks later without incident.
+      chosen_path_score: 0.9
+      metrics:
+        margin_pct: 38
+        days_to_decision: 6
+  lessons_in_your_own_words: |
+    For small independent clients with a firm budget, anchor on the
+    middle of three options and design that option to land EXACTLY
+    at their ceiling. The cheap option exists to prove you've
+    listened; the premium option exists to make the middle feel
+    sensible. You are not trying to sell the cheap or the premium.
+
+# ── Worked example 2: quote that went cold (Sonnet will write a lesson) ──
+- case_id: hair-salon-discount-2024
+  client: Tyneside Hair Salon
+  quote_value_gbp: 1200
+  phases:
+    - phase: quote_sent
+      decided_at: 2024-11-20
+      context: |
+        A small hair salon pushed for a 25% discount in exchange for
+        vague promises of future referrals. The quote was already at
+        a thin margin for a one-off installation.
+      chosen_path: "Held full price and offered a small goodwill extra (discount on a future service) instead of cutting the quote."
+      rejected_alternatives:
+        - path: "Accept the 25% discount for the referral promise"
+          reason: "Would have set an undercutting precedent and the referral promise is rarely redeemed in practice."
+      outcome: |
+        Client signed at full price. No referrals materialised over
+        the next six months.
+      chosen_path_score: 0.5
+      metrics:
+        discount_requested_pct: 25
+        discount_given_pct: 0
+        referrals_received: 0
+  # lessons_in_your_own_words intentionally omitted — Sonnet will
+  # distil the lesson from the context + outcome.
+
+# ── Worked example 3: quote you walked away from ────────────────────
+- case_id: hotel-chain-six-site-2025
+  client: Regional Hotel Chain
+  quote_value_gbp: 85000
+  phases:
+    - phase: scoping_call
+      decided_at: 2025-02-08
+      context: |
+        A national hotel chain enquired about rebranding six regional
+        sites simultaneously. The opportunity looked lucrative but the
+        timeline was impossible and the specification kept shifting
+        mid-quote. Three scope changes in the first week alone.
+      chosen_path: "Declined the full six-site job and offered to pilot one site first at a fixed price."
+      rejected_alternatives:
+        - path: "Accept all six sites with heavy contingency pricing"
+          reason: "Scope was too unstable to price honestly; contingency would have to be 30%+ which kills the win-rate."
+      outcome: |
+        Client declined the pilot offer and went to a larger competitor.
+        Trade gossip six months later suggested that competitor ran
+        significantly over time and over budget on the same job.
+      chosen_path_score: 0.6
+  lessons_in_your_own_words: |
+    When scope is unstable, a fixed-price pilot on ONE deliverable
+    is the honest answer. If the client won't accept a pilot, that
+    IS the signal — the full job is a trap. The margin on saying
+    "no" is often higher than the margin on saying "yes" to an
+    unpriced scope.
+
+# Delete these three examples and replace with your own named cases.
+# The brief names JT Dove, Glitz Hair and Bakery Barn as canonical —
+# any real named quotes you can remember will do. Ten to fifteen
+# cases is where the retrieval starts paying off.
