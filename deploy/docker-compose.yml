@@ -41,6 +41,11 @@ services:
       ETSY_SHOP_IDS: ${ETSY_SHOP_IDS:-}
       ETSY_OAUTH_REDIRECT_URI: ${ETSY_OAUTH_REDIRECT_URI:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      # Shared token for server-to-server calls into the CRM's
+      # /api/cairn/* routes. Both cairn-api and the CRM container
+      # read this same env var — rotate on both sides together.
+      CAIRN_API_KEY: ${CAIRN_API_KEY:-}
+      CRM_BASE_URL: ${CRM_BASE_URL:-https://crm.nbnesigns.co.uk}
     ports:
       - "127.0.0.1:8765:8765"
     volumes:
