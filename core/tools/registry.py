@@ -23,17 +23,26 @@ DEFAULT_PERMISSIONS = {
         'read_file', 'search_code', 'run_tests',
         'edit_file', 'create_file', 'run_migration',
         'query_amazon_intel',
+        'get_module_snapshot', 'search_emails', 'search_wiki',
     ],
     'readonly': [
         'read_file', 'search_code', 'query_amazon_intel',
+        'get_module_snapshot', 'search_emails', 'search_wiki',
     ],
     'ops': [
         'read_file', 'search_code', 'run_command',
         'edit_file', 'create_file',
+        'get_module_snapshot', 'search_emails', 'search_wiki',
     ],
     'creative': [
         'read_file', 'search_code', 'edit_file', 'create_file',
         'generate_video', 'generate_image',
+        'search_wiki',
+    ],
+    'business': [
+        'read_file', 'search_code',
+        'query_amazon_intel',
+        'get_module_snapshot', 'search_emails', 'search_wiki',
     ],
 }
 
@@ -301,6 +310,57 @@ TOOL_SCHEMAS: dict[str, dict] = {
             },
         },
         'required': ['sql'],
+    },
+    # ── Cairn federation + memory ────────────────────────────────────────────
+    'get_module_snapshot': {
+        'type': 'object',
+        'properties': {
+            'module': {
+                'type': 'string',
+                'description': (
+                    'Name of the module to fetch (e.g. "manufacture", '
+                    '"crm", "ledger", "render"). Omit to list all '
+                    'registered modules.'
+                ),
+            },
+        },
+        'required': [],
+    },
+    'search_emails': {
+        'type': 'object',
+        'properties': {
+            'query': {
+                'type': 'string',
+                'description': (
+                    'Free-text search term — sender name, subject keyword, '
+                    'topic, company, etc.'
+                ),
+            },
+            'limit': {
+                'type': 'integer',
+                'description': 'Max results to return (default 5, max 20)',
+                'default': 5,
+            },
+        },
+        'required': ['query'],
+    },
+    'search_wiki': {
+        'type': 'object',
+        'properties': {
+            'query': {
+                'type': 'string',
+                'description': (
+                    'Free-text search term — process, SOP, module name, '
+                    'supplier, decision, etc.'
+                ),
+            },
+            'limit': {
+                'type': 'integer',
+                'description': 'Max results to return (default 5, max 20)',
+                'default': 5,
+            },
+        },
+        'required': ['query'],
     },
     # ── Server check ─────────────────────────────────────────────────────────
     'check_server': {

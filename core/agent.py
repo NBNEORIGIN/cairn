@@ -2335,6 +2335,11 @@ class ClawAgent:
         from .tools.video_tools import generate_video_tool
         from .tools.image_tools import generate_image_tool
         from .tools.ami_tools import query_amazon_intel_tool
+        from .tools.cairn_tools import (
+            get_module_snapshot_tool,
+            search_emails_tool,
+            search_wiki_tool,
+        )
         for tool in [
             # File
             read_file_tool, edit_file_tool, create_file_tool,
@@ -2353,5 +2358,9 @@ class ClawAgent:
             generate_video_tool, generate_image_tool,
             # Amazon Intelligence
             query_amazon_intel_tool,
+            # Cairn federation + memory (module snapshots, emails, wiki)
+            get_module_snapshot_tool,
+            search_emails_tool,
+            search_wiki_tool,
         ]:
             self.tools.register(tool)
