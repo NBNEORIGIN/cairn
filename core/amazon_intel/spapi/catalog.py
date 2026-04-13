@@ -323,12 +323,13 @@ def get_asins_for_enrichment(region: Region = 'EU', limit: int = 500) -> list[st
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT DISTINCT sm.asin
+                SELECT sm.asin, MIN(lc.last_enriched_at) AS last_enriched
                 FROM ami_sku_mapping sm
                 LEFT JOIN ami_listing_content lc
                     ON sm.asin = lc.asin AND lc.marketplace = %s
                 WHERE sm.asin IS NOT NULL AND sm.asin != ''
-                ORDER BY lc.last_enriched_at ASC NULLS FIRST
+                GROUP BY sm.asin
+                ORDER BY last_enriched ASC NULLS FIRST
                 LIMIT %s
             """, (marketplace, limit))
             return [row[0] for row in cur.fetchall()]
