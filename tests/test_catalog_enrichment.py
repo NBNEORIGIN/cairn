@@ -348,11 +348,12 @@ class TestMarketplaceFinder:
         result = _find_for_marketplace(items, 'A1F83G8C2ARO7P')
         assert result['data'] == 'UK'
 
-    def test_find_no_match(self):
+    def test_find_no_match_falls_back(self):
         from core.amazon_intel.spapi.catalog import _find_for_marketplace
         items = [{'marketplaceId': 'ATVPDKIKX0DER'}]
         result = _find_for_marketplace(items, 'A1F83G8C2ARO7P')
-        assert result is None
+        # Falls back to first dict entry when no exact marketplace match
+        assert result == {'marketplaceId': 'ATVPDKIKX0DER'}
 
     def test_find_empty_list(self):
         from core.amazon_intel.spapi.catalog import _find_for_marketplace

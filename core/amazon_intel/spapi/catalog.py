@@ -409,11 +409,33 @@ def _extract_variations(rel_set: dict) -> dict:
 
     result = {}
     for rel in relationships:
+        if not isinstance(rel, dict):
+            continue
         rel_type = rel.get('type', '')
         if rel_type == 'VARIATION':
-            child_asins = [c.get('asin', '') for c in rel.get('childAsins', []) if c.get('asin')]
-            parent = rel.get('parentAsins', [{}])
-            parent_asin = parent[0].get('asin', '') if parent else ''
+            # childAsins can be list of dicts [{'asin': 'X'}] or list of strings ['X']
+            raw_children = rel.get('childAsins', [])
+            child_asins = []
+            for c in raw_children:
+                if isinstance(c, dict):
+                    a = c.get('asin', '')
+                elif isinstance(c, str):
+                    a = c
+                else:
+                    continue
+                if a:
+                    child_asins.append(a)
+
+            # parentAsins can be list of dicts or list of strings
+            raw_parents = rel.get('parentAsins', [])
+            parent_asin = ''
+            if raw_parents:
+                p = raw_parents[0]
+                if isinstance(p, dict):
+                    parent_asin = p.get('asin', '')
+                elif isinstance(p, str):
+                    parent_asin = p
+
             result = {
                 'parent_asin': parent_asin or None,
                 'variation_type': 'VARIATION',
