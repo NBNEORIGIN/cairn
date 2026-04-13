@@ -57,6 +57,8 @@ services:
       ETSY_SHOP_IDS: ${ETSY_SHOP_IDS:-}
       ETSY_OAUTH_REDIRECT_URI: ${ETSY_OAUTH_REDIRECT_URI:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-deepseek/deepseek-chat}
+      CLAW_MAX_TIER: ${CLAW_MAX_TIER:-4}
       # Shared token for server-to-server calls into the CRM's
       # /api/cairn/* routes. Both cairn-api and the CRM container
       # read this same env var — rotate on both sides together.

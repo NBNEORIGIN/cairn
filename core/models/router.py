@@ -207,14 +207,33 @@ def _resolve_tier(
     """
     Walk up from the desired tier to the nearest available tier.
     Returns ModelChoice for the first available tier >= desired.
+
+    CLAW_MAX_TIER (env int, default 4) caps the tier ceiling — useful to force
+    all traffic through DeepSeek/OpenRouter and prevent Claude API spend.
+    Set CLAW_MAX_TIER=2 to cap at DeepSeek for all non-destructive tasks.
     """
+    try:
+        max_tier = TaskTier(int(os.getenv('CLAW_MAX_TIER', '4')))
+    except (ValueError, KeyError):
+        max_tier = TaskTier.OPUS
+
+    effective_desired = min(desired, max_tier)
+
     for tier in TaskTier:
-        if tier < desired:
+        if tier < effective_desired:
             continue
+        if tier > max_tier:
+            break
         choice = _tier_available(tier, force_api, context_tokens)
         if choice is not None:
             return choice
-    # Tier 4 (Claude) is always available as the final fallback
+
+    # Final fallback: cheapest available provider
+    if _deepseek_available():
+        return ModelChoice.DEEPSEEK
+    if os.getenv('ANTHROPIC_API_KEY', ''):
+        return ModelChoice.API
+    # No provider configured — return API and let the caller handle auth failure
     return ModelChoice.API
 
 

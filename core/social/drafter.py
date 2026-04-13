@@ -37,14 +37,27 @@ DEFAULT_MODEL = os.getenv('CAIRN_SOCIAL_MODEL', 'claude-sonnet-4-6')
 PRICE_INPUT_GBP_PER_M = 0.24
 PRICE_OUTPUT_GBP_PER_M = 1.20
 
+# OpenRouter rates (DeepSeek V3) — ~12× cheaper than Sonnet
+_OR_PRICE_INPUT_GBP_PER_M = 0.022   # $0.027/M × 0.80 GBP/USD
+_OR_PRICE_OUTPUT_GBP_PER_M = 0.088  # $0.110/M × 0.80 GBP/USD
 
-def _client() -> anthropic.Anthropic:
+
+def _client():
+    """Return (client, is_openrouter) — prefers OpenRouter when available."""
+    or_key = os.getenv('OPENROUTER_API_KEY', '')
+    if or_key:
+        from openai import OpenAI as _OAI
+        return _OAI(
+            api_key=or_key,
+            base_url='https://openrouter.ai/api/v1',
+        ), True
     api_key = os.getenv('ANTHROPIC_API_KEY', '')
     if not api_key:
         raise RuntimeError(
-            "ANTHROPIC_API_KEY is not set — Cairn Social needs it to draft posts"
+            "Neither OPENROUTER_API_KEY nor ANTHROPIC_API_KEY is set — "
+            "Cairn Social cannot draft posts"
         )
-    return anthropic.Anthropic(api_key=api_key)
+    return anthropic.Anthropic(api_key=api_key), False
 
 
 def estimate_gbp(input_tokens: int, output_tokens: int) -> float:
@@ -174,8 +187,36 @@ def _call_claude(
     user_message: str,
     model: str = DEFAULT_MODEL,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Single Claude call. Returns (parsed_json, usage_dict)."""
-    client = _client()
+    """LLM call for social drafting. Uses OpenRouter when available, Anthropic otherwise."""
+    client, is_openrouter = _client()
+
+    if is_openrouter:
+        or_model = os.getenv('OPENROUTER_MODEL', 'deepseek/deepseek-chat')
+        response = client.chat.completions.create(
+            model=or_model,
+            max_tokens=2048,
+            messages=[
+                {'role': 'system', 'content': system_prompt},
+                {'role': 'user', 'content': user_message},
+            ],
+        )
+        text = response.choices[0].message.content or ''
+        in_tok = response.usage.prompt_tokens
+        out_tok = response.usage.completion_tokens
+        cost = round(
+            (in_tok / 1_000_000) * _OR_PRICE_INPUT_GBP_PER_M
+            + (out_tok / 1_000_000) * _OR_PRICE_OUTPUT_GBP_PER_M,
+            6,
+        )
+        parsed = _parse_json_response(text)
+        return parsed, {
+            'model': or_model,
+            'input_tokens': in_tok,
+            'output_tokens': out_tok,
+            'cost_gbp': cost,
+        }
+
+    # Anthropic path
     response = client.messages.create(
         model=model,
         max_tokens=2048,
@@ -188,8 +229,7 @@ def _call_claude(
             text += block.text
 
     parsed = _parse_json_response(text)
-
-    usage = {
+    return parsed, {
         'model': model,
         'input_tokens': response.usage.input_tokens,
         'output_tokens': response.usage.output_tokens,
@@ -198,7 +238,6 @@ def _call_claude(
             response.usage.output_tokens,
         ),
     }
-    return parsed, usage
 
 
 def _validate_platforms(platforms: list[str]) -> list[str]:
