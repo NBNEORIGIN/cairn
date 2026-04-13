@@ -352,6 +352,107 @@ CREATE TABLE IF NOT EXISTS ami_velocity (
 CREATE INDEX IF NOT EXISTS ami_velocity_alert_idx ON ami_velocity (alert, alert_acknowledged)
     WHERE alert IS NOT NULL AND alert_acknowledged = FALSE;
 CREATE INDEX IF NOT EXISTS ami_velocity_date_idx ON ami_velocity (computed_date DESC);
+
+-- ── Listing Content (Catalog Items API enrichment) ───────────────────────────
+
+-- Full listing content from per-ASIN Catalog Items API calls.
+-- Replaces ami_listing_snapshots for content fields — that table had inflated
+-- rows from smart-merge. This table is the single source of truth for listing
+-- content per marketplace+ASIN.
+CREATE TABLE IF NOT EXISTS ami_listing_content (
+    id                  SERIAL PRIMARY KEY,
+    asin                VARCHAR(20)     NOT NULL,
+    marketplace         VARCHAR(10)     NOT NULL,
+    region              VARCHAR(5)      NOT NULL,
+    -- Content
+    title               TEXT,
+    bullet1             TEXT,
+    bullet2             TEXT,
+    bullet3             TEXT,
+    bullet4             TEXT,
+    bullet5             TEXT,
+    description         TEXT,
+    -- Images
+    main_image_url      VARCHAR(2000),
+    image_urls          JSONB           DEFAULT '[]',
+    image_count         INTEGER         DEFAULT 0,
+    -- A+ / brand content
+    aplus_present       BOOLEAN         DEFAULT FALSE,
+    aplus_modules       JSONB,
+    brand               VARCHAR(200),
+    brand_registered    BOOLEAN,
+    -- Variation
+    parent_asin         VARCHAR(20),
+    variation_type      VARCHAR(50),
+    variation_theme     JSONB,
+    child_asins         JSONB           DEFAULT '[]',
+    -- Classification
+    product_type        VARCHAR(200),
+    browse_nodes        JSONB           DEFAULT '[]',
+    item_classification VARCHAR(100),
+    -- Pricing from catalog
+    list_price_amount   NUMERIC(10,2),
+    list_price_currency VARCHAR(5),
+    -- Raw API response (for debugging/future parsing)
+    catalog_json        JSONB,
+    -- Provenance
+    catalog_api_version VARCHAR(20)     DEFAULT '2022-04-01',
+    first_seen_at       TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+    last_enriched_at    TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+    content_hash        VARCHAR(64),
+    CONSTRAINT ami_listing_content_unique UNIQUE (asin, marketplace)
+);
+CREATE INDEX IF NOT EXISTS ami_lc_marketplace_idx ON ami_listing_content (marketplace);
+CREATE INDEX IF NOT EXISTS ami_lc_parent_idx ON ami_listing_content (parent_asin);
+CREATE INDEX IF NOT EXISTS ami_lc_brand_idx ON ami_listing_content (brand);
+CREATE INDEX IF NOT EXISTS ami_lc_enriched_idx ON ami_listing_content (last_enriched_at);
+
+-- Listing content embeddings (pgvector).
+-- Stores nomic-embed-text vectors for semantic search over listing text.
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE IF NOT EXISTS ami_listing_embeddings (
+    id                  SERIAL PRIMARY KEY,
+    asin                VARCHAR(20)     NOT NULL,
+    marketplace         VARCHAR(10)     NOT NULL,
+    field_type          VARCHAR(20)     NOT NULL,  -- 'title', 'bullets', 'description', 'combined'
+    embedding           vector(768),
+    text_hash           VARCHAR(64),
+    created_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+    CONSTRAINT ami_le_unique UNIQUE (asin, marketplace, field_type)
+);
+CREATE INDEX IF NOT EXISTS ami_le_embedding_idx ON ami_listing_embeddings
+    USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+
+-- Listing content change history (for diff pipeline in Session 2)
+CREATE TABLE IF NOT EXISTS ami_listing_content_history (
+    id                  SERIAL PRIMARY KEY,
+    asin                VARCHAR(20)     NOT NULL,
+    marketplace         VARCHAR(10)     NOT NULL,
+    field_name          VARCHAR(50)     NOT NULL,
+    old_value           TEXT,
+    new_value           TEXT,
+    changed_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS ami_lch_asin_idx ON ami_listing_content_history (asin, marketplace, changed_at DESC);
+
+-- Notification events from SP-API via SQS
+CREATE TABLE IF NOT EXISTS ami_notification_events (
+    id                  SERIAL PRIMARY KEY,
+    notification_type   VARCHAR(100)    NOT NULL,
+    region              VARCHAR(5)      NOT NULL,
+    asin                VARCHAR(20),
+    sku                 VARCHAR(200),
+    seller_id           VARCHAR(50),
+    event_time          VARCHAR(50),
+    payload             JSONB,
+    processed           BOOLEAN         NOT NULL DEFAULT FALSE,
+    processed_at        TIMESTAMPTZ,
+    received_at         TIMESTAMPTZ     NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS ami_ne_type_idx ON ami_notification_events (notification_type, received_at DESC);
+CREATE INDEX IF NOT EXISTS ami_ne_asin_idx ON ami_notification_events (asin);
+CREATE INDEX IF NOT EXISTS ami_ne_unprocessed_idx ON ami_notification_events (processed) WHERE processed = FALSE;
 """
 
 

@@ -499,3 +499,217 @@ async def patch_listing_title(
     """Update the listing title for a SKU on Amazon."""
     from core.amazon_intel.spapi.listings import update_title
     return update_title(sku=sku, title=title, region=region)  # type: ignore[arg-type]
+
+
+# ── Catalog Enrichment (Phase 1) ────────────────────────────────────────────
+
+@router.post("/catalog/enrich")
+async def enrich_catalog(
+    background_tasks: BackgroundTasks,
+    region: str = Query('EU'),
+    limit: int = Query(100),
+    skip_recent_hours: int = Query(24),
+):
+    """Trigger catalog enrichment — fetches full listing content via Catalog Items API."""
+    from core.amazon_intel.spapi.catalog import run_enrichment
+    background_tasks.add_task(run_enrichment, region=region, limit=limit,
+                              skip_recent_hours=skip_recent_hours)
+    return {'status': 'started', 'region': region, 'limit': limit}
+
+
+@router.get("/catalog/content/{asin}")
+async def get_listing_content(asin: str, marketplace: str = Query('UK')):
+    """Get enriched listing content for an ASIN."""
+    from core.amazon_intel.db import get_conn
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT asin, marketplace, title, bullet1, bullet2, bullet3, bullet4, bullet5,
+                          description, main_image_url, image_urls, image_count,
+                          aplus_present, brand, parent_asin, variation_type,
+                          child_asins, product_type, list_price_amount,
+                          last_enriched_at, content_hash
+                   FROM ami_listing_content WHERE asin = %s AND marketplace = %s""",
+                (asin, marketplace),
+            )
+            row = cur.fetchone()
+    if not row:
+        raise HTTPException(404, f"No listing content for {asin} in {marketplace}")
+    cols = [d[0] for d in cur.description]
+    result = dict(zip(cols, row))
+    for k, v in result.items():
+        if hasattr(v, 'isoformat'):
+            result[k] = v.isoformat()
+    return result
+
+
+@router.get("/catalog/content")
+async def list_listing_content(
+    marketplace: str = Query('UK'),
+    limit: int = Query(50),
+    offset: int = Query(0),
+):
+    """List enriched listing content."""
+    from core.amazon_intel.db import get_conn
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT asin, marketplace, title, brand, image_count,
+                          aplus_present, product_type, last_enriched_at
+                   FROM ami_listing_content
+                   WHERE marketplace = %s
+                   ORDER BY last_enriched_at DESC
+                   LIMIT %s OFFSET %s""",
+                (marketplace, limit, offset),
+            )
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+    for r in rows:
+        for k, v in r.items():
+            if hasattr(v, 'isoformat'):
+                r[k] = v.isoformat()
+    return {'marketplace': marketplace, 'count': len(rows), 'items': rows}
+
+
+@router.get("/catalog/changes/{asin}")
+async def get_listing_changes(asin: str, marketplace: str = Query('UK'), limit: int = Query(50)):
+    """Get content change history for an ASIN."""
+    from core.amazon_intel.db import get_conn
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT field_name, old_value, new_value, changed_at
+                   FROM ami_listing_content_history
+                   WHERE asin = %s AND marketplace = %s
+                   ORDER BY changed_at DESC LIMIT %s""",
+                (asin, marketplace, limit),
+            )
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+    for r in rows:
+        for k, v in r.items():
+            if hasattr(v, 'isoformat'):
+                r[k] = v.isoformat()
+    return {'asin': asin, 'changes': rows}
+
+
+# ── Embeddings (Phase 1) ────────────────────────────────────────────────────
+
+@router.post("/catalog/embed")
+async def embed_listings(
+    background_tasks: BackgroundTasks,
+    marketplace: str = Query('UK'),
+):
+    """Trigger embedding generation for all listing content in a marketplace."""
+    from core.amazon_intel.spapi.embeddings import embed_all_listings
+    background_tasks.add_task(embed_all_listings, marketplace=marketplace)
+    return {'status': 'started', 'marketplace': marketplace}
+
+
+@router.get("/catalog/search")
+async def semantic_search_listings(
+    q: str = Query(...),
+    marketplace: str = Query('UK'),
+    field_type: str = Query('combined'),
+    limit: int = Query(20),
+):
+    """Semantic search over listing content embeddings."""
+    from core.amazon_intel.spapi.embeddings import semantic_search
+    results = semantic_search(q, marketplace=marketplace, field_type=field_type, limit=limit)
+    for r in results:
+        for k, v in r.items():
+            if hasattr(v, 'isoformat'):
+                r[k] = v.isoformat()
+            elif isinstance(v, float):
+                r[k] = round(v, 4)
+    return {'query': q, 'results': results}
+
+
+# ── Notifications (Phase 2) ─────────────────────────────────────────────────
+
+@router.post("/notifications/setup")
+async def setup_notifications_endpoint(region: str = Query('EU')):
+    """Full notification setup: create destination + subscribe to all types."""
+    from core.amazon_intel.spapi.notifications import setup_notifications
+    return setup_notifications(region)  # type: ignore[arg-type]
+
+
+@router.get("/notifications/destinations")
+async def list_notification_destinations(region: str = Query('EU')):
+    """List notification destinations for a region."""
+    from core.amazon_intel.spapi.notifications import list_destinations
+    return list_destinations(region)  # type: ignore[arg-type]
+
+
+@router.get("/notifications/subscriptions/{notification_type}")
+async def get_notification_subscription(notification_type: str, region: str = Query('EU')):
+    """Get subscription status for a notification type."""
+    from core.amazon_intel.spapi.notifications import get_subscription
+    result = get_subscription(region, notification_type)  # type: ignore[arg-type]
+    return result or {'status': 'not_subscribed'}
+
+
+@router.post("/notifications/poll")
+async def poll_notifications_endpoint(
+    region: str = Query('EU'),
+    max_messages: int = Query(10),
+):
+    """Poll SQS for pending notifications."""
+    from core.amazon_intel.spapi.notifications import poll_notifications
+    notifications = poll_notifications(region, max_messages=max_messages)  # type: ignore[arg-type]
+    return {'region': region, 'count': len(notifications), 'notifications': notifications}
+
+
+@router.post("/notifications/test")
+async def send_test_notification(
+    region: str = Query('EU'),
+    asin: str = Query('B000TEST01'),
+):
+    """Send a test notification to the SQS queue for verification."""
+    from core.amazon_intel.spapi.notifications import send_test_notification
+    return send_test_notification(region, asin=asin)  # type: ignore[arg-type]
+
+
+@router.get("/notifications/events")
+async def list_notification_events(
+    region: str = Query(None),
+    limit: int = Query(50),
+):
+    """List recent notification events."""
+    from core.amazon_intel.db import get_conn
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if region:
+                cur.execute(
+                    """SELECT id, notification_type, region, asin, sku, event_time,
+                              processed, received_at
+                       FROM ami_notification_events
+                       WHERE region = %s ORDER BY received_at DESC LIMIT %s""",
+                    (region, limit),
+                )
+            else:
+                cur.execute(
+                    """SELECT id, notification_type, region, asin, sku, event_time,
+                              processed, received_at
+                       FROM ami_notification_events
+                       ORDER BY received_at DESC LIMIT %s""",
+                    (limit,),
+                )
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+    for r in rows:
+        for k, v in r.items():
+            if hasattr(v, 'isoformat'):
+                r[k] = v.isoformat()
+    return {'count': len(rows), 'events': rows}
+
+
+@router.post("/notifications/processor")
+async def run_notification_processor_endpoint(
+    background_tasks: BackgroundTasks,
+    poll_cycles: int = Query(3),
+):
+    """Run the notification processor across all configured regions."""
+    from core.amazon_intel.spapi.notifications import run_notification_processor
+    background_tasks.add_task(run_notification_processor, poll_cycles=poll_cycles)
+    return {'status': 'started', 'poll_cycles': poll_cycles}

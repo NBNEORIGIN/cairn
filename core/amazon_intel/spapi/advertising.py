@@ -61,16 +61,26 @@ def get_advertising_profiles(region: Region = 'EU') -> list[dict]:
     """
     Discover all advertising profiles linked to this app for a region.
     Store the returned profileId values in .env as AMAZON_ADS_PROFILE_ID_*.
+
+    Uses Ads API v3 endpoint (v2 /profiles was deprecated and returns 301).
+    v3: GET /v3/profiles with apiProgram filter for Sponsored Products.
     """
     host = ADS_REGION_HOSTS[region]
-    with httpx.Client(timeout=30) as client:
+    headers = _ads_headers(region)
+    headers['Accept'] = 'application/vnd.amazonadvertising.v3+json'
+
+    with httpx.Client(timeout=30, follow_redirects=True) as client:
         resp = client.get(
-            f'https://{host}/v2/profiles',
-            headers=_ads_headers(region),
+            f'https://{host}/v3/profiles',
+            params={'apiProgram': 'SPONSORED_PRODUCTS'},
+            headers=headers,
         )
         resp.raise_for_status()
 
-    profiles = resp.json()
+    profiles = resp.json().get('profiles', resp.json()) if isinstance(resp.json(), dict) else resp.json()
+    if not isinstance(profiles, list):
+        profiles = [profiles] if profiles else []
+
     return [
         {
             'profile_id': str(p.get('profileId', '')),

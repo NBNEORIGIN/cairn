@@ -15,12 +15,12 @@ from datetime import datetime, timezone
 from typing import Callable
 
 from core.amazon_intel.db import get_conn
-from .client import Region
+from .client import Region, REGION_MARKETPLACE_CODE
 
 logger = logging.getLogger(__name__)
 
 MIN_INTERVAL_HOURS = 6
-ACTIVE_REGIONS: list[Region] = ['EU']  # Add 'NA', 'FE' once credentials confirmed
+ACTIVE_REGIONS: list[Region] = ['EU', 'NA', 'FE']  # All three regions auth-verified 2026-04-13
 
 
 def _log_start(sync_type: str, region: str) -> int:
@@ -187,6 +187,30 @@ def sync_region(region: Region, force: bool = False) -> dict:
             results['advertising'] = {'status': 'skipped', 'reason': 'not due'}
     else:
         results['advertising'] = {'status': 'skipped', 'reason': 'no profile id configured'}
+
+    # Catalog enrichment — runs after inventory sync, fetches full listing content
+    if results.get('inventory', {}).get('status') == 'complete':
+        log_id = _log_start('catalog_enrichment', region)
+        try:
+            from .catalog import run_enrichment
+            enrich_result = run_enrichment(region, limit=100, skip_recent_hours=24)
+            _log_complete(log_id, enrich_result)
+            results['catalog_enrichment'] = {'status': 'complete', **enrich_result}
+            logger.info("Catalog enrichment complete: %s", enrich_result)
+
+            # Embed newly enriched listings
+            from .embeddings import embed_all_listings
+            marketplace = REGION_MARKETPLACE_CODE.get(region, region)
+            embed_result = embed_all_listings(marketplace=marketplace, batch_size=100)
+            results['embeddings'] = {'status': 'complete', **embed_result}
+            logger.info("Listing embeddings updated: %s", embed_result)
+        except Exception as e:
+            err = traceback.format_exc()
+            _log_error(log_id, err)
+            results['catalog_enrichment'] = {'status': 'error', 'error': str(e)}
+    else:
+        results['catalog_enrichment'] = {'status': 'skipped', 'reason': 'inventory not synced'}
+        results['embeddings'] = {'status': 'skipped', 'reason': 'no enrichment ran'}
 
     # Rebuild snapshots if any data sync completed
     data_synced = any(
