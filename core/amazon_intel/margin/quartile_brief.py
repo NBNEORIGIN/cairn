@@ -288,11 +288,29 @@ def fetch_ad_aggregates(
     ]
 
 
+# Ads API profiles use Amazon marketplace codes (UK, DE, FR, ...) but
+# ami_orders.marketplace uses ISO 3166-1 alpha-2 (GB for the UK). Map both
+# ways so the brief's join matches. Only UK→GB diverges materially; the
+# others (DE, FR, ES, IT, NL, SE, PL, TR, US, CA, MX, AU) line up.
+MARKETPLACE_ALIASES: dict[str, list[str]] = {
+    "UK": ["UK", "GB"],
+    "GB": ["UK", "GB"],
+}
+
+
+def _marketplace_variants(code: str) -> list[str]:
+    return MARKETPLACE_ALIASES.get(code, [code])
+
+
 def fetch_orders_aggregates(
     marketplace: Optional[str] = None,
     lookback_days: int = DEFAULT_LOOKBACK_DAYS,
 ) -> list[SkuOrdersAggregate]:
-    """Aggregate ami_orders over the lookback window."""
+    """Aggregate ami_orders over the lookback window.
+
+    When filtering by marketplace, expand to include ISO alternates so UK
+    (Ads) also catches GB (orders) — the single cross-table quirk.
+    """
     from core.amazon_intel.db import get_conn
 
     sql = """
@@ -305,8 +323,8 @@ def fetch_orders_aggregates(
     """
     params: dict[str, Any] = {"days": lookback_days}
     if marketplace:
-        sql += " AND marketplace = %(mkt)s"
-        params["mkt"] = marketplace
+        sql += " AND marketplace = ANY(%(mkts)s)"
+        params["mkts"] = _marketplace_variants(marketplace)
     sql += """
          GROUP BY asin, marketplace
     """
@@ -316,10 +334,14 @@ def fetch_orders_aggregates(
             cur.execute(sql, params)
             rows = cur.fetchall()
 
+    # Normalise every row's marketplace to the Ads-side canonical code so
+    # the join in classify_all works regardless of which alias is stored.
+    iso_to_ads = {"GB": "UK"}
+
     return [
         SkuOrdersAggregate(
             asin=r[0],
-            marketplace=r[1],
+            marketplace=iso_to_ads.get(r[1], r[1]),
             units=int(r[2] or 0),
             revenue=float(r[3] or 0),
         )
