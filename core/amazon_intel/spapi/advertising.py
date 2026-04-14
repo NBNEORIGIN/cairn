@@ -182,14 +182,22 @@ def request_sponsored_products_report(region: Region, profile_id: str,
         },
     }
 
+    # The Ads API v3 /reporting/reports endpoint requires vendored
+    # Content-Type + Accept headers. Generic application/json → 400.
+    headers = _ads_headers(region, profile_id)
+    headers['Content-Type'] = 'application/vnd.createasyncreportrequest.v3+json'
+    headers['Accept'] = 'application/vnd.createasyncreportrequest.v3+json'
+
     with httpx.Client(timeout=30) as client:
         resp = client.post(
             f'https://{host}/reporting/reports',
             json=body,
-            headers=_ads_headers(region, profile_id),
+            headers=headers,
         )
-        resp.raise_for_status()
-
+    if resp.status_code not in (200, 202):
+        raise RuntimeError(
+            f"Ads report request failed [{resp.status_code}]: {resp.text[:500]}"
+        )
     return resp.json()['reportId']
 
 
@@ -197,14 +205,20 @@ def wait_for_ads_report(region: Region, profile_id: str, report_id: str,
                         max_wait: int = 1800, poll_interval: int = 30) -> str:
     """Poll Ads API until report is SUCCESS. Returns download URL."""
     host = ADS_REGION_HOSTS[region]
+    # GET /reporting/reports/{id} also wants the vendored Accept type.
+    headers = _ads_headers(region, profile_id)
+    headers['Accept'] = 'application/vnd.createasyncreportrequest.v3+json'
     deadline = time.time() + max_wait
     while time.time() < deadline:
         with httpx.Client(timeout=30) as client:
             resp = client.get(
                 f'https://{host}/reporting/reports/{report_id}',
-                headers=_ads_headers(region, profile_id),
+                headers=headers,
             )
-            resp.raise_for_status()
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"Ads report status check failed [{resp.status_code}]: {resp.text[:500]}"
+            )
 
         data = resp.json()
         status = data.get('status', '')
