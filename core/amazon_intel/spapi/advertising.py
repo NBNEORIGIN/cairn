@@ -27,12 +27,70 @@ from typing import Literal
 
 import httpx
 
-from .client import Region, CLIENT_ID, get_access_token
+from .client import Region, CLIENT_ID as SPAPI_CLIENT_ID, get_access_token as _spapi_access_token
 
+# Amazon Ads API is a separate LWA app from SP-API with its own client_id,
+# client_secret, and refresh tokens (scope: advertising::campaign_management).
+# The SP-API refresh tokens in get_access_token() are scoped to
+# sellingpartnerapi:* and cannot be used against the Ads API.
+ADS_CLIENT_ID = os.getenv('AMAZON_ADS_CLIENT_ID', '')
+CLIENT_ID = ADS_CLIENT_ID or SPAPI_CLIENT_ID  # legacy alias for existing callsites
+
+_ads_token_cache: dict[str, tuple[str, float]] = {}
+
+
+def get_ads_access_token(region: Region) -> str:
+    """Exchange the Ads API refresh token for an access token.
+    Cached in-memory with a 60s expiry buffer, per-region (tokens are
+    region-scoped — see the three-region OAuth capture in scripts/ads_auth.py).
+    """
+    cached = _ads_token_cache.get(region)
+    if cached and time.time() < cached[1] - 60:
+        return cached[0]
+
+    refresh_token = os.getenv(f'AMAZON_ADS_REFRESH_TOKEN_{region}', '')
+    if not refresh_token:
+        raise ValueError(
+            f"Missing Ads API refresh token for region {region}. "
+            f"Set AMAZON_ADS_REFRESH_TOKEN_{region} in .env "
+            f"(distinct from AMAZON_REFRESH_TOKEN_* which are SP-API)."
+        )
+
+    client_id = os.getenv('AMAZON_ADS_CLIENT_ID', '')
+    client_secret = os.getenv('AMAZON_ADS_CLIENT_SECRET', '')
+    if not client_id or not client_secret:
+        raise ValueError(
+            "Missing AMAZON_ADS_CLIENT_ID / AMAZON_ADS_CLIENT_SECRET. "
+            "These are the Ads API LWA app credentials, distinct from "
+            "AMAZON_CLIENT_ID / AMAZON_CLIENT_SECRET used by SP-API."
+        )
+
+    with httpx.Client(timeout=15) as client:
+        resp = client.post(
+            'https://api.amazon.com/auth/o2/token',
+            data={
+                'grant_type': 'refresh_token',
+                'refresh_token': refresh_token,
+                'client_id': client_id,
+                'client_secret': client_secret,
+            },
+            headers={'Content-Type': 'application/x-www-form-urlencoded'},
+        )
+        resp.raise_for_status()
+
+    data = resp.json()
+    access_token = data['access_token']
+    expires_in = int(data.get('expires_in', 3600))
+    _ads_token_cache[region] = (access_token, time.time() + expires_in)
+    return access_token
+
+# Amazon Ads API regional endpoints. NOT the consumer marketing sites
+# (advertising.amazon.*) — those redirect API calls to a human sign-in page.
+# See: https://advertising.amazon.com/API/docs/en-us/info/api-overview#api-endpoints
 ADS_REGION_HOSTS: dict[str, str] = {
-    'EU': 'advertising.amazon.co.uk',
-    'NA': 'advertising.amazon.com',
-    'FE': 'advertising.amazon.com.au',
+    'EU': 'advertising-api-eu.amazon.com',     # UK, DE, FR, ES, IT, NL, SE, PL, TR, AE
+    'NA': 'advertising-api.amazon.com',        # US, CA, MX, BR
+    'FE': 'advertising-api-fe.amazon.com',     # JP, AU, SG
 }
 
 # Set via /ami/spapi/advertising/profiles discovery
@@ -45,11 +103,12 @@ ADS_PROFILE_IDS: dict[str, str] = {
 
 
 def _ads_headers(region: Region, profile_id: str | None = None) -> dict[str, str]:
-    token = get_access_token(region)
+    token = get_ads_access_token(region)
     pid = profile_id or ADS_PROFILE_IDS.get(region, '')
+    client_id = os.getenv('AMAZON_ADS_CLIENT_ID', '') or SPAPI_CLIENT_ID
     headers = {
         'Authorization': f'Bearer {token}',
-        'Amazon-Advertising-API-ClientId': CLIENT_ID,
+        'Amazon-Advertising-API-ClientId': client_id,
         'Content-Type': 'application/json',
     }
     if pid:
