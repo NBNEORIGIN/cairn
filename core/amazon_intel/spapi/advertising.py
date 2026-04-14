@@ -157,26 +157,34 @@ def get_advertising_profiles(region: Region = 'EU') -> list[dict]:
 def request_sponsored_products_report(region: Region, profile_id: str,
                                        days: int = 30) -> str:
     """
-    Request a Sponsored Products search term report (Ads API v3).
+    Request a Sponsored Products Advertised Product report (Ads API v3).
     Returns reportId.
+
+    Why spAdvertisedProduct (grouped by advertiser) and not spSearchTerm:
+    the Quartile brief + margin engine need per-ASIN/SKU spend and
+    ad-attributed sales. spSearchTerm is grouped by keyword/query —
+    it can't report advertisedAsin / advertisedSku at all (those
+    columns are rejected with a 400 on that report type). spAdvertisedProduct
+    is exactly per (campaign, adGroup, ASIN/SKU) which is what we want.
     """
     host = ADS_REGION_HOSTS[region]
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=days)
 
     body = {
-        'name': f'SP Search Term Report {start.strftime("%Y-%m-%d")} to {end.strftime("%Y-%m-%d")}',
+        'name': f'SP Advertised Product Report {start.strftime("%Y-%m-%d")} to {end.strftime("%Y-%m-%d")}',
         'startDate': start.strftime('%Y-%m-%d'),
         'endDate': end.strftime('%Y-%m-%d'),
         'configuration': {
             'adProduct': 'SPONSORED_PRODUCTS',
-            'groupBy': ['searchTerm'],
+            'groupBy': ['advertiser'],
             'columns': [
-                'campaignName', 'adGroupName', 'targetingExpression', 'matchType',
-                'query', 'impressions', 'clicks', 'cost', 'purchases7d',
-                'sales7d', 'advertisedAsin', 'advertisedSku',
+                'campaignName', 'adGroupName',
+                'advertisedAsin', 'advertisedSku',
+                'impressions', 'clicks', 'cost',
+                'purchases7d', 'sales7d', 'unitsSoldClicks7d',
             ],
-            'reportTypeId': 'spSearchTerm',
+            'reportTypeId': 'spAdvertisedProduct',
             'timeUnit': 'SUMMARY',
             'format': 'GZIP_JSON',
         },
@@ -259,7 +267,7 @@ def _parse_ads_rows(raw_rows: list[dict]) -> list[dict]:
             roas = None
 
         rows.append({
-            'report_type': 'sp_search_term',
+            'report_type': 'sp_advertised_product',
             'campaign_name': (r.get('campaignName') or '')[:500],
             'ad_group_name': (r.get('adGroupName') or '')[:500],
             'asin': (r.get('advertisedAsin') or '')[:20] or None,
