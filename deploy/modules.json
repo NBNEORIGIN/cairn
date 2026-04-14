@@ -19,7 +19,7 @@
     },
     {
       "name": "render",
-      "snapshot_url": "http://127.0.0.1:8025/api/cairn/context",
+      "snapshot_url": "http://app-app-1:5000/api/cairn/context",
       "auth_header_env": "CAIRN_API_KEY",
       "interval_minutes": 15,
       "enabled": true,
@@ -27,7 +27,7 @@
     },
     {
       "name": "phloe",
-      "snapshot_url": "http://127.0.0.1:8000/api/cairn/context/",
+      "snapshot_url": "http://nbne-backend-1:8000/api/cairn/context/",
       "auth_header_env": "CAIRN_API_KEY",
       "interval_minutes": 15,
       "enabled": true,
