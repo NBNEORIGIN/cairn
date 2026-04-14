@@ -36,6 +36,14 @@ MIN_SPEND_FOR_RECOMMENDATION = 1.0   # < £1 / $1 spend: exclude, nothing to say
 MIN_UNITS_FOR_INCREASE = 20          # need >20 units in window to suggest scaling
 LOW_VOLUME_FLAG_UNITS = 10           # units < 10: flag recommendation as low-confidence
 ORGANIC_DEPENDENCY_THRESHOLD = 0.7   # organic_rate > 0.7 → flag as organic-dependent
+# At very high organic rates the derived recommended ACOS explodes
+# (max_tacos / (1 − 0.97) = 600%), which is mathematically correct but
+# practically meaningless — the product ranks organically and scaling
+# ads has no headroom to move the organic share. Cap the recommended
+# ACOS at a realistic ceiling so the brief doesn't trigger INCREASE
+# on products that are already saturating their own demand.
+MAX_RECOMMENDED_ACOS = 1.0           # never tell Quartile to aim above 100% ACOS
+ORGANIC_SATURATION_THRESHOLD = 0.90  # organic_rate above this → never INCREASE
 
 
 Action = str  # "REDUCE" | "INCREASE" | "PAUSE" | "HOLD"
@@ -136,7 +144,15 @@ def classify_sku(
     # Compute recommended ACOS when we have the ingredients.
     recommended_acos: Optional[float] = None
     if organic_rate is not None and organic_rate < 1.0:
-        recommended_acos = max_tacos / (1.0 - organic_rate)
+        raw = max_tacos / (1.0 - organic_rate)
+        # Cap — never tell Quartile to aim above 100% ACOS, no matter how
+        # high the derived theoretical ceiling climbs.
+        recommended_acos = min(raw, MAX_RECOMMENDED_ACOS)
+        if raw > MAX_RECOMMENDED_ACOS:
+            caveats.append(
+                f"theoretical ACOS ceiling is {raw:.0%} (organic dominated); "
+                f"recommendation capped at {MAX_RECOMMENDED_ACOS:.0%}"
+            )
     elif organic_rate is None:
         # No total-revenue data — can't compute TACOS. Fall back to max_tacos
         # as a conservative ACOS target, flag the caveat.
@@ -177,6 +193,7 @@ def classify_sku(
     elif (
         current_acos < recommended_acos * INCREASE_RATIO
         and units >= MIN_UNITS_FOR_INCREASE
+        and (organic_rate is None or organic_rate <= ORGANIC_SATURATION_THRESHOLD)
     ):
         action = "INCREASE"
         reason = (

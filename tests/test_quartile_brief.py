@@ -144,6 +144,37 @@ def test_acos_within_band_holds():
     assert rec.action == "HOLD"
 
 
+# ── Organic-saturation protection (don't recommend scaling on ranking products) ─
+
+
+def test_very_high_organic_rate_does_not_trigger_increase():
+    """Product at 97% organic with low ACOS should NOT be told to scale ads —
+    ads aren't the bottleneck when the product ranks organically. The
+    theoretical recommended ACOS would explode, but the cap + saturation
+    check should hold."""
+    rec = classify_sku(
+        _ad(spend=2.0, ad_sales=20.0),     # ACOS 10%
+        _orders(revenue=800.0, units=50),  # organic_rate = 1 − 20/800 = 0.975
+    )
+    assert rec is not None
+    assert rec.organic_rate is not None and rec.organic_rate >= 0.95
+    assert rec.action != "INCREASE"
+    # Cap applied
+    assert rec.recommended_acos is not None and rec.recommended_acos <= 1.0
+    assert any("theoretical ACOS ceiling" in c for c in rec.caveats)
+
+
+def test_recommended_acos_never_exceeds_100pct():
+    """Regardless of organic rate, the surfaced recommended ACOS is capped."""
+    rec = classify_sku(
+        _ad(spend=1.0, ad_sales=100.0),
+        _orders(revenue=10000.0, units=200),
+    )
+    assert rec is not None
+    assert rec.recommended_acos is not None
+    assert rec.recommended_acos <= 1.0
+
+
 # ── Organic-rate-dependent caveat ─────────────────────────────────────────────
 
 
