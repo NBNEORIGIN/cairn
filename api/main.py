@@ -2729,6 +2729,10 @@ app.include_router(cairn_federation_router)
 from api.routes.counterparty_risk import router as counterparty_risk_router
 app.include_router(counterparty_risk_router)
 
+# Register cross-module delegation routes (cairn_delegate MCP tool backend)
+from api.routes.delegation import router as delegation_router
+app.include_router(delegation_router)
+
 # Best-effort: ensure social_* tables exist on startup. Failure here must
 # not block API startup — the /social/migrate endpoint can repair if needed.
 try:
@@ -2736,3 +2740,10 @@ try:
     _ensure_social_schema()
 except Exception as _social_schema_exc:  # pragma: no cover
     print(f'[Cairn] social schema bootstrap skipped: {_social_schema_exc}')
+
+# Best-effort: ensure cairn_delegation_log table exists on startup.
+try:
+    from core.delegation.log import ensure_table as _ensure_delegation_table
+    _ensure_delegation_table()
+except Exception as _delegation_schema_exc:  # pragma: no cover
+    print(f'[Cairn] delegation log bootstrap skipped: {_delegation_schema_exc}')
