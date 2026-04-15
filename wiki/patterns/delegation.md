@@ -215,11 +215,18 @@ points, verified 2026-04-15:
   any User Content for any of its internal AI or other training purposes."
   Content auto-deletes within 30 days unless flagged. A Zero Data Retention
   option exists. xAI MAY create and use de-identified aggregates for
-  product development — a carve-out worth naming.
-  **Verification pending — Toby to confirm exact wording. xAI's legal pages
-  are Cloudflare-gated against automated fetches; the current quotation is
-  sourced via WebSearch (2026-04-15), not direct WebFetch. The URL is the
-  authoritative reference for humans.**
+  product development — a carve-out worth naming. Verified against the
+  live ToS 2026-04-15 via WebSearch (page remains Cloudflare-gated to
+  direct fetches); the quoted sentence continues "(such as training its
+  machine learning models), including developing new products or services
+  based on User Content," and the 30-day auto-deletion clause is mirrored
+  under "User Content is automatically deleted within 30 days, unless
+  (a) xAI is legally required to retain it, or (b) it is flagged for
+  safety, compliance, or moderation issues." De-identified aggregate
+  carve-out is the Section on de-identified data: "xAI may create and use
+  de-identified data related to Customer's use of the Services to improve
+  xAI's products and services, to develop new products and services, and
+  for its other business purposes."
 - **Anthropic (via OpenRouter)**: Anthropic's API policy generally
   excludes API traffic from training. Haiku via OpenRouter inherits this
   through OpenRouter's provider-deferred posture.
