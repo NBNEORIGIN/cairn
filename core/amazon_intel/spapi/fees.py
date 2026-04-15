@@ -242,12 +242,14 @@ def sync_fees_for_marketplace(marketplace: str, lookback_days: int = 30) -> dict
 
     for i in range(0, len(price_points), BATCH_SIZE):
         batch = price_points[i:i + BATCH_SIZE]
-        body = {
-            'FeesEstimateByIdRequestList': [
-                _build_fees_request(marketplace_id, currency, asin, price)
-                for asin, price in batch
-            ],
-        }
+        # getMyFeesEstimates takes a bare JSON array as the body — no wrapper
+        # object. Confirmed by probing the live endpoint; wrapping in
+        # FeesEstimateByIdRequestList returned "Missing PriceToEstimateFees"
+        # while the top-level array returned 200 with per-ASIN results.
+        body = [
+            _build_fees_request(marketplace_id, currency, asin, price)
+            for asin, price in batch
+        ]
         try:
             resp = spapi_post(region, '/products/fees/v0/feesEstimate', body)
         except RateLimitError:
@@ -265,7 +267,13 @@ def sync_fees_for_marketplace(marketplace: str, lookback_days: int = 30) -> dict
             logger.exception("fees sync %s: batch failed", marketplace)
             continue
 
-        results = (resp or {}).get('FeesEstimateResultList') or []
+        # Response mirrors the request: bare JSON array of FeesEstimateResult.
+        # (Some SP-API doc versions show it wrapped in FeesEstimateResultList —
+        # accept both defensively.)
+        if isinstance(resp, list):
+            results = resp
+        else:
+            results = (resp or {}).get('FeesEstimateResultList') or []
         # Match results back to the ASINs we sent. Amazon echoes the Identifier
         # as `FeesEstimateIdentifier.SellerInputIdentifier` (or similar).
         # We trust the ordering Amazon returns matches request ordering.
