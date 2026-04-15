@@ -64,6 +64,7 @@ class SkuAdAggregate:
     ad_orders: int
     impressions: int
     clicks: int
+    m_number: Optional[str] = None
 
 
 @dataclass
@@ -83,6 +84,7 @@ class Recommendation:
     country_code: str
     action: Action
     reason: str
+    m_number: Optional[str] = None
     caveats: list[str] = field(default_factory=list)
     # Current-state snapshot
     spend: float = 0.0
@@ -209,6 +211,7 @@ def classify_sku(
     return Recommendation(
         asin=ad.asin,
         sku=ad.sku,
+        m_number=ad.m_number,
         account_name=ad.account_name,
         country_code=ad.country_code,
         action=action,
@@ -261,6 +264,9 @@ def fetch_ad_aggregates(
     ami_advertising_profiles so we carry account_name + country_code."""
     from core.amazon_intel.db import get_conn
 
+    # LEFT JOIN LATERAL pulls a single m_number per ASIN — ami_sku_mapping can
+    # have multiple rows per ASIN (one per channel SKU), but m_number is
+    # canonical per product, so any row works. MIN is stable and cheap.
     sql = """
         SELECT d.asin,
                MAX(d.sku) AS sku,
@@ -271,7 +277,9 @@ def fetch_ad_aggregates(
                SUM(d.sales_7d) AS ad_sales,
                SUM(d.orders_7d) AS ad_orders,
                SUM(d.impressions) AS impressions,
-               SUM(d.clicks) AS clicks
+               SUM(d.clicks) AS clicks,
+               (SELECT MIN(m.m_number) FROM ami_sku_mapping m
+                 WHERE m.asin = d.asin AND m.m_number IS NOT NULL) AS m_number
           FROM ami_advertising_data d
           LEFT JOIN ami_advertising_profiles p ON p.profile_id = d.profile_id
          WHERE d.asin IS NOT NULL
@@ -302,6 +310,7 @@ def fetch_ad_aggregates(
             ad_orders=int(r[7] or 0),
             impressions=int(r[8] or 0),
             clicks=int(r[9] or 0),
+            m_number=r[10] if len(r) > 10 else None,
         )
         for r in rows
     ]
@@ -515,7 +524,7 @@ def render_brief_csv(brief: dict) -> str:
     writer.writerow([])
 
     writer.writerow([
-        "action", "sku", "asin", "account_name", "country_code",
+        "action", "m_number", "sku", "asin", "account_name", "country_code",
         "spend", "ad_sales", "total_revenue", "units",
         "current_acos", "recommended_acos", "organic_rate",
         "reason", "caveats",
@@ -524,6 +533,7 @@ def render_brief_csv(brief: dict) -> str:
     for r in brief.get("recommendations", []):
         writer.writerow([
             r.get("action", ""),
+            r.get("m_number") or "",
             r.get("sku") or "",
             r.get("asin") or "",
             r.get("account_name") or "",
