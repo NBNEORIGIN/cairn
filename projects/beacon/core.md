@@ -102,9 +102,27 @@ endpoint surfaces `last_success` / `last_failure` per job.
 - **D-004** — google-ads 30.0.0 (v20) — latest stable as of session
 - **D-005** — MCC account 2141262231 confirmed manager; campaigns live on
   sub-account 2028631064
-- **D-006** — (pending Outcome 1) GAQL shape for live metrics + budget
-- **D-007** — (pending Outcome 2) Celery chosen over APScheduler / cron —
-  Phloe precedent, already in requirements
+- **D-006** — `list_campaigns()` uses two GAQL queries merged in Python:
+  (1) `FROM campaign` selecting `campaign_budget.amount_micros` for all
+  campaigns, (2) `FROM campaign WHERE segments.date DURING LAST_7_DAYS`
+  for metrics, aggregated per campaign.id. Single-query with the
+  segments.date filter rejected because it drops zero-activity campaigns
+  from the cache. Verified live against sub-account 2028631064 on
+  2026-04-15 — 4 campaigns cached. Known Phase 2 gap: cache rows scope
+  to the auth account (MCC), not the queried customer_id.
+- **D-007** — Celery + declarative `CELERY_BEAT_SCHEDULE` dict chosen
+  over django-celery-beat DatabaseScheduler, APScheduler, and cron.
+  Celery: Phloe precedent, already in requirements, one scheduler per
+  module is the NBNE convention. Dict over DB-backed scheduler: Phase 1
+  schedules are few and code-reviewable; swap to DatabaseScheduler if
+  operators later need no-deploy schedule edits. MCC filter enforced by
+  pinning `customer_id` in the schedule entry (not via a runtime
+  `is_manager=false` filter in the command) so the non-MCC contract is
+  visible at a glance and the smoke command remains ad-hoc-callable
+  against any customer_id for debugging. Beat+worker live cycle NOT
+  verified in this session — Redis not running in dev; deploy env must
+  run `celery -A config beat` and `celery -A config worker` for one
+  15-min cycle to close the acceptance loop.
 
 ## Out of scope for Phase 1
 
