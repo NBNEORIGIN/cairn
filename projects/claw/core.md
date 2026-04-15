@@ -151,3 +151,9 @@ Tools registered for this project. Risk levels:
 - Fix: continuation now provides tools, executes SAFE follow-ups inline, surfaces REVIEW/DESTRUCTIVE follow-ups for approval
 - Prior fix (b1abfeb) was incomplete — it fed results back but without tools
 - Appended Phloe strategic decisions to projects/phloe/core.md (booking paradigm insight, conversational AI direction)
+
+## Session 2026-04-15 — claw (cairn_delegate Commit 6)
+- D-102: Exposed `/api/delegation/` on cairn.nbnesigns.co.uk via nginx location block on Hetzner (178.104.1.152). Minimum-surface approach (Option 1).
+- Change is on the Hetzner host in `/etc/nginx/sites-enabled/cairn-business.conf`, not in git. Mirrored in repo at `deploy/nginx/cairn-business.conf.snippet` for reviewability and reprovisioning recovery.
+- Rejected: Option 2 (also expose `/ami/*`) — no current cross-module need, principle of minimum public surface. Option 3 (separate `api.` subdomain) — speculative refactor, no current scope justifies.
+- Verified publicly: `POST https://cairn.nbnesigns.co.uk/api/delegation/call` returns 401 without `X-API-Key`, 422 with valid key + empty body. Auth uses `CLAW_API_KEY` (middleware env var) not `CAIRN_API_KEY`.
