@@ -163,6 +163,55 @@ The `delegation_decision` field is required on every memory write-back going
 forward. An empty field is treated the same as the existing empty `rejected`
 field — a red flag indicating the discipline was skipped.
 
+### Rule 1b — Cost discipline through cross-module delegation
+
+Rule 1 governs in-house delegation (Qwen, DeepSeek) inside Cairn's own agent
+loop. Rule 1b governs cross-module delegation via `cairn_delegate` — any CC
+session working in a module (Beacon, Phloe, Render, CRM, Ledger, Cairn itself)
+pushing a discrete piece of work to a cheaper tier via OpenRouter.
+
+Where work is mechanical — CRUD endpoints following an established pattern,
+SQL query builders from a written spec, test scaffolding, structured reviews
+of short diffs, prose extraction, classification against a fixed label set —
+delegate to a junior tier via `cairn_delegate` before self-executing. The
+routing rule is deterministic per `task_type`:
+
+- `task_type="generate"` → `x-ai/grok-4-fast` (~£0.00016 per 1K input,
+  £0.0004 per 1K output).
+- `task_type="review" | "extract" | "classify"` →
+  `anthropic/claude-haiku-4.5` (~£0.0008 per 1K input, £0.004 per 1K output).
+
+Self-execute when any of:
+
+- Architectural decisions are involved (cross-module design, trade-off
+  analysis, invariants across more than two files).
+- Edge-case correctness matters in ways the junior tier will not reliably
+  catch. Per D-103, Grok misses 1–2 stated edge cases per task on first
+  attempt on any spec more complex than boilerplate.
+- The cost of getting it wrong substantially exceeds the cost of
+  self-execution (security, irreversible state, data migrations).
+- The task needs context the junior tier does not have and cannot be given
+  in under ~500 words.
+
+Always review junior-tier output before committing. Delegation cost is
+`junior generation + senior review`, not `junior generation` alone. The
+realistic baseline is Outcome B (accepted with tweaks) as recorded in D-103
+— happy-path code correct, contract details fixed in review under 5 minutes.
+
+Schema design: do NOT pass `output_schema` on `generate` calls. Pass it
+only on `review`, `extract`, `classify` where the output IS structured data,
+and prefer permissive over strict.
+
+Every delegation call logs to `cairn_delegation_log` on the Cairn host.
+Aggregates surface via `GET /api/cairn/context` (Hetzner-loopback only —
+see D-102). Cost data feeds the monthly trend analysis alongside
+`/costs/log`.
+
+See `wiki/patterns/delegation.md` for the full pattern, four concrete
+examples (including an anti-example), sovereignty position, and D-103's
+findings verbatim. See `wiki/decisions/delegation-tier-routing.md` for the
+decision record.
+
 ### Rule 2 — Retrieval defaults reduced
 
 The default `limit` parameter on all retrieval calls is now **5**, not 10.
