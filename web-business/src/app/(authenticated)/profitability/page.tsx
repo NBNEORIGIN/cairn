@@ -219,8 +219,8 @@ export default function ProfitabilityPage() {
     if (scored.length < 10) return null
     const unique = new Set(scored.map(r => r.cogs_per_unit))
     if (unique.size === 1) {
-      const v = [...unique][0]
-      return `All ${scored.length} SKUs show identical COGS (${money(v!, marketplace)}/unit). Blank costs in Manufacture haven’t been populated — profit figures are placeholders until they are.`
+      const v = Array.from(unique)[0]
+      return `All ${scored.length} SKUs show identical COGS (${money(v, marketplace)}/unit). Blank costs in Manufacture haven’t been populated — profit figures are placeholders until they are.`
     }
     return null
   }, [data, marketplace])
