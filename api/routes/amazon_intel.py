@@ -3,10 +3,16 @@ Amazon Listing Intelligence API routes.
 
 Mounted at /ami/* in the Cairn FastAPI app.
 """
-from fastapi import APIRouter, BackgroundTasks, UploadFile, File, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, UploadFile, File, HTTPException, Query, Depends
 from typing import Optional
 
-router = APIRouter(prefix="/ami", tags=["Amazon Intelligence"])
+from api.middleware.auth import verify_api_key
+
+router = APIRouter(
+    prefix="/ami",
+    tags=["Amazon Intelligence"],
+    dependencies=[Depends(verify_api_key)],
+)
 
 
 @router.get("/health")

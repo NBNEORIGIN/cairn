@@ -10,10 +10,16 @@ NEVER query ami_business_report_legacy for revenue. Use ami_orders only.
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/ami/analytics", tags=["Amazon Analytics"])
+from api.middleware.auth import verify_api_key
+
+router = APIRouter(
+    prefix="/ami/analytics",
+    tags=["Amazon Analytics"],
+    dependencies=[Depends(verify_api_key)],
+)
 
 
 # ── Pydantic models ────────────────────────────────────────────────────────────
