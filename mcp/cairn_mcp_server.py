@@ -185,81 +185,6 @@ TOOLS = [
         },
     ),
     types.Tool(
-        name="cairn_delegate",
-        description=(
-            "Delegate a one-shot generation, review, extraction, or "
-            "classification task to a junior tier (Grok 4 Fast or Claude "
-            "Haiku 4.5) via OpenRouter. Use when a task does not require "
-            "Sonnet/Opus-tier judgement. Generation routes to Grok 4 Fast; "
-            "review/extract/classify route to Haiku 4.5. Every call is "
-            "cost-logged to the cairn_delegation_log table. See Rule 1b in "
-            "CLAUDE.md for when to prefer this over self-tier execution."
-        ),
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "task_type": {
-                    "type": "string",
-                    "enum": ["generate", "review", "extract", "classify"],
-                    "description": (
-                        "generate → Grok 4 Fast (code, prose). "
-                        "review/extract/classify → Haiku 4.5 (structured JSON)."
-                    ),
-                },
-                "instructions": {
-                    "type": "string",
-                    "description": "Full prompt for the junior model. Be specific.",
-                },
-                "context": {
-                    "type": "string",
-                    "description": (
-                        "Optional prior context. Sent as a separate user "
-                        "message before instructions — not as system prompt."
-                    ),
-                },
-                "output_schema": {
-                    "type": "object",
-                    "description": (
-                        "Optional JSON schema. If set, the response is parsed "
-                        "and validated; schema_valid:false with raw response "
-                        "is returned on failure (no auto-retry)."
-                    ),
-                },
-                "max_tokens": {
-                    "type": "integer",
-                    "description": "Max output tokens. Default 4000.",
-                    "default": 4000,
-                },
-                "tier_override": {
-                    "type": "string",
-                    "enum": ["grok_fast", "haiku"],
-                    "description": (
-                        "Optional. Force a specific tier regardless of "
-                        "task_type. Use sparingly — routing rule exists "
-                        "for a reason."
-                    ),
-                },
-                "delegating_session": {
-                    "type": "string",
-                    "description": (
-                        "module + section, e.g. 'beacon:amazon_listings' "
-                        "or 'crm:shipment_ingest'. Used for per-module "
-                        "spend attribution in the context endpoint."
-                    ),
-                },
-                "rationale": {
-                    "type": "string",
-                    "description": (
-                        "One sentence: why this is being delegated instead "
-                        "of executed by the caller. Surfaces weak "
-                        "delegation choices in the log."
-                    ),
-                },
-            },
-            "required": ["task_type", "instructions", "delegating_session", "rationale"],
-        },
-    ),
-    types.Tool(
         name="log_cost",
         description=(
             "Log the cost of every model used in this prompt. Required after "
@@ -373,17 +298,6 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
 
             elif name == "log_cost":
                 r = await client.post(f"{CAIRN_BASE_URL}/costs/log", json=arguments)
-                return [types.TextContent(type="text", text=r.text)]
-
-            elif name == "cairn_delegate":
-                # Longer timeout: OpenRouter generation can legitimately take >30s
-                # under load, and the client-side 30s cap is applied by the
-                # delegation endpoint itself.
-                r = await client.post(
-                    f"{CAIRN_BASE_URL}/api/delegation/call",
-                    json=arguments,
-                    timeout=60.0,
-                )
                 return [types.TextContent(type="text", text=r.text)]
 
             else:
