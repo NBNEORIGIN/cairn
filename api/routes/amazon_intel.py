@@ -338,13 +338,17 @@ async def spapi_advertising_profiles_db(
 async def margin_quartile_brief_preview(
     marketplace: Optional[str] = Query(None,
         description="Country code (UK/US/CA/DE/FR/ES/IT/NL/SE/PL/TR/AU/MX). Omit for all."),
-    lookback_days: int = Query(30, ge=1, le=90),
+    lookback_days: int = Query(30, ge=1, le=180),
     target_margin_pct: float = Query(0.06, ge=0.0, le=0.5,
         description="Account-level target margin as decimal (e.g. 0.06 = 6%)."),
     non_ad_cost_pct: float = Query(0.82, ge=0.0, le=1.0,
         description="Assumed fraction of selling price covering non-ad costs (COGS + Amazon fees + target margin)."),
     format: str = Query("json",
         description="'json' (default), 'text' (email-ready plain text), or 'csv'."),
+    new_product_m_threshold: Optional[int] = Query(None, ge=1,
+        description="M-number at or above which a SKU is treated as a new product "
+                    "and forced to HOLD (with caveat). Gives launches time to "
+                    "establish before Quartile acts. Raise this every few months."),
 ):
     """
     Phase 0 Quartile ACOS brief (preview — does not send anything).
@@ -362,6 +366,7 @@ async def margin_quartile_brief_preview(
         lookback_days=lookback_days,
         target_margin_pct=target_margin_pct,
         non_ad_cost_pct=non_ad_cost_pct,
+        new_product_m_threshold=new_product_m_threshold,
     )
     fmt = (format or "json").lower()
     if fmt == "text":
@@ -371,6 +376,47 @@ async def margin_quartile_brief_preview(
         from fastapi.responses import PlainTextResponse
         return PlainTextResponse(render_brief_csv(brief), media_type="text/csv")
     return brief
+
+
+@router.get("/margin/opportunities")
+async def margin_opportunities(
+    marketplace: Optional[str] = Query(None,
+        description="Country code (UK/US/CA/DE/FR/ES/IT/NL/SE/PL/TR/AU/MX). Omit for all."),
+    lookback_days: int = Query(30, ge=1, le=180),
+    target_margin_pct: float = Query(0.06, ge=0.0, le=0.5),
+    non_ad_cost_pct: float = Query(0.82, ge=0.0, le=1.0),
+    limit: int = Query(20, ge=1, le=100,
+        description="Top N opportunities to return (ranked by opportunity_score)."),
+    include_listing_analysis: bool = Query(True,
+        description="If true, run LLM listing-quality assessment on top high-ACOS rows."),
+    analysis_limit: int = Query(8, ge=0, le=25,
+        description="Max number of rows to run listing analysis for."),
+    new_product_m_threshold: Optional[int] = Query(None, ge=1,
+        description="M-number at or above which a SKU is excluded from the "
+                    "opportunity ranking (new products need establishment time)."),
+):
+    """
+    SKU prioritisation + listing-quality correlation.
+
+    Ranks SKUs by composite opportunity score ((waste + scale) × log10(1+revenue))
+    built on top of the Quartile Brief. For the top high-ACOS REDUCE/PAUSE rows,
+    cross-references ami_listing_content via Claude to assess whether listing
+    quality issues plausibly explain the ad-efficiency problem.
+
+    Returns the top `limit` opportunities with `opportunity_score`,
+    `score_components`, and (when triggered) `listing_analysis`.
+    """
+    from core.amazon_intel.margin.opportunities import build_opportunities_brief
+    return await build_opportunities_brief(
+        marketplace=marketplace,
+        lookback_days=lookback_days,
+        target_margin_pct=target_margin_pct,
+        non_ad_cost_pct=non_ad_cost_pct,
+        limit=limit,
+        include_listing_analysis=include_listing_analysis,
+        analysis_limit=analysis_limit,
+        new_product_m_threshold=new_product_m_threshold,
+    )
 
 
 # ── Advertising profiles seed ─────────────────────────────────────────────────

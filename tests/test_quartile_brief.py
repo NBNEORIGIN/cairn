@@ -14,7 +14,10 @@ from core.amazon_intel.margin.quartile_brief import (
     DEFAULT_NON_AD_COST_PCT,
     MIN_SPEND_FOR_RECOMMENDATION,
     LOW_VOLUME_FLAG_UNITS,
+    NEW_PRODUCT_CAVEAT_PREFIX,
     ORGANIC_DEPENDENCY_THRESHOLD,
+    _apply_new_product_override,
+    _parse_m_number,
 )
 
 
@@ -293,4 +296,88 @@ def test_render_brief_text_includes_all_sections():
     assert "SKU-UK-02" in text
     assert "SKU-UK-03" in text
 
+
+# ── New-product M-number override ────────────────────────────────────────────
+
+
+def test_parse_m_number_handles_formats():
+    assert _parse_m_number("M0001") == 1
+    assert _parse_m_number("M1234") == 1234
+    assert _parse_m_number("m0500") == 500
+    assert _parse_m_number("1000") == 1000       # missing M prefix, still parses
+    assert _parse_m_number("M2059") == 2059
+
+
+def test_parse_m_number_returns_none_on_junk():
+    assert _parse_m_number(None) is None
+    assert _parse_m_number("") is None
+    assert _parse_m_number("Mabc") is None
+    assert _parse_m_number("nonsense") is None
+
+
+def test_new_product_override_forces_hold():
+    """A SKU at or above threshold should be overridden to HOLD regardless
+    of original classification, with a new-product caveat prepended."""
+    rec = classify_sku(_ad(spend=200.0, ad_sales=50.0), _orders())  # ACOS 400% — would PAUSE
+    assert rec is not None
+    assert rec.action == "PAUSE"
+    rec = rec.__class__(**{**rec.__dict__, "m_number": "M1234"})
+    overridden = _apply_new_product_override(rec, threshold=1000)
+    assert overridden.action == "HOLD"
+    assert any(c.startswith(NEW_PRODUCT_CAVEAT_PREFIX) for c in overridden.caveats)
+    # Raw signal preserved in reason for audit
+    assert "PAUSE" in overridden.reason
+    # Metrics preserved — we didn't want to mutate the numbers
+    assert overridden.spend == rec.spend
+    assert overridden.current_acos == rec.current_acos
+
+
+def test_new_product_override_skips_established_products():
+    rec = classify_sku(_ad(spend=200.0, ad_sales=50.0), _orders())
+    assert rec is not None
+    rec = rec.__class__(**{**rec.__dict__, "m_number": "M0500"})
+    overridden = _apply_new_product_override(rec, threshold=1000)
+    # Below threshold → no change
+    assert overridden.action == rec.action
+    assert overridden.caveats == rec.caveats
+
+
+def test_new_product_override_skips_unparseable_m_number():
+    """A missing or malformed M-number must not trigger the override —
+    otherwise a data-quality issue would silently mute real signals."""
+    rec = classify_sku(_ad(spend=200.0, ad_sales=50.0), _orders())
+    assert rec is not None
+    rec = rec.__class__(**{**rec.__dict__, "m_number": None})
+    overridden = _apply_new_product_override(rec, threshold=1000)
+    assert overridden.action == rec.action
+    assert overridden is rec or overridden.action == rec.action
+
+
+def test_classify_all_applies_threshold():
+    """Threading the threshold through classify_all should tag only the
+    new SKUs, leaving established ones classified normally."""
+    ads = [
+        SkuAdAggregate(
+            asin="B0NEW", sku="SKU-NEW", profile_id="P1",
+            country_code="UK", account_name="Origin Trading",
+            spend=200.0, ad_sales=50.0, ad_orders=2,
+            impressions=1000, clicks=50, m_number="M1500",
+        ),
+        SkuAdAggregate(
+            asin="B0OLD", sku="SKU-OLD", profile_id="P1",
+            country_code="UK", account_name="Origin Trading",
+            spend=200.0, ad_sales=50.0, ad_orders=2,
+            impressions=1000, clicks=50, m_number="M0100",
+        ),
+    ]
+    orders = [
+        SkuOrdersAggregate(asin="B0NEW", marketplace="UK", units=10, revenue=100.0),
+        SkuOrdersAggregate(asin="B0OLD", marketplace="UK", units=50, revenue=500.0),
+    ]
+    recs = classify_all(ads, orders, new_product_m_threshold=1000)
+    by_asin = {r.asin: r for r in recs}
+    assert by_asin["B0NEW"].action == "HOLD"
+    assert any(c.startswith(NEW_PRODUCT_CAVEAT_PREFIX) for c in by_asin["B0NEW"].caveats)
+    # Established SKU still classified as PAUSE (ACOS 400%)
+    assert by_asin["B0OLD"].action == "PAUSE"
 

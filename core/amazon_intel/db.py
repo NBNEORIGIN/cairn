@@ -552,6 +552,24 @@ def migrate_ami_schema():
         # profile per region and rows couldn't be disambiguated.
         "ALTER TABLE ami_advertising_data ADD COLUMN profile_id VARCHAR(40)",
         "CREATE INDEX IF NOT EXISTS ami_ad_profile_idx ON ami_advertising_data(profile_id)",
+        # Daily-segmented ads reports. Before this column existed, each sync
+        # pulled a 30-day aggregate and INSERTed it fresh — with 4×/day cron,
+        # 30-day lookback SUM inflated spend/sales by ~120×. Going forward,
+        # sync_advertising requests timeUnit=DAILY and stores one row per
+        # (profile, date, campaign, ad_group, asin, sku). The partial unique
+        # index covers only rows with a report_date, so legacy rows remain
+        # stored (for audit) but the brief's new query path excludes them.
+        "ALTER TABLE ami_advertising_data ADD COLUMN report_date DATE",
+        # Key columns coalesced to empty-string on insert so NULL handling
+        # doesn't defeat the unique check. Partial index keeps legacy rows
+        # (report_date IS NULL) out of the dedup scope.
+        """CREATE UNIQUE INDEX IF NOT EXISTS ami_ad_daily_dedup_idx
+               ON ami_advertising_data (
+                   profile_id, report_date, asin, sku,
+                   campaign_name, ad_group_name
+               )
+               WHERE report_date IS NOT NULL""",
+        "CREATE INDEX IF NOT EXISTS ami_ad_report_date_idx ON ami_advertising_data(report_date)",
     ]
     with get_conn() as conn:
         with conn.cursor() as cur:

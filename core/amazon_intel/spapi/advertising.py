@@ -179,13 +179,21 @@ def request_sponsored_products_report(region: Region, profile_id: str,
             'adProduct': 'SPONSORED_PRODUCTS',
             'groupBy': ['advertiser'],
             'columns': [
+                # 'date' is required when timeUnit=DAILY — Amazon returns one
+                # row per (date, campaign, ad_group, asin, sku). That's what
+                # makes the per-day UPSERT idempotent and what lets us read
+                # multi-month ACOS history for slow-converting new products.
+                'date',
                 'campaignName', 'adGroupName',
                 'advertisedAsin', 'advertisedSku',
                 'impressions', 'clicks', 'cost',
                 'purchases7d', 'sales7d', 'unitsSoldClicks7d',
             ],
             'reportTypeId': 'spAdvertisedProduct',
-            'timeUnit': 'SUMMARY',
+            # DAILY — one row per day per advertised product. Previously
+            # SUMMARY, which made every 30-day sync return a single aggregate
+            # row per ASIN and double-counted on repeated pulls.
+            'timeUnit': 'DAILY',
             'format': 'GZIP_JSON',
         },
     }
@@ -266,12 +274,24 @@ def _parse_ads_rows(raw_rows: list[dict]) -> list[dict]:
         except (TypeError, ValueError, ZeroDivisionError):
             roas = None
 
+        # timeUnit=DAILY returns one row per day with a 'date' field. If
+        # Amazon omits it (e.g. an older SUMMARY report flowing through this
+        # parser by mistake), leave report_date as None — the UPSERT path
+        # treats those rows as non-dedupable and the new brief query
+        # excludes them, so they can't contaminate per-day aggregates.
+        report_date = r.get('date') or None
+
         rows.append({
             'report_type': 'sp_advertised_product',
+            'report_date': report_date,
+            # Coalesce key columns to empty strings rather than None so the
+            # unique dedup index catches repeat rows. ASIN/SKU in particular
+            # were NULLable before; a NULL key would defeat the ON CONFLICT
+            # match in Postgres (NULLs are distinct by default).
             'campaign_name': (r.get('campaignName') or '')[:500],
             'ad_group_name': (r.get('adGroupName') or '')[:500],
-            'asin': (r.get('advertisedAsin') or '')[:20] or None,
-            'sku': (r.get('advertisedSku') or '')[:100] or None,
+            'asin': ((r.get('advertisedAsin') or '')[:20]) or '',
+            'sku': ((r.get('advertisedSku') or '')[:100]) or '',
             'targeting': (r.get('targetingExpression') or '')[:500],
             'match_type': (r.get('matchType') or '')[:30],
             'customer_search_term': (r.get('query') or '')[:500],
@@ -323,15 +343,37 @@ def sync_advertising(region: Region = 'EU', profile_id: str | None = None,
         with conn.cursor() as cur:
             for row in rows:
                 try:
+                    # UPSERT on ami_ad_daily_dedup_idx. Re-syncing the same
+                    # (profile, date, campaign, ad_group, asin, sku) tuple
+                    # overwrites metrics rather than duplicating — which is
+                    # what makes 4×/day cron safe now.
                     cur.execute(
                         """INSERT INTO ami_advertising_data
-                               (upload_id, report_type, campaign_name, ad_group_name,
+                               (upload_id, report_type, report_date,
+                                campaign_name, ad_group_name,
                                 asin, sku, targeting, match_type,
                                 customer_search_term, impressions, clicks,
                                 spend, sales_7d, orders_7d, acos, roas, profile_id)
-                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                        (upload_id, row['report_type'], row['campaign_name'],
-                         row['ad_group_name'], row['asin'], row['sku'],
+                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                           ON CONFLICT (profile_id, report_date, asin, sku,
+                                        campaign_name, ad_group_name)
+                           WHERE report_date IS NOT NULL
+                           DO UPDATE SET
+                               upload_id = EXCLUDED.upload_id,
+                               impressions = EXCLUDED.impressions,
+                               clicks = EXCLUDED.clicks,
+                               spend = EXCLUDED.spend,
+                               sales_7d = EXCLUDED.sales_7d,
+                               orders_7d = EXCLUDED.orders_7d,
+                               acos = EXCLUDED.acos,
+                               roas = EXCLUDED.roas,
+                               targeting = EXCLUDED.targeting,
+                               match_type = EXCLUDED.match_type,
+                               customer_search_term = EXCLUDED.customer_search_term,
+                               created_at = NOW()""",
+                        (upload_id, row['report_type'], row.get('report_date'),
+                         row['campaign_name'], row['ad_group_name'],
+                         row['asin'], row['sku'],
                          row['targeting'], row['match_type'],
                          row['customer_search_term'], row['impressions'],
                          row['clicks'], row['spend'], row['sales_7d'],

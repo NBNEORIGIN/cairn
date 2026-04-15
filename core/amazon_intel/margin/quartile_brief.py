@@ -47,6 +47,15 @@ ORGANIC_DEPENDENCY_THRESHOLD = 0.7   # organic_rate > 0.7 → flag as organic-de
 MAX_RECOMMENDED_ACOS = 1.0           # never tell Quartile to aim above 100% ACOS
 ORGANIC_SATURATION_THRESHOLD = 0.90  # organic_rate above this → never INCREASE
 
+# New products need a lead-in window before Quartile acts on their ACOS —
+# historical conversion rate is ~10% (render-app economics make this fine)
+# but the successful 10% take months to establish. Any m_number at or above
+# the configured threshold is forced to HOLD with a caveat so Quartile does
+# not prematurely PAUSE/REDUCE something that simply has not had time to
+# prove itself. The threshold is passed per-call (not baked in) because it
+# drifts upward over time as older M-numbers mature.
+NEW_PRODUCT_CAVEAT_PREFIX = "new-product"
+
 
 Action = str  # "REDUCE" | "INCREASE" | "PAUSE" | "HOLD"
 
@@ -228,14 +237,77 @@ def classify_sku(
     )
 
 
+def _parse_m_number(m_number: Optional[str]) -> Optional[int]:
+    """Parse the integer portion of an M-number string. 'M0001' → 1, 'M1234' → 1234.
+    Returns None on anything that doesn't match the expected shape, so a
+    malformed or missing M-number never trips the new-product override."""
+    if not m_number:
+        return None
+    s = m_number.strip().upper()
+    if s.startswith("M"):
+        s = s[1:]
+    try:
+        return int(s)
+    except ValueError:
+        return None
+
+
+def _apply_new_product_override(
+    rec: Recommendation, threshold: int,
+) -> Recommendation:
+    """If the SKU's M-number is at or above the threshold, force the
+    action to HOLD with a new-product caveat. Raw ACOS signal is preserved
+    in the reason so the operator can audit why the row was screened.
+
+    M-number is the canonical creation-sequence reference at NBNE, so
+    M-number ≥ threshold is the cleanest proxy for "hasn't had time to
+    establish". The threshold drifts upward — expect to raise it every
+    few months as older M-numbers mature.
+    """
+    m_int = _parse_m_number(rec.m_number)
+    if m_int is None or m_int < threshold:
+        return rec
+    caveat = (
+        f"{NEW_PRODUCT_CAVEAT_PREFIX} (M{m_int:04d} ≥ M{threshold:04d}) — "
+        f"give 3–6 months to establish before Quartile adjusts"
+    )
+    return Recommendation(
+        asin=rec.asin,
+        sku=rec.sku,
+        m_number=rec.m_number,
+        account_name=rec.account_name,
+        country_code=rec.country_code,
+        action="HOLD",
+        reason=(
+            f"New product held for establishment window — raw signal was "
+            f"{rec.action}: {rec.reason}"
+        ),
+        caveats=[caveat] + list(rec.caveats),
+        spend=rec.spend,
+        ad_sales=rec.ad_sales,
+        total_revenue=rec.total_revenue,
+        units=rec.units,
+        current_acos=rec.current_acos,
+        current_tacos=rec.current_tacos,
+        organic_rate=rec.organic_rate,
+        recommended_acos=rec.recommended_acos,
+    )
+
+
 def classify_all(
     ad_rows: Iterable[SkuAdAggregate],
     orders_rows: Iterable[SkuOrdersAggregate],
     *,
     target_margin_pct: float = DEFAULT_TARGET_MARGIN_PCT,
     non_ad_cost_pct: float = DEFAULT_NON_AD_COST_PCT,
+    new_product_m_threshold: Optional[int] = None,
 ) -> list[Recommendation]:
-    """Run classify_sku over every ad aggregate, joining by (asin, marketplace=country_code)."""
+    """Run classify_sku over every ad aggregate, joining by (asin, marketplace=country_code).
+
+    When new_product_m_threshold is provided, any SKU whose M-number parses
+    to an integer ≥ threshold is overridden to HOLD with a caveat. The raw
+    classification is preserved in the override's reason string for audit.
+    """
     orders_by_key: dict[tuple[str, str], SkuOrdersAggregate] = {
         (o.asin, o.marketplace): o for o in orders_rows
     }
@@ -248,8 +320,11 @@ def classify_all(
             target_margin_pct=target_margin_pct,
             non_ad_cost_pct=non_ad_cost_pct,
         )
-        if rec is not None:
-            out.append(rec)
+        if rec is None:
+            continue
+        if new_product_m_threshold is not None:
+            rec = _apply_new_product_override(rec, new_product_m_threshold)
+        out.append(rec)
     return out
 
 
@@ -267,6 +342,13 @@ def fetch_ad_aggregates(
     # LEFT JOIN LATERAL pulls a single m_number per ASIN — ami_sku_mapping can
     # have multiple rows per ASIN (one per channel SKU), but m_number is
     # canonical per product, so any row works. MIN is stable and cheap.
+    #
+    # The WHERE clause intentionally requires report_date IS NOT NULL: legacy
+    # pre-dedup rows (SUMMARY-mode aggregates, 4×/day duplicated) have
+    # report_date NULL and reading them would inflate spend/sales. The
+    # daily-segmented sync writes report_date on every row; after one cron
+    # cycle post-deploy, the brief reads clean data. Legacy rows stay on disk
+    # for audit but are excluded from the brief.
     sql = """
         SELECT d.asin,
                MAX(d.sku) AS sku,
@@ -282,8 +364,9 @@ def fetch_ad_aggregates(
                  WHERE m.asin = d.asin AND m.m_number IS NOT NULL) AS m_number
           FROM ami_advertising_data d
           LEFT JOIN ami_advertising_profiles p ON p.profile_id = d.profile_id
-         WHERE d.asin IS NOT NULL
-           AND d.created_at >= NOW() - make_interval(days => %(days)s)
+         WHERE d.asin IS NOT NULL AND d.asin <> ''
+           AND d.report_date IS NOT NULL
+           AND d.report_date >= CURRENT_DATE - make_interval(days => %(days)s)
     """
     params: dict[str, Any] = {"days": lookback_days}
     if marketplace:
@@ -382,6 +465,7 @@ def generate_brief(
     lookback_days: int = DEFAULT_LOOKBACK_DAYS,
     target_margin_pct: float = DEFAULT_TARGET_MARGIN_PCT,
     non_ad_cost_pct: float = DEFAULT_NON_AD_COST_PCT,
+    new_product_m_threshold: Optional[int] = None,
 ) -> dict:
     """End-to-end: query DB, classify, return structured brief."""
     ad_rows = fetch_ad_aggregates(marketplace=marketplace, lookback_days=lookback_days)
@@ -391,6 +475,7 @@ def generate_brief(
         ad_rows, order_rows,
         target_margin_pct=target_margin_pct,
         non_ad_cost_pct=non_ad_cost_pct,
+        new_product_m_threshold=new_product_m_threshold,
     )
 
     # Sort: PAUSE first (most urgent), then REDUCE, then INCREASE, then HOLD.
@@ -425,6 +510,7 @@ def generate_brief(
             "target_margin_pct": target_margin_pct,
             "non_ad_cost_pct": non_ad_cost_pct,
             "max_tacos": round(max(0.0, 1.0 - non_ad_cost_pct), 4),
+            "new_product_m_threshold": new_product_m_threshold,
         },
         "summary": {
             "total_skus_with_spend": len(recs),
