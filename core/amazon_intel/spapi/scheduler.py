@@ -20,6 +20,15 @@ from .client import Region, REGION_MARKETPLACE_CODE
 logger = logging.getLogger(__name__)
 
 MIN_INTERVAL_HOURS = 6
+# Per-sync-type minimum interval. Advertising is the expensive outlier:
+# DAILY-mode reports on the Ads API can take 5–20 min per profile of
+# server-side generation, and EU alone has ~15 profiles. Running 4×/day
+# (6h guard) just queues reports faster than Amazon generates them and
+# wastes the quota. Once per day is sufficient — UPSERT on the dedup
+# index means the daily run safely re-covers the last 30 days.
+MIN_INTERVAL_HOURS_BY_TYPE: dict[str, int] = {
+    'advertising': 24,
+}
 ACTIVE_REGIONS: list[Region] = ['EU', 'NA', 'FE']  # All three regions auth-verified 2026-04-13
 
 
@@ -81,7 +90,9 @@ def _run_logged(sync_type: str, region: str, fn: Callable, **kwargs):
 
 
 def _is_due(sync_type: str, region: str) -> bool:
-    """Return True if this sync type+region hasn't run in MIN_INTERVAL_HOURS."""
+    """Return True if this sync type+region hasn't run in its configured
+    minimum interval. Type-specific overrides live in
+    MIN_INTERVAL_HOURS_BY_TYPE; the fallback is MIN_INTERVAL_HOURS."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -99,7 +110,8 @@ def _is_due(sync_type: str, region: str) -> bool:
     if last.tzinfo is None:
         last = last.replace(tzinfo=timezone.utc)
     hours_since = (datetime.now(timezone.utc) - last).total_seconds() / 3600
-    return hours_since >= MIN_INTERVAL_HOURS
+    threshold = MIN_INTERVAL_HOURS_BY_TYPE.get(sync_type, MIN_INTERVAL_HOURS)
+    return hours_since >= threshold
 
 
 def sync_region(region: Region, force: bool = False) -> dict:

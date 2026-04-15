@@ -218,8 +218,15 @@ def request_sponsored_products_report(region: Region, profile_id: str,
 
 
 def wait_for_ads_report(region: Region, profile_id: str, report_id: str,
-                        max_wait: int = 1800, poll_interval: int = 30) -> str:
-    """Poll Ads API until report is SUCCESS. Returns download URL."""
+                        max_wait: int = 3600, poll_interval: int = 30) -> str:
+    """Poll Ads API until report is SUCCESS. Returns download URL.
+
+    Default max_wait is 60 minutes — bumped from 30 min when we moved to
+    timeUnit=DAILY. DAILY reports are materially slower to generate on
+    Amazon's side (5–20 min per profile is typical, occasional outliers
+    longer) because each date-slice is a distinct row in the response.
+    30 min was enough for SUMMARY; it under-runs DAILY on the long tail
+    and drops reports that would otherwise have completed."""
     host = ADS_REGION_HOSTS[region]
     # GET /reporting/reports/{id} also wants the vendored Accept type.
     headers = _ads_headers(region, profile_id)
