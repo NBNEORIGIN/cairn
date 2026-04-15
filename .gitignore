@@ -31,3 +31,9 @@ scripts/nssm.exe
 wiki/_meta/last_sync.json
 *_CC_PROMPT.md
 *_CC_PROMPT*.md
+
+# Auto-generated TypeScript incremental build cache
+web/tsconfig.tsbuildinfo
+
+# Windows shortcut files — local-only conveniences
+*.lnk
