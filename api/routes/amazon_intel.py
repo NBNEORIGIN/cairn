@@ -859,6 +859,98 @@ async def list_notification_events(
     return {'count': len(rows), 'events': rows}
 
 
+# ── Margin engine: fees + per-SKU margin ─────────────────────────────────────
+
+
+@router.post("/spapi/sync/fees")
+async def spapi_sync_fees(
+    background_tasks: BackgroundTasks,
+    marketplace: Optional[str] = Query(None, description="UK|DE|FR|... or omit for all"),
+    lookback_days: int = Query(30, ge=1, le=180),
+):
+    """
+    Refresh ami_fee_snapshots via SP-API feesEstimate for every ASIN with
+    orders in the last `lookback_days`. Defaults to all supported marketplaces.
+    """
+    from core.amazon_intel.spapi.fees import sync_fees_all, sync_fees_for_marketplace
+
+    if marketplace:
+        background_tasks.add_task(sync_fees_for_marketplace, marketplace, lookback_days)
+        return {'status': 'started', 'type': 'fees', 'marketplace': marketplace,
+                'lookback_days': lookback_days}
+    background_tasks.add_task(sync_fees_all)
+    return {'status': 'started', 'type': 'fees', 'marketplace': 'ALL'}
+
+
+@router.get("/fees/snapshots")
+async def list_fee_snapshots(
+    marketplace: Optional[str] = Query(None),
+    asin: Optional[str] = Query(None),
+    limit: int = Query(200, le=2000),
+):
+    """Read fee snapshots. Optional filter by marketplace or ASIN."""
+    from core.amazon_intel.db import get_conn
+    sql = """
+        SELECT asin, marketplace, region, price_point_amount, price_point_currency,
+               referral_fee, fba_fee, variable_closing_fee, other_fees, total_fees,
+               api_status, api_error, estimated_at
+          FROM ami_fee_snapshots
+         WHERE 1=1
+    """
+    params: list = []
+    if marketplace:
+        sql += " AND marketplace = %s"
+        params.append(marketplace.upper())
+    if asin:
+        sql += " AND asin = %s"
+        params.append(asin)
+    sql += " ORDER BY estimated_at DESC LIMIT %s"
+    params.append(limit)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    return {'count': len(rows), 'results': rows}
+
+
+@router.get("/margin/per-sku")
+async def margin_per_sku(
+    marketplace: str = Query(..., description="UK|DE|FR|US|..."),
+    lookback_days: int = Query(30, ge=1, le=180),
+    min_units: int = Query(0, ge=0),
+):
+    """
+    Compute margin per SKU for a marketplace. Joins orders + fee snapshots +
+    Manufacture costs + ad spend. Returns one row per ASIN.
+    """
+    from core.amazon_intel.margin.per_sku import compute_margins, margin_to_dict, bucket_margins
+    margins = await compute_margins(marketplace, lookback_days=lookback_days)
+    if min_units:
+        margins = [m for m in margins if m.units >= min_units]
+    return {
+        'marketplace': marketplace.upper(),
+        'lookback_days': lookback_days,
+        'summary': bucket_margins(margins),
+        'results': [margin_to_dict(m) for m in margins],
+    }
+
+
+@router.get("/margin/buckets")
+async def margin_buckets(
+    marketplace: str = Query(...),
+    lookback_days: int = Query(30, ge=1, le=180),
+):
+    """Summary-only version of /margin/per-sku — cheap to poll from the UI."""
+    from core.amazon_intel.margin.per_sku import compute_margins, bucket_margins
+    margins = await compute_margins(marketplace, lookback_days=lookback_days)
+    return {
+        'marketplace': marketplace.upper(),
+        'lookback_days': lookback_days,
+        'summary': bucket_margins(margins),
+    }
+
+
 @router.post("/notifications/processor")
 async def run_notification_processor_endpoint(
     background_tasks: BackgroundTasks,

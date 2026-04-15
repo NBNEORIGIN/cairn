@@ -477,6 +477,33 @@ CREATE TABLE IF NOT EXISTS ami_notification_events (
 CREATE INDEX IF NOT EXISTS ami_ne_type_idx ON ami_notification_events (notification_type, received_at DESC);
 CREATE INDEX IF NOT EXISTS ami_ne_asin_idx ON ami_notification_events (asin);
 CREATE INDEX IF NOT EXISTS ami_ne_unprocessed_idx ON ami_notification_events (processed) WHERE processed = FALSE;
+
+-- ── Margin engine: SP-API feesEstimate snapshots ──────────────────────────────
+-- One row per (asin, marketplace). Refreshed by sync_fees job via
+-- POST /products/fees/v0/feesEstimate. Price point is the median
+-- item_price_amount from ami_orders over the last 30 days (gross, inc. VAT)
+-- — Amazon's fee calc takes the listed price, so using actual sale price is
+-- a faithful estimate. For ASINs with no recent orders, no row is written.
+CREATE TABLE IF NOT EXISTS ami_fee_snapshots (
+    id                      SERIAL PRIMARY KEY,
+    asin                    VARCHAR(20)     NOT NULL,
+    marketplace             VARCHAR(10)     NOT NULL,  -- UK | DE | FR | IT | ES | NL | US | CA | AU ...
+    region                  VARCHAR(5)      NOT NULL,  -- EU | NA | FE
+    price_point_amount      NUMERIC(12,2)   NOT NULL,
+    price_point_currency    VARCHAR(5)      NOT NULL,
+    referral_fee            NUMERIC(10,2),
+    fba_fee                 NUMERIC(10,2),             -- FBAFees / FulfillmentFees family
+    variable_closing_fee    NUMERIC(10,2),
+    other_fees              NUMERIC(10,2),             -- catch-all for anything not above
+    total_fees              NUMERIC(10,2),
+    fee_detail              JSONB,                     -- raw FeeDetailList for audit
+    api_status              VARCHAR(20),               -- 'Success' | 'ClientError' | 'ServiceError'
+    api_error               TEXT,
+    estimated_at            TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+    CONSTRAINT ami_fee_snapshots_unique UNIQUE (asin, marketplace)
+);
+CREATE INDEX IF NOT EXISTS ami_fee_snapshots_asin_idx ON ami_fee_snapshots (asin);
+CREATE INDEX IF NOT EXISTS ami_fee_snapshots_mp_idx ON ami_fee_snapshots (marketplace, estimated_at DESC);
 """
 
 
