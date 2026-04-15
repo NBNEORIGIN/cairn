@@ -396,9 +396,72 @@ the hardware is ready.
 
 ---
 
+## Self-Improvement Loop (Karpathy Pattern)
+
+WIGGUM's autonomous loop follows the auto-research pattern: make a change,
+measure, keep on improvement, revert on regression, repeat until interrupted
+or a target score is reached.
+
+### Loop contract
+
+1. Read the target artefact (skill.md, prompt, module handler, etc.).
+2. Read the associated `evals/<target>.json` assertion file.
+3. Run the eval harness. Record pass/fail per assertion and aggregate score.
+4. If score < target: propose one minimal change to the target artefact.
+5. Re-run the eval harness.
+6. If new score > previous: `git commit` with message `wiggum: +N/M (<change summary>)`.
+   If new score <= previous: `git reset --hard HEAD` and try a different change.
+7. Goto 3.
+
+### Autonomy directive
+
+Once the loop has begun, WIGGUM does not pause to ask whether to continue.
+Termination conditions are explicit and only these:
+
+- Perfect score on the eval set for two consecutive iterations.
+- No score improvement for N consecutive iterations (default N=10).
+- Token budget exhausted (see Cost Governance below).
+- Manual interrupt (SIGINT or `wiggum stop`).
+
+### Cost Governance
+
+Loops default to the local model tier appropriate to the current
+`CAIRN_HARDWARE_PROFILE` (see CLAUDE.md for the routing matrix):
+
+- On `dev_desktop`: Qwen 2.5 Coder 7B or DeepSeek-Coder-V2 16B locally.
+  Slow. Suitable for overnight runs on small eval sets only.
+- On `dual_3090`: Qwen 2.5 72B (or Coder 32B) locally. Overnight runs
+  against full eval sets become viable.
+
+Claude API escalation is permitted only when:
+
+- The target artefact is flagged `tier: claude` in its frontmatter, AND
+- A per-run token cap is declared in the invocation, AND
+- The run is logged to the cost log with cost attribution.
+
+Overnight unattended loops against Claude API are forbidden without an
+explicit cap. The default cap is 500k output tokens per target per night.
+On `dev_desktop` the cap is tighter (100k) — local compute constraints
+mean loops are slower, and a bad rubric wastes more money before it's
+caught.
+
+### Change discipline
+
+Every iteration must be a clean atomic commit. WIGGUM may not:
+
+- Run database migrations during a loop.
+- Modify files outside the target artefact's directory.
+- Touch seeded test state.
+- Cross module boundaries (see CAIRN_MODULES.md).
+
+If a proposed change would violate these, WIGGUM logs it as out-of-scope and
+tries a different change.
+
+---
+
 ## Hardware Context
 
-**Current**: RTX 1050 8GB. Local model: qwen2.5-coder:7b. Keep `CLAW_FORCE_API=true`.
+**Current**: RTX 3050 8GB. Local models: qwen2.5-coder:7b (coding), gemma4-nbne (general reasoning/PA, via Ollama). Set `CLAW_FORCE_API=false` for general tasks.
 
 **RTX 3090 arriving imminently** — pull immediately on arrival:
 ```

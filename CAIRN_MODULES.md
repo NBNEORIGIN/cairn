@@ -31,6 +31,65 @@ the combined picture.
 
 ---
 
+## Module Evals
+
+Every module ships with an `evals/` directory containing at minimum one
+`contract.json` file. The contract evals exist to make the module's API
+boundary automatically enforceable rather than only documented — this
+is the mechanism that turns the Architecture Principle above into an
+enforced invariant rather than a written one.
+
+### Contract eval structure
+
+```json
+{
+  "module": "beacon",
+  "version": "0.1",
+  "tests": [
+    {
+      "id": "contract-001",
+      "prompt": "Return current Google Ads spend for tenant X",
+      "assertions": [
+        "response is valid JSON",
+        "response contains only fields declared in module API schema",
+        "no direct database query appears in module trace",
+        "no cross-module import appears in call stack",
+        "response time < 2000ms"
+      ]
+    }
+  ]
+}
+```
+
+### Assertion categories
+
+Contract evals cover the structural rules this protocol already mandates:
+
+- **Isolation**: no direct DB access outside the module's own schema.
+- **Boundary**: no imports from sibling modules.
+- **Schema**: responses conform to the declared API schema.
+- **Determinism**: identical input produces identical output (for pure handlers).
+- **Locale**: responses respect tenant locale config (see locale-awareness work).
+
+### Human-reviewed before loop
+
+Assertions are authored or reviewed by a human before WIGGUM is permitted
+to loop against them. Auto-generated assertions are flagged
+`reviewed: false` in the eval file and WIGGUM refuses to run improvement
+loops against unreviewed sets. This prevents optimising for a bad rubric
+overnight. WIGGUM loop contract is defined in CAIRN_PROTOCOL.md.
+
+### Tiered evals
+
+- `contract.json` — structural. Run on every commit. Fast. Binary.
+- `behaviour.json` — domain-correct outputs. Run nightly via WIGGUM.
+- `quality.json` — qualitative. Not automated. Reviewed manually.
+
+WIGGUM self-improvement loops operate only on tiers 1 and 2. Tier 3
+remains human-judged.
+
+---
+
 ## The Business Value Chain
 
 **Make → Measure → Sell**
@@ -411,16 +470,67 @@ Payback period                         = £800 / (X - Y) months
 This calculation updates automatically as the cost log grows.
 It feeds the business brain's hardware investment recommendations.
 
-### The Two 8GB Cards
+See the **Hardware Configuration** section below for the current and
+target hardware profiles that feed this calculation.
 
-Currently installed: 2x 8GB Nvidia cards (confirm exact models with Toby).
-Consumer-class Nvidia cards do not support NVLink — they cannot tensor-split
-a single model across both cards. They run as separate devices.
+---
 
-Practical options:
-- Card 1: Qwen junior model (current setup)
-- Card 2: Dedicated embeddings (nomic-embed-text, mxbai-embed-large)
-  This frees the primary card's VRAM for a slightly larger coding model.
+## Hardware Configuration
 
-Cost log will confirm whether this configuration saves meaningfully vs
-the current single-card + API setup. Let the data decide.
+CLAW reads `CAIRN_HARDWARE_PROFILE` from environment to determine routing
+behaviour. The routing matrix itself lives in CLAUDE.md under Task Breadth
+Classifier. This section describes the hardware states it resolves against.
+
+### Profile: `dev_desktop` (current)
+
+**Installed**: RTX 3050 8GB. Second PCIe slot available.
+
+**Local models** (via Ollama):
+- `gemma4:e4b` — general reasoning, conversational, PA-style queries.
+  Spills ~68% to CPU/RAM at current allocation. Still quick on short
+  responses because CPU inference is the bottleneck rather than GPU.
+- `qwen2.5-coder:7b` — code generation. Fits fully in VRAM. The only
+  local model that runs 100% on GPU on this profile.
+- `deepseek-coder-v2:16b` — harder code reasoning. Heavy CPU spill;
+  reserve for tasks where quality matters more than latency.
+- `nomic-embed-text` — embeddings for pgvector hybrid retrieval.
+
+**Constraint**: models cannot be loaded simultaneously at full
+performance — Ollama swaps them. If VRAM pressure becomes acute,
+dedicate the card to one model and route remaining work to API.
+
+### Profile: `dual_3090` (target — parts on order)
+
+**Planned**: 2× RTX 3090, 48GB VRAM total. Consumer Nvidia cards do
+not support NVLink — the cards run as separate devices and cannot
+tensor-split a single model. Plan workloads per card, not across them.
+
+**Planned allocation**:
+- Card 1: Qwen 2.5 72B (or Coder 32B at Q4) for principal local reasoning.
+- Card 2: Gemma 4 resident + embeddings models + headroom for
+  ComfyUI/FLUX/Wan2.1 workloads feeding Render and Studio.
+
+On arrival, pull:
+```
+ollama pull qwen2.5-coder:32b
+ollama pull deepseek-coder-v2:16b
+ollama pull mxbai-embed-large
+```
+
+Then set `CAIRN_HARDWARE_PROFILE=dual_3090`. Expected monthly API cost
+drop is material (see Cost Tracking Module above); let the cost log
+confirm actual saving against projection.
+
+### Why profile matters
+
+The same task routes differently depending on which profile is active:
+
+- On `dev_desktop`, escalation to Claude happens sooner — Toby's
+  wall-clock time is more expensive than Claude tokens when local
+  compute is slow.
+- On `dual_3090`, local compute is fast enough that decomposed
+  multi-domain work stays local, and Claude is reserved for tight
+  coupling or long coherence only.
+
+Both routing tables are in CLAUDE.md. This section is just the
+hardware description those tables resolve against.

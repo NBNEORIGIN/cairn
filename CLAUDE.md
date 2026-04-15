@@ -63,6 +63,8 @@ Classify the task before starting work:
 | Medium | Multi-file, bug diagnosis, moderate feature, known pattern | DeepSeek API |
 | High | Architecture, cross-project, new pattern, significant risk | Claude (yourself) |
 | Critical | Irreversible, security, data migration, payment flow | Opus + Toby confirmation |
+| Local general | Business prose, context summarisation, PA queries, non-code reasoning | gemma4-nbne (Ollama) |
+| Local coding  | Boilerplate, scaffolding, mechanical edits, code search | Qwen (Ollama) |
 
 **When delegating to Qwen or DeepSeek**, always include:
 1. The exact task in one paragraph
@@ -110,19 +112,6 @@ Review (your sign-off before committing):
 
 Do not accept free-form prose from Qwen or DeepSeek in place of these formats.
 If a junior model returns prose where a diff was required, reject it and re-prompt.
-
----
-
-# CLAUDE.md — Cost Discipline Addendum
-# To be inserted into the existing CLAUDE.md
-# Date: 7 April 2026
-# Purpose: Reduce monthly Anthropic spend by tightening existing protocol discipline
-
----
-
-## Where this goes
-
-Insert this section into `CLAUDE.md` directly after the existing **STEP 2 — Classify and delegate** section, before STEP 3. It builds on the delegation hierarchy already in place — it does not replace it.
 
 ---
 
@@ -358,6 +347,7 @@ Only include models actually used in this prompt. Qwen is always £0.00 (local).
 | claude-sonnet-4-6 | ~£0.24 | ~£1.20 |
 | claude-opus-4-6 | ~£1.20 | ~£6.00 |
 | gpt-4o (fallback) | ~£1.60 | ~£4.80 |
+| gemma4-nbne (local) | £0.00 | £0.00 |
 
 Rates are approximate and in GBP at current exchange. Update this table if
 rates change materially. The log is for trend analysis, not invoice-level precision.
@@ -471,6 +461,140 @@ Base URL: http://localhost:8765
 
 MCP tools (once server is running): retrieve_codebase_context, retrieve_chat_history,
 update_memory, list_projects, get_project_status — see CAIRN_MCP_SPEC.md
+
+---
+
+## Task Breadth Classifier and Decomposition Executor
+
+CLAW classifies every incoming task along two axes before dispatching to a
+model tier: **domain count** and **coupling**.
+
+### Axis 1: Domain count
+
+A "domain" is a category of knowledge the task draws on. Typical domains:
+
+- conversational / natural language
+- code generation (single language, single file)
+- stateful simulation or algorithmic logic
+- rendering or output formatting (ANSI, HTML, terminal, etc.)
+- schema / data modelling
+- API contract / integration
+- business logic specific to an NBNE or Phloe module
+
+CLAW counts distinct domains in the task. Single-domain tasks are the
+common case. Multi-domain tasks are the MoE trap.
+
+### Axis 2: Coupling
+
+- **Decoupled**: steps can be verified independently (build scaffold, verify;
+  add rendering, verify; add logic, verify).
+- **Tightly coupled**: steps cannot be verified in isolation because
+  correctness only emerges from their interaction.
+
+### Hardware profile
+
+CLAW reads `CAIRN_HARDWARE_PROFILE` from environment. Supported values:
+
+- `dev_desktop`: single RTX 3050 8GB. Currently installed. Gemma 4
+  (`gemma4:e4b`) and Qwen 2.5 Coder 7B run non-concurrently via Ollama
+  model swap. Gemma spills ~68% to CPU/RAM; Qwen Coder fits fully in
+  VRAM. DeepSeek-Coder-V2 16B available locally for harder code
+  reasoning, expect heavy CPU spill.
+
+- `dual_3090`: 48GB VRAM total. Target configuration (parts on order).
+  Consumer Nvidia cards do not support NVLink — cards run as separate
+  devices, no tensor-split across a single model. Planned allocation:
+  Qwen 2.5 72B (or Coder 32B) on card 1, Gemma 4 + embeddings on card 2.
+
+### Routing matrix
+
+The matrix resolves differently per profile:
+
+| Breadth / Coupling         | dev_desktop            | dual_3090            |
+|----------------------------|------------------------|----------------------|
+| Single, conversational     | Gemma 4                | Gemma 4              |
+| Single, technical (small)  | Qwen Coder 7B local    | Qwen 72B             |
+| Single, technical (large)  | Claude                 | Qwen 72B             |
+| Multi-domain, decoupled    | Qwen local, decomposed | Qwen 72B, decomposed |
+| Multi-domain, tight        | Claude                 | Claude               |
+| Long-coherence             | Claude                 | Claude               |
+
+On `dev_desktop` the threshold for escalating to Claude is deliberately
+lower. Local compute is scarce; Claude tokens are the cheaper resource
+relative to Toby's wall-clock time. This inverts on `dual_3090`, where
+the matrix is also consistent with the Cost Discipline rules above —
+the cheaper tier handles more work once local capability is real.
+
+Gemma 4's dense-parallel FFN makes it robust on short conversational work
+where a larger MoE's routing overhead is wasted. Qwen's depth earns its
+place on technical work, but only when the task is either narrow or
+decomposable.
+
+### Classification prompt
+
+CLAW runs a preliminary classification call against Gemma 4 (cheap, fast)
+before dispatching the real task. The classifier prompt:
+
+```
+Classify the following task.
+
+1. List the distinct knowledge domains it requires (pick from:
+   conversational, single-file code, stateful simulation, rendering,
+   schema, API contract, module business logic).
+2. For each pair of domains, state whether correctness in one can be
+   verified independently of the other (decoupled) or not (tight).
+3. Estimate whether the task requires long-range coherence across
+   many turns or files (yes/no).
+
+Respond with JSON only, no prose:
+{
+  "domains": [...],
+  "coupling": "decoupled" | "tight" | "n/a",
+  "long_coherence": true | false,
+  "recommended_tier": "gemma" | "qwen-local" | "qwen-decomposed" | "claude"
+}
+
+Task:
+<the task text>
+```
+
+If the classifier returns `qwen-decomposed`, CLAW invokes the decomposition
+executor. If the classifier itself returns malformed JSON twice, fall back
+to Qwen for classification and accept the latency.
+
+### Decomposition executor
+
+For multi-domain decoupled tasks:
+
+1. Ask Qwen to produce an ordered list of verifiable sub-steps. Each
+   sub-step must be single-domain.
+2. For each sub-step in order:
+   - Issue the sub-step as a fresh prompt with only the minimal prior
+     context needed — not the full running transcript. This avoids KV
+     cache contamination from any earlier ambiguity.
+   - Execute or verify the output.
+   - On success: `git commit` with message `claw: step N/M <summary>`.
+   - On failure: reset to the last good commit. Retry with a tighter,
+     narrower restatement. After 3 failed retries on the same sub-step,
+     escalate the remaining work to Claude.
+3. When all sub-steps pass, run the full module eval (contract.json,
+   behaviour.json) against the assembled result per CAIRN_MODULES.md.
+
+### Prohibitions
+
+- CLAW does not issue cold one-shot multi-domain prompts to Qwen.
+- CLAW does not carry forward a failed Qwen attempt's output as context
+  for the retry. Reset the context, narrow the prompt.
+- CLAW does not use Gemma 4 for stateful code generation or anything
+  requiring algorithmic correctness. Its strength is conversational
+  latency, not reasoning depth.
+
+### Logging
+
+Every classification decision is logged to the cost log with: task
+summary, classifier output, tier chosen, outcome, token spend. This is
+the data that tells us months from now whether the matrix above is
+actually right or whether it needs revision.
 
 ---
 
