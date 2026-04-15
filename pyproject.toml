@@ -46,3 +46,6 @@ target-version = "py311"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "integration: hits real external services (OpenRouter etc.); run manually with `-m integration`",
+]
