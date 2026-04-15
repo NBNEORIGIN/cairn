@@ -2,100 +2,100 @@
 
 ## Summary
 
-This article covers the GitGuardian security alert system integrated with NBNE's Cairn knowledge base. GitGuardian monitors internal repositories for exposed secrets, credentials, and sensitive data. When an incident is detected in the NBNEORIGIN/cairn system, operators receive automated email notifications requiring immediate triage and remediation. Understanding these alerts and responding appropriately is critical for maintaining operational security.
+GitGuardian has detected an internal security incident within the NBNEORIGIN/cairn repository. This alert indicates that sensitive credentials, secrets, or security tokens may have been exposed in code commits. As a Cairn operator, immediate action is required to assess the exposure, rotate compromised credentials, and implement remediation steps to prevent similar incidents.
 
-## Alert Anatomy
+## Incident Response Steps
 
-GitGuardian alerts for NBNEORIGIN/cairn follow a standardized format:
+### 1. Access the Alert Details
 
-1. **Subject Line**: Always begins with "NBNEORIGIN/cairn - [number] internal incident detected"
-2. **Email Body**: Contains HTML-formatted incident details with embedded styling
-3. **Incident Count**: Indicates how many distinct secrets or vulnerabilities were found
-4. **Repository Context**: Links to specific commits or files where exposure occurred
+Navigate to your GitGuardian dashboard to review the full incident details. The email notification contains limited information due to HTML rendering - you'll need to access the complete alert through the GitGuardian interface to identify:
 
-## Incident Response Procedure
+- The specific file(s) containing exposed secrets
+- The commit hash where the exposure occurred
+- The type of secret detected (API key, token, password, certificate, etc.)
+- The repository branch affected
 
-### 1. Initial Assessment (0-15 minutes)
+### 2. Assess the Severity
 
-- **DO NOT** ignore these alerts - they indicate potential security compromises
-- Log into the GitGuardian dashboard immediately to view full incident details
-- Identify the type of secret exposed (API key, token, password, certificate, etc.)
-- Determine the scope: Which repository, branch, and commit contains the exposure?
+Determine the impact level of the exposed credential:
 
-### 2. Validate the Finding (15-30 minutes)
+- **Critical**: Production API keys, database credentials, signing certificates
+- **High**: Development/staging credentials with production access
+- **Medium**: Service tokens with limited scope
+- **Low**: Test credentials or already-expired tokens
 
-Not all detections are true positives. Check for:
+### 3. Immediate Containment
 
-- **Test credentials**: Development or example keys that aren't production secrets
-- **False positives**: Strings matching secret patterns but aren't actual credentials
-- **Already rotated secrets**: Keys that have been previously invalidated
+**⚠️ WARNING**: Do not simply delete the file or revert the commit. Git history retains all changes, meaning the secret remains accessible.
 
-If confirmed as a false positive, mark it as resolved in GitGuardian with appropriate justification.
+Take these actions immediately:
 
-### 3. Immediate Containment (30-60 minutes)
+1. **Rotate the exposed credential** - Generate a new secret and update all services using it
+2. **Revoke the compromised credential** - Invalidate the old secret in the service provider's console
+3. **Audit access logs** - Check if the exposed credential was accessed or used maliciously
+4. **Document the timeline** - Note when the secret was committed and when it was rotated
 
-For validated incidents:
+### 4. Remove Secret from Git History
 
-1. **Revoke the exposed credential immediately** through the relevant service portal
-2. Generate a replacement credential with appropriate access controls
-3. Update the credential in secure storage (Vault, Secrets Manager, etc.)
-4. Never commit the new credential to the repository
+Use one of these approaches to permanently remove the secret:
 
-### 4. Remediation (1-4 hours)
+**Option A: BFG Repo-Cleaner (Recommended)**
+```bash
+bfg --replace-text passwords.txt NBNEORIGIN/cairn.git
+cd NBNEORIGIN/cairn.git
+git reflog expire --expire=now --all
+git gc --prune=now --aggressive
+```
 
-- Remove the secret from repository history using `git filter-branch` or BFG Repo-Cleaner
-- Update all services and applications using the revoked credential
-- Verify no downstream services are broken by the rotation
-- Document the incident in the security log with ticket reference
+**Option B: git filter-branch**
+```bash
+git filter-branch --force --index-filter \
+  "git rm --cached --ignore-unmatch PATH/TO/FILE" \
+  --prune-empty --tag-name-filter cat -- --all
+```
 
-### 5. Post-Incident Actions
+**⚠️ CRITICAL**: Coordinate with all team members before rewriting history. Force-pushing will affect anyone with local clones of the repository.
 
-- Review access logs for the compromised credential to detect potential unauthorized use
-- Assess whether additional credentials need rotation as a precaution
-- Update documentation to prevent similar exposures
-- Mark the incident as resolved in GitGuardian only after complete remediation
+### 5. Implement Prevention Measures
+
+Add protection layers to prevent future incidents:
+
+- **Pre-commit hooks**: Install GitGuardian's ggshield or similar tools locally
+  ```bash
+  pip install ggshield
+  ggshield install -m local
+  ```
+- **Environment variables**: Store all secrets in environment variables or secret management systems
+- **Secret scanning CI/CD**: Add GitGuardian scanning to your CI pipeline
+- **.gitignore updates**: Ensure all credential files are excluded from version control
+
+### 6. Team Communication
+
+Once containment is complete:
+
+1. Notify the security team of the incident and resolution
+2. Brief all repository contributors on what happened
+3. Update team documentation on secret management practices
+4. Schedule a post-incident review if the exposure was critical
 
 ## Common Pitfalls
 
-⚠️ **WARNING: Repository History Persistence**
-Simply deleting a secret from the current commit does NOT remove it from Git history. The exposed credential remains accessible in previous commits and must be purged using proper tools.
+- **Deleting commits without rotating credentials**: The secret remains valid and exploitable
+- **Only rotating in one environment**: Ensure all environments (dev, staging, prod) are updated
+- **Ignoring the alert**: Automated scanners may have already detected and harvested the secret
+- **Not checking forked repositories**: Public forks may contain the exposed secret even after cleanup
 
-⚠️ **WARNING: Public Fork Exposure**
-If NBNEORIGIN/cairn has been forked, exposed secrets may exist in external repositories. Check for forks and contact repository owners if necessary.
+## Post-Incident Actions
 
-⚠️ **WARNING: Cached Artifacts**
-CI/CD pipelines, Docker images, and build artifacts may contain the exposed secret. These must be rebuilt after rotation.
-
-## Prevention Best Practices
-
-1. **Use environment variables** for all secrets - never hardcode in source
-2. **Enable pre-commit hooks** with GitGuardian client-side scanning
-3. **Implement secrets management** through HashiCorp Vault or AWS Secrets Manager
-4. **Regular secret rotation** on a defined schedule (30, 60, or 90 days)
-5. **Team training** on secure credential handling
-
-## Email Rendering Issues
-
-The GitGuardian alert emails contain extensive inline CSS and HTML formatting. If your email client displays raw HTML or CSS code (as shown in the truncated example), this doesn't affect the alert's validity:
-
-- Use the GitGuardian web dashboard for full incident details
-- Configure your email client to render HTML properly
-- Consider setting up Slack or PagerDuty integrations for cleaner notifications
-
-## Escalation Criteria
-
-Escalate immediately to the security team if:
-
-- The exposed secret is a production database credential
-- The secret has been public for more than 24 hours
-- Access logs show suspicious activity using the credential
-- The incident involves customer data or PII
-- You're unable to revoke/rotate the credential within 1 hour
+- Mark the incident as resolved in GitGuardian once all steps are complete
+- Update your secrets inventory to track which credentials were affected
+- Review and update access controls for the compromised service
+- Consider implementing HashiCorp Vault or AWS Secrets Manager for centralized secret management
 
 ## Related Topics
 
-- **Cairn Security Architecture**: Overview of security controls in the Cairn system
-- **Secret Rotation Procedures**: Detailed playbooks for rotating various credential types
-- **Git History Rewriting**: Technical guide to removing sensitive data from repositories
-- **Incident Response Playbook**: General security incident handling procedures
-- **GitGuardian Dashboard Access**: How to request and configure GitGuardian access
+- **Cairn Secret Management Best Practices** - Standard procedures for handling credentials in Cairn deployments
+- **GitGuardian Dashboard Guide** - Detailed walkthrough of alert management and configuration
+- **NBNE Security Incident Response Protocol** - Escalation procedures for security events
+- **Pre-commit Hook Configuration** - Setting up local secret scanning for all NBNE repositories
+- **Git History Rewriting Guide** - Advanced techniques for removing sensitive data from repositories

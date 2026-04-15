@@ -1,103 +1,125 @@
 # Signage and Menus
 
-This article covers the process for ordering outdoor signage and printed menus for NBNE sites. It documents a typical signage order including roadside A-frames with QR codes, flags, boundary markers, fence-mounted signs, and A5 menus on card stock. Use this as a reference when clients request similar materials or when planning site signage installations.
+This article covers the standard signage package and menu ordering process for NBNE venues. Based on a typical client brief, this outlines the common signage requirements for roadside visibility, on-site wayfinding, boundary marking, and customer-facing printed materials. Use this as a template when quoting for similar venue setups.
 
-## Signage Requirements
+## Summary
 
-### Roadside A-Frame Signs
+A comprehensive signage order typically includes roadside A-frame signs with directional arrows and QR codes, branded flags for visibility, specialty signage for lane entrances and boundaries, fence-mounted tall signs, and printed menus on card stock. This article breaks down each component, specifications to confirm with clients, and common pitfalls to avoid during the ordering process.
 
-**Quantity:** Typically 3 units per site
+## Signage Components
 
-**Purpose:** Directional wayfinding from public roads
+### 1. Roadside A-Frame Signs
 
-**Key specifications:**
-- Must include directional arrows
-- QR codes for digital engagement (menu access, booking links, or information)
-- Weather-resistant materials suitable for roadside placement
-- Stable base to withstand wind and passing traffic
+**Quantity:** 3 units (standard for multi-approach venues)
 
-**⚠️ Warning:** Verify local authority requirements for roadside signage placement. Some councils require permits for A-frames positioned near public highways. Check visibility triangles and ensure signs don't create traffic hazards.
+**Specifications to confirm:**
+- Directional arrow orientation (left/right/straight)
+- QR code destination URL
+- Material preference (typically weather-resistant correx or metal)
+- Branding/color scheme
+- Size (standard is 600mm x 800mm but verify based on road positioning regulations)
 
-### Flags
+**Key considerations:**
+- Ensure QR codes are tested and functional before print
+- Check local authority requirements for roadside signage placement
+- Consider separate artwork for each sign if arrows differ
 
-**Quantity:** Standard order of 4 units
+### 2. Flags
 
-**Considerations:**
-- Confirm flag size and mounting method (ground spike, wall bracket, or freestanding base)
-- Verify artwork is provided in vector format for best print quality
-- Consider wind loading for the site location
-- Order spare pole sections or mounting hardware
+**Quantity:** 4 units
 
-### Specialty Site Signs
+**Specifications to confirm:**
+- Flag type (feather, teardrop, or rectangular)
+- Height (typically 2.5m, 3m, or 4m)
+- Single or double-sided printing
+- Base type (ground spike for grass, water base for hard surfaces)
+- Design artwork orientation
 
-The following categories cover various positioning needs:
+⚠️ **Warning:** Always confirm base type based on installation surface. Ground spikes are unsuitable for tarmac/concrete and water bases are unstable on soft ground in high winds.
 
-**1. Lane entrance sign**
-- Described as "road sign style" – typically rigid board with professional finish
-- Mounted at the bottom of access lanes
-- Should match highway sign aesthetics for clear wayfinding
+### 3. Lane Entrance Sign ("Road Sign" Style)
 
-**2. Boundary line marker**
-- Single unit to define property limits or designated areas
-- May require ground mounting or post installation
+**Quantity:** 1 unit
 
-**3. Walk fence tall signs**
-- Quantity: 2 units
-- Mounted at height on fencing along walking routes
-- Ensure mounting hardware is suitable for existing fence type
+**Specifications to confirm:**
+- Mounting method (post-mounted or wall-mounted)
+- Reflective material requirement (if used in low-light conditions)
+- Size and visibility distance
+- Regulatory compliance if resembling official road signage
+
+⚠️ **Warning:** Signs resembling official highway signage must not use prohibited colors/shapes (e.g., red triangles, blue circles). Verify local regulations.
+
+### 4. Boundary Line Sign
+
+**Quantity:** 1 unit
+
+**Specifications to confirm:**
+- Purpose (property boundary marker, safety demarcation, customer instruction)
+- Material durability (especially if boundary is in exposed location)
+- Mounting height and method
+- Visibility requirements from different approaches
+
+### 5. Walk Fence Tall Signs
+
+**Quantity:** 2 units
+
+**Specifications to confirm:**
+- Height above fence line
+- Fixing method (cable ties, brackets, posts)
+- Material (must withstand outdoor exposure)
+- Visibility from customer walking routes
+- Design orientation (portrait typically works best for tall formats)
 
 ## Menu Ordering
 
 ### Standard Specifications
 
-**Size:** A5 (148mm × 210mm)
-- Confirm this is correct for the intended use case
-- A5 is half the size of A4 and suitable for table menus or takeaway displays
+**Size:** A5 (148mm x 210mm)
+- Confirm this is correct size - A5 is indeed half of A4
+- Consider A6 if counter space is limited
 
-**Material:** Card stock
-- Specify "thin card" or similar weight (typically 250-350gsm)
-- Avoid standard paper (80gsm) – insufficient durability for hospitality use
-- Consider lamination or coating for wipe-clean surface in food service environments
+**Material:** Thin card stock (typically 250-350gsm)
+- 250gsm: Budget-friendly, adequate for indoor use
+- 300gsm: Better durability, resists handling wear
+- 350gsm: Premium feel, longest lifespan
 
-**⚠️ Common pitfall:** Always request a proof before full print run. Menu errors (pricing, allergen information, item descriptions) are costly to reprint.
+**Finish options:**
+- Matt lamination (reduces glare, easier to read)
+- Gloss lamination (more vibrant, easier to wipe clean)
+- Unlaminated (cheapest, but least durable)
 
-### Artwork Considerations
+**Quantity considerations:**
+- Request previous order quantity as baseline
+- Add 20-30% buffer for wear and tear replacement
+- Confirm whether double-sided printing is required
 
-Before finalising any signage or menu order, confirm:
+## Artwork Requirements Checklist
 
-1. **Digital files available** – Vector formats (AI, EPS, PDF) for signs; high-resolution PDF for menus
-2. **QR codes tested** – Ensure codes link to correct destinations and work across devices
-3. **Brand consistency** – Colours, fonts, and logos match existing site materials
-4. **Proofreading complete** – Multiple stakeholders should review text content
+Before providing a quote, confirm with client:
 
-Ask the client directly: "Do you need any further artwork?" as artwork delays are the most common cause of order postponement.
+1. **New artwork needed?** Check what exists vs. what requires design work
+2. **Logo and branding files** available in vector format (AI, EPS, PDF)
+3. **QR code destinations** confirmed and tested
+4. **Directional information** for each roadside sign
+5. **Menu content** finalized (many delays occur here)
+6. **Color matching** requirements (PMS/CMYK specifications)
+7. **Proofing timeline** - allow 48-72 hours for client approval
 
-## Ordering Process
+## Common Pitfalls
 
-1. **Gather specifications** – Confirm quantities, sizes, materials, and placement locations
-2. **Request or create artwork** – Allow adequate time for design revisions
-3. **Obtain quotation** – Price should include production, delivery, and any mounting hardware
-4. **Get client approval** – Send quote and confirm budget availability
-5. **Submit order** – Retain order confirmation and expected delivery date
-6. **Coordinate installation** – Schedule fitting for signs requiring mounting
-7. **Conduct site check** – Verify all signage is correctly positioned and secure
+⚠️ **Artwork delays:** Menu content changes are the most common cause of project delays. Set a clear artwork deadline before production begins.
 
-## Pricing Considerations
+⚠️ **QR code testing:** Always verify QR codes scan correctly and direct to the intended destination before printing. Test on multiple devices.
 
-When preparing quotations, factor in:
+⚠️ **Material durability:** External signage should be UV-resistant and weatherproof. Standard indoor materials will fade and deteriorate quickly.
 
-- Unit cost per sign type
-- Artwork setup fees (if new designs required)
-- Delivery charges
-- Mounting hardware and installation labour
-- Potential permit or approval costs
+⚠️ **Installation hardware:** Confirm who is providing installation (NBNE or client) and ensure appropriate fixings are included in the quote.
 
-Group similar items together in quotes for clarity (e.g., "Outdoor signage package" vs itemising menus separately).
+⚠️ **Permissions:** Client is responsible for planning permission or landowner approval for roadside signs, but flag this requirement proactively.
 
 ## Related Topics
 
-- **Site Setup and Launch Preparation** – Broader context for signage as part of opening readiness
-- **Brand Guidelines and Artwork Management** – Logo usage, colour specifications, file storage
-- **Supplier Directory** – Approved vendors for signage and print materials
-- **Health and Safety Signage Requirements** – Statutory signs vs promotional materials
-- **Digital Integration** – QR code management, analytics tracking, and destination page setup
+- **Brand Guidelines Setup** - Establishing consistent visual identity across venues
+- **QR Code Campaign Management** - Creating and tracking marketing QR codes
+- **Venue Photography** - Capturing images for marketing materials and menus
+- **Print Supplier Management** - Approved vendors and pricing structures
