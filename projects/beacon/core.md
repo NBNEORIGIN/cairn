@@ -166,6 +166,28 @@ endpoint surfaces `last_success` / `last_failure` per job.
   when invoked in-process — the bug is DRF layering only.
   Phase 1 acceptance criterion now met. Phase 1 is COMPLETE.
 
+- **D-009** — Three Google Ads conversion actions created in sub-account
+  2028631064 on 2026-04-15 via MCC 214-126-2231:
+  1. `NBNE Signs — Contact Form` — category Qualified Lead, offline
+     import (API upload via gclid), count One, click-through 90 days,
+     value per-conversion (default £0), attribution Data-driven.
+     Source: nbnesigns.co.uk contact form submissions.
+  2. `Phloe — Contact Form` — identical settings. Source: phloe.co.uk
+     tenant contact/booking enquiry forms.
+  3. `NBNE — Phone Call Lead` — category Phone Call Lead, website call
+     tracking (Google forwarding number), count One, click-through
+     90 days, attribution Data-driven. Requires Google tag + forwarding
+     snippet on nbnesigns.co.uk (not yet installed).
+  Next steps before these actions produce data:
+  - Pull conversion action resource names via `ConversionActionService`
+    and store in Beacon tenant config (Beacon needs the resource name to
+    target uploads).
+  - Install Google global site tag on nbnesigns.co.uk (enables Action 3
+    phone call forwarding + gclid auto-capture).
+  - Implement gclid capture on nbnesigns.co.uk and phloe.co.uk contact
+    forms — store gclid with the lead record so Beacon can upload it
+    with the conversion.
+
 ## Out of scope for Phase 1
 
 - Attribution model (Phase 2)
