@@ -473,7 +473,7 @@ Rules:
             with conn.cursor() as cur:
                 cur.execute(
                     """SELECT content_hash FROM claw_code_chunks
-                       WHERE project_id = 'claw' AND file_path = %s AND chunk_type = 'wiki'""",
+                       WHERE project_id = 'deek' AND file_path = %s AND chunk_type = 'wiki'""",
                     (rel_path,),
                 )
                 existing = cur.fetchone()
@@ -498,7 +498,7 @@ Rules:
                 # Upsert: delete old, insert new
                 cur.execute(
                     """DELETE FROM claw_code_chunks
-                       WHERE project_id = 'claw' AND file_path = %s AND chunk_type = 'wiki'""",
+                       WHERE project_id = 'deek' AND file_path = %s AND chunk_type = 'wiki'""",
                     (rel_path,),
                 )
                 cur.execute(
@@ -506,7 +506,7 @@ Rules:
                        (project_id, file_path, chunk_content, chunk_type, chunk_name,
                         content_hash, embedding, indexed_at)
                        VALUES (%s, %s, %s, 'wiki', %s, %s, %s::vector, NOW())""",
-                    ('claw', rel_path, content, chunk_name, content_hash, embedding),
+                    ('deek', rel_path, content, chunk_name, content_hash, embedding),
                 )
             conn.commit()
             embedded += 1

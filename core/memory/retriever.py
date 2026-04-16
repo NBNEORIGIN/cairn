@@ -308,7 +308,7 @@ class HybridRetriever:
         below the global SIMILARITY_THRESHOLD (0.65). Called separately from the
         main cosine search so wiki knowledge is never crowded out by email/code chunks.
 
-        extra_project_ids: additional projects to search for wiki chunks (e.g. 'claw'
+        extra_project_ids: additional projects to search for wiki chunks (e.g. 'deek'
         chunks surfaced in the 'nbne' business interface). Configured via
         wiki_source_projects in the project's config.json.
         """
@@ -414,7 +414,7 @@ class HybridRetriever:
         # cosine_results before they reach the boost step. Run a dedicated
         # no-threshold wiki search and inject any wiki chunks not already present.
         # Also searches wiki_source_projects so business projects (e.g. 'nbne')
-        # can pull wiki articles stored under the developer project ('claw').
+        # can pull wiki articles stored under the developer project ('deek').
         extra_wiki_pids: list[str] = self.context_engine._load_config().get(
             'wiki_source_projects', []
         )

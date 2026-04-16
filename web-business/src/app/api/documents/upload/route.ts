@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
   const decision = extractedText.slice(0, MAX_DECISION_CHARS)
   const preview = extractedText.slice(0, 500)
 
-  // Write to Cairn memory (now also embeds to pgvector via updated /memory/write)
+  // Write to Deek memory (now also embeds to pgvector via updated /memory/write)
   try {
     const cairnRes = await cairnFetch('/memory/write', {
       method: 'POST',

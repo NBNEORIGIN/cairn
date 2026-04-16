@@ -38,7 +38,7 @@ def _run_tests(project_root: str, test_path: str = '') -> str:
 _BLOCKED_PATTERNS = [
     'rm -rf /', 'format c:', 'del /f /s /q c:\\',
     'shutdown', 'reboot', 'dd if=',
-    # Never let CLAW kill its own web UI or API server
+    # Never let DEEK kill its own web UI or API server
     'taskkill /pid 1 ', 'stop-process',
 ]
 

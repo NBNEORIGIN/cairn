@@ -1,111 +1,118 @@
 # Requesting Quotations for Banners and Cards
 
-This article guides NBNE operators through processing quotation requests for promotional materials including foam banners, roller banners, and printed cards. The request from Amit Kapoor represents a typical multi-item quote scenario requiring two separate quotations based on varying card requirements (with and without Ishihara cards).
+## Summary
 
-## Request Overview
+This article covers best practices when requesting print quotations from NBNE, based on a real customer interaction involving banners and thank-you cards. The customer initially received a quote, then negotiated after comparing it with previous pricing. Key takeaways include understanding product options, artwork requirements (especially bleed), and how to request price adjustments professionally.
 
-**Customer:** Amit Kapoor (07442661135)
+## Understanding Banner Options
 
-**Quote Type:** Two separate quotations required
+When requesting banner quotes, be specific about your needs. NBNE typically offers three main banner types:
 
-**Key Requirement:** Pricing and delivery/collection timeline information
+### 1. Foamex Boards (Rigid PVC)
+- **Use case:** Wall mounting or display on easels
+- **Characteristics:** Rigid, not foldable, 5mm thick
+- **Pricing example:** 2 × A1 boards = £60.00 + VAT
+- **Best for:** Permanent or semi-permanent displays
 
-## Quote 1 Specifications - With Ishihara Cards
+### 2. Roller Banners
+- **Use case:** Events, exhibitions, portable displays
+- **Characteristics:** Roll-up mechanism, includes stand and carry bag
+- **Pricing example:** 2 × 800 × 2000mm = £140.00 + VAT (or £150.00 for full kit with cassette)
+- **Best for:** Repeat use at different locations
 
-1. **A1 5mm Foam Banner Printing** - Quantity: 2
-2. **Roller Banner (800mm × 2000mm)** - Quantity: 2
-3. **A3 Roller Banners** - Quantity: 2
-4. **A5 Printed Cards (250-300 GSM)** - Quantity: 156
-   - Card types: Thank you cards and Ishihara cards
-   - Quality specification: Certificate-grade material
+### 3. PVC Banners with Eyelets
+- **Use case:** Temporary displays, indoor or short-term outdoor
+- **Characteristics:** Flexible, rollable
+- **Pricing example:** 2 × A1 = £50.00 + VAT
+- **Best for:** Budget-conscious projects or temporary events
 
-## Quote 2 Specifications - Without Ishihara Cards
+### 4. Desktop Pull-up Banners
+- **Dimensions:** Approximately 400 × 600mm
+- **Includes:** Display stand
+- **Pricing example:** £45.00 per unit
+- **Best for:** Table-top displays at events or reception areas
 
-1. **A1 5mm Foam Banner Printing** - Quantity: 2
-2. **Roller Banner (800mm × 2000mm)** - Quantity: 2
-3. **A3 Roller Banners** - Quantity: 2
-4. **A5 Printed Cards (250-300 GSM)** - Quantity: 110
-   - Card types: Thank you cards only
-   - Quality specification: Certificate-grade material
+## Print Card Specifications
 
-## Processing Steps
+When ordering cards, specify:
+- **Size** (A6, A5, etc.)
+- **Quantity**
+- **Card stock** (e.g., 300gsm silk)
+- **Printing** (single-sided or double-sided)
 
-### Step 1: Verify Specifications
+**Pricing benchmark:**
+- A6 thank-you cards: £25.00 + VAT for 50 units (£0.50/card)
+- A5 certificate cards: £0.85/card (higher quality stock)
 
-- Confirm all dimensions are correct (A1, 800mm × 2000mm, A3, A5)
-- Note the 5mm foam thickness requirement for A1 banners
-- Verify GSM range (250-300) meets certificate-grade standards
-- Clarify what "Ishihara cards" refers to (likely color blindness test cards)
+⚠️ **Note:** Artwork/design services are NOT included in standard card pricing.
 
-### Step 2: Calculate Quotations
+## Critical: Understanding Artwork Requirements
 
-Calculate pricing for each quote separately:
+### What is Bleed?
 
-- Price all banner items (identical in both quotes)
-- Calculate card pricing based on different quantities (156 vs 110)
-- Factor in any specialty printing requirements for Ishihara cards
-- Include any setup fees or plate charges
+**Bleed** is additional artwork that extends 3mm beyond the finished cut size on all sides. This prevents white edges after trimming.
 
-### Step 3: Determine Delivery Timeline
+**Best practice:**
+- Supply PDFs with 3mm bleed on all sides
+- Ensure critical text/logos are at least 5mm from the trim edge
 
-- Check production capacity for each item type
-- Identify longest lead time item (typically roller banners)
-- Confirm collection availability if customer prefers pickup
-- Note any expedited options available
+⚠️ **Warning:** If you supply artwork at exact finished dimensions (no bleed), NBNE can still print but cannot guarantee:
+- No thin white edges
+- No slight content loss at trim
+- Proper positioning of edge elements
 
-### Step 4: Prepare Quote Response
+### Artwork Review Service
 
-Include in your response:
+For £20 setup fee, NBNE will review artwork before printing and flag potential issues. **Recommended** if you're unsure about bleed or file preparation.
 
-- Itemized pricing for each product in both quotes
-- Subtotals and totals for Quote 1 and Quote 2
-- Production timeline (estimated days)
-- Delivery cost (if applicable) or collection details
-- Quote validity period
-- Payment terms
+## Negotiating Pricing
 
-### Step 5: Send Response
+### Effective Approach (as demonstrated by Amit):
 
-- Address customer by name (Amit)
-- Present both quotes clearly labeled
-- Highlight the key difference (Ishihara cards inclusion)
-- Provide clear next steps for order confirmation
+1. **Reference previous quotes:** "One of my colleagues received this quote a couple of months ago..."
+2. **Be specific:** Clearly state what's different (e.g., "without desktop pull-up banner")
+3. **Ask politely:** "Please can you check once and see if there's anything that can be adjusted on the pricing?"
 
-## Important Warnings
+### What Affects Pricing:
 
-> **⚠️ GSM Range Alert:** Customer specified 250-300 GSM range. Confirm which specific weight will be quoted or offer options within the range as pricing may vary.
+- **Quantity:** Higher volumes = lower per-unit cost
+- **Specifications:** Material quality, size, finishing
+- **Timeline:** Rush orders may incur surcharges
+- **Repeat business:** Previous customers may receive preferential rates
 
-> **⚠️ Ishihara Cards:** These are specialized color vision test cards. Verify if special printing requirements or color accuracy standards apply. If unfamiliar with these, escalate to production team.
+## Standard Quote Components
 
-> **⚠️ Roller Banner Confusion:** Note that both standard roller banners (800mm × 2000mm) and A3 roller banners are requested. Ensure these are quoted as separate items with appropriate hardware.
+Expect these elements in NBNE quotes:
+
+1. **Itemised breakdown** with quantities and unit prices
+2. **Delivery costs** (typically £15.00 for tracked courier)
+3. **Subtotal, VAT (20%), and Total**
+4. **Lead time** (usually 3–5 working days)
+5. **Terms:** Payment required upfront; quote validity (typically 14 days)
+
+## Ordering Process
+
+1. **Request quote** via email to sales@nbnesigns.co.uk
+2. **Provide delivery details** (full address including postcode)
+3. **Specify deadline requirements**
+4. **Review and negotiate** if needed (compare with previous quotes)
+5. **Confirm order** via email
+6. **Send artwork** to sales@nbnesigns.co.uk
+7. **Await payment link**
+8. **Make payment** (production begins on cleared funds)
+9. **Approve artwork** (if review service selected)
 
 ## Common Pitfalls
 
-- **Mixing up quantities:** The card quantities differ significantly between quotes (156 vs 110). Double-check which quote you're calculating.
-- **Forgetting hardware:** Roller banners require stands/hardware. Confirm if pricing includes stands or is print-only.
-- **Unclear delivery terms:** Customer asks for "delivery or collection" - provide both options with timelines.
-- **Missing contact preference:** Customer provided mobile number - confirm if they prefer call, SMS, or email response.
+⚠️ **Copyright materials:** NBNE cannot reproduce copyrighted materials (e.g., Ishihara colour vision test plates) without valid reproduction licence
 
-## Pricing Considerations
+⚠️ **Unclear specifications:** Always specify exact dimensions, quantities, and use case
 
-- Bulk discounts may not apply with low quantities (2 units per banner type)
-- Certificate-grade card stock typically commands premium pricing
-- Ishihara cards may require specialized color-matching processes
-- Collection may be preferred to reduce overall quote cost
-
-## Follow-Up Actions
-
-After sending the quote:
-
-- Set reminder to follow up in 3-5 business days if no response
-- Save specifications for potential reorder
-- Note any custom requirements for future reference
-- Keep customer contact details updated in system
+⚠️ **Last-minute orders:** Allow 3–5 working days minimum; this timeline starts AFTER payment clears AND artwork is approved
 
 ## Related Topics
 
-- **Banner Material Specifications Guide** - Detailed foam board and roller banner materials
-- **Card Stock GSM Reference** - Complete guide to paper weights and applications
-- **Quote Template Library** - Standard quotation formats and terms
-- **Delivery and Collection Procedures** - Scheduling and logistics protocols
-- **Specialty Print Requirements** - Color-critical printing guidelines
+- **Artwork Preparation Guidelines** (bleed, file formats, resolution requirements)
+- **Standard Lead Times and Rush Order Policy**
+- **Copyright and Licensing for Print Materials**
+- **Event Signage Best Practices**

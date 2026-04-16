@@ -1,11 +1,11 @@
-# Register and launch the CLAW tray app.
+# Register and launch the DEEK tray app.
 # No admin rights required. Run this once after remove_services.ps1,
 # or any time you need to re-register the tray at Windows login.
 
-param([string]$ClawDir = "D:\claw")
+param([string]$ClawDir = "D:\deek")
 
 $PythonExe  = Join-Path $ClawDir ".venv\Scripts\python.exe"
-$TrayScript = Join-Path $ClawDir "tray\claw_tray.py"
+$TrayScript = Join-Path $ClawDir "tray\deek_tray.py"
 $RunKey     = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 
 if (-not (Test-Path $PythonExe)) {
@@ -16,12 +16,12 @@ if (-not (Test-Path $PythonExe)) {
 
 # Register at login
 $TrayCmd = "`"$PythonExe`" `"$TrayScript`""
-Set-ItemProperty -Path $RunKey -Name "CLAW-Tray" -Value $TrayCmd
+Set-ItemProperty -Path $RunKey -Name "DEEK-Tray" -Value $TrayCmd
 Write-Host "[OK] Tray registered at user login" -ForegroundColor Green
 
 # Kill any existing tray instance so we get a clean start
 Get-WmiObject Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue |
-    Where-Object { $_.CommandLine -like "*claw_tray*" } |
+    Where-Object { $_.CommandLine -like "*deek_tray*" } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
 Start-Sleep -Seconds 1

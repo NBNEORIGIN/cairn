@@ -179,7 +179,7 @@ class MemoryStore:
         if 'title' not in cols:
             self.conn.execute("ALTER TABLE sessions ADD COLUMN title TEXT")
 
-        # Cairn Protocol spec fields for decisions table
+        # Deek Protocol spec fields for decisions table
         dcols = [r[1] for r in self.conn.execute("PRAGMA table_info(decisions)")]
         if 'project' not in dcols:
             self.conn.execute("ALTER TABLE decisions ADD COLUMN project TEXT DEFAULT ''")

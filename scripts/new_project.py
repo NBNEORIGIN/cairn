@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Scaffold a new CLAW project configuration.
+Scaffold a new DEEK project configuration.
 
 Usage:
     python scripts/new_project.py --id myproject --name "My Project" --path /path/to/codebase
@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Create a new CLAW project config')
+    parser = argparse.ArgumentParser(description='Create a new DEEK project config')
     parser.add_argument('--id', required=True, dest='project_id', help='Project ID (slug, no spaces)')
     parser.add_argument('--name', required=True, help='Human-readable project name')
     parser.add_argument('--path', required=True, help='Absolute path to codebase')
@@ -29,7 +29,7 @@ def main():
     # Copy template config and update it
     config = {
         "name": args.name,
-        "description": f"CLAW agent for {args.name}",
+        "description": f"DEEK agent for {args.name}",
         "codebase_path": args.path,
         "project_type": "coding",
         "permissions": [

@@ -73,7 +73,7 @@ SEED_TOPICS = [
     'fixings anchors supplier',
 ]
 
-_CLUSTER_WIKI_PROMPT = """You are writing a wiki article for NBNE's internal Cairn knowledge base.
+_CLUSTER_WIKI_PROMPT = """You are writing a wiki article for NBNE's internal Deek knowledge base.
 NBNE is a sign fabrication and print company in Alnwick, Northumberland.
 
 The following are excerpts from real NBNE business emails related to the topic: "{topic}"
@@ -114,7 +114,7 @@ def retrieve_email_chunks_for_topic(topic: str, limit: int = 20) -> list[dict]:
                     subproject_id,
                     1 - (embedding <=> %s::vector) AS similarity
                 FROM claw_code_chunks
-                WHERE project_id = 'claw'
+                WHERE project_id = 'deek'
                   AND chunk_type = 'email'
                 ORDER BY embedding <=> %s::vector
                 LIMIT %s

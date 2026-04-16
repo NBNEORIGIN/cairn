@@ -13,7 +13,7 @@ This article documents the setup and processing of Kit's GCSE project, processed
 ## Pre-Appointment Preparation
 
 1. **Review emailed DXF files** before the customer arrives to identify any potential issues
-2. **Check file compatibility** with Cairn cutting software
+2. **Check file compatibility** with Deek cutting software
 3. **Prepare material samples** of both 3mm and 4mm clear acrylic for customer inspection
 4. **Calculate approximate cutting time** based on design complexity
 5. **Estimate material costs** for both thickness options
@@ -34,7 +34,7 @@ This article documents the setup and processing of Kit's GCSE project, processed
 
 ### DXF Import Procedure
 
-1. Open files in Cairn software
+1. Open files in Deek software
 2. Check units are correct (mm vs inches)
 3. Verify layer assignments for cutting/engraving operations
 4. Confirm all paths are closed where required

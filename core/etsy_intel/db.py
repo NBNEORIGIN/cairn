@@ -1,7 +1,7 @@
 """
 Database schema and query helpers for Etsy Intelligence.
 
-All tables use the `etsy_` prefix to namespace within Cairn's PostgreSQL.
+All tables use the `etsy_` prefix to namespace within Deek's PostgreSQL.
 Uses psycopg2 directly (matching core/amazon_intel/db.py pattern).
 """
 import os
@@ -23,7 +23,7 @@ def get_conn():
 
 
 def ensure_schema():
-    """Create all etsy_* tables if they don't exist. Called at Cairn startup."""
+    """Create all etsy_* tables if they don't exist. Called at Deek startup."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(_SQL_SCHEMA)

@@ -1,5 +1,5 @@
 """
-Render module API routes — mounted at /render/* in Cairn.
+Render module API routes — mounted at /render/* in Deek.
 
 Provides context endpoint for Claude chat injection and catalogue summary.
 """
@@ -11,7 +11,7 @@ router = APIRouter(prefix="/render", tags=["Render"])
 
 
 def _get_conn():
-    """Get a psycopg2 connection to the shared Cairn DB."""
+    """Get a psycopg2 connection to the shared Deek DB."""
     import os
     import psycopg2
     from psycopg2.extras import RealDictCursor
@@ -38,7 +38,7 @@ async def render_health():
 
 
 @router.get("/cairn/context")
-async def render_cairn_context():
+async def render_deek_context():
     """
     Catalogue summary for Claude chat context injection.
 

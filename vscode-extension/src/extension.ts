@@ -10,12 +10,12 @@ function getConfig() {
     const apiUrl = config.get<string>('apiUrl', 'http://localhost:8765');
     let apiKey = config.get<string>('apiKey', '');
 
-    // Fall back to reading D:\claw\.env if no key configured
+    // Fall back to reading D:\deek\.env if no key configured
     if (!apiKey) {
         try {
-            const envPath = path.join('D:', 'claw', '.env');
+            const envPath = path.join('D:', 'deek', '.env');
             const envContent = fs.readFileSync(envPath, 'utf-8');
-            const match = envContent.match(/^CLAW_API_KEY=(.+)$/m);
+            const match = envContent.match(/^DEEK_API_KEY=(.+)$/m);
             if (match) { apiKey = match[1].trim(); }
         } catch { /* .env not found — continue without key */ }
     }
@@ -37,7 +37,7 @@ async function updateStatusBar() {
             signal: AbortSignal.timeout(5000),
         });
         if (!res.ok) {
-            statusBarItem.text = '$(circle-slash) Cairn offline';
+            statusBarItem.text = '$(circle-slash) Deek offline';
             statusBarItem.color = new vscode.ThemeColor('statusBarItem.errorForeground');
             return;
         }
@@ -48,10 +48,10 @@ async function updateStatusBar() {
         const chunks = data.total_chunks ?? 0;
         const proj = project || (data.projects_loaded?.[0] ?? '');
         const cost = CairnPanel.currentPanel?.sessionCost ?? 0;
-        statusBarItem.text = `$(circle-filled) Cairn  ${proj}  $${cost.toFixed(2)}  ${chunks.toLocaleString()} chunks`;
+        statusBarItem.text = `$(circle-filled) Deek  ${proj}  $${cost.toFixed(2)}  ${chunks.toLocaleString()} chunks`;
         statusBarItem.color = new vscode.ThemeColor('statusBarItem.foreground');
     } catch {
-        statusBarItem.text = '$(circle-slash) Cairn offline';
+        statusBarItem.text = '$(circle-slash) Deek offline';
         statusBarItem.color = new vscode.ThemeColor('statusBarItem.errorForeground');
     }
 }
@@ -103,7 +103,7 @@ class CairnInlineCompletionProvider implements vscode.InlineCompletionItemProvid
                             file_path: document.fileName,
                             prefix,
                             suffix,
-                            project: project || 'claw',
+                            project: project || 'deek',
                             language: document.languageId,
                         }),
                         signal: AbortSignal.timeout(3000),
@@ -143,8 +143,8 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.StatusBarAlignment.Left, 100
     );
     statusBarItem.command = 'cairn.openPanel';
-    statusBarItem.text = '$(loading~spin) Cairn';
-    statusBarItem.tooltip = 'Click to open Cairn panel';
+    statusBarItem.text = '$(loading~spin) Deek';
+    statusBarItem.tooltip = 'Click to open Deek panel';
     statusBarItem.show();
     context.subscriptions.push(statusBarItem);
 
@@ -201,12 +201,12 @@ export function activate(context: vscode.ExtensionContext) {
                     }
                 );
                 if (res.ok) {
-                    vscode.window.showInformationMessage(`Cairn: Indexing ${project} started`);
+                    vscode.window.showInformationMessage(`Deek: Indexing ${project} started`);
                 } else {
-                    vscode.window.showErrorMessage(`Cairn: Indexing failed — ${res.status}`);
+                    vscode.window.showErrorMessage(`Deek: Indexing failed — ${res.status}`);
                 }
             } catch {
-                vscode.window.showErrorMessage(`Cairn: Cannot reach API at ${apiUrl}`);
+                vscode.window.showErrorMessage(`Deek: Cannot reach API at ${apiUrl}`);
             }
         }),
     );
@@ -215,7 +215,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.commands.registerCommand('cairn.addMention', async () => {
             const { apiUrl, apiKey, project } = getConfig();
-            const projectId = project || 'claw';
+            const projectId = project || 'deek';
 
             const typeChoice = await vscode.window.showQuickPick(
                 [
@@ -273,7 +273,7 @@ export function activate(context: vscode.ExtensionContext) {
                     value = picked.label.replace(/\/$/, '');
                     display = value.split('/').pop() || value;
                 } catch {
-                    vscode.window.showErrorMessage('Cairn: Could not fetch file list');
+                    vscode.window.showErrorMessage('Deek: Could not fetch file list');
                     return;
                 }
             } else if (typeChoice.value === 'symbol') {
@@ -297,7 +297,7 @@ export function activate(context: vscode.ExtensionContext) {
                     value = picked.label;
                     display = picked.label;
                 } catch {
-                    vscode.window.showErrorMessage('Cairn: Could not fetch symbols');
+                    vscode.window.showErrorMessage('Deek: Could not fetch symbols');
                     return;
                 }
             } else if (typeChoice.value === 'session') {
@@ -319,7 +319,7 @@ export function activate(context: vscode.ExtensionContext) {
                     value = (picked as any).value;
                     display = picked.label;
                 } catch {
-                    vscode.window.showErrorMessage('Cairn: Could not fetch sessions');
+                    vscode.window.showErrorMessage('Deek: Could not fetch sessions');
                     return;
                 }
             }
@@ -329,9 +329,9 @@ export function activate(context: vscode.ExtensionContext) {
             const mentionType = typeChoice.value === 'current_file' ? 'file' : typeChoice.value;
             if (CairnPanel.currentPanel) {
                 CairnPanel.currentPanel.addMention({ type: mentionType, value, display });
-                vscode.window.showInformationMessage(`Cairn: Pinned ${mentionType} — ${display}`);
+                vscode.window.showInformationMessage(`Deek: Pinned ${mentionType} — ${display}`);
             } else {
-                vscode.window.showWarningMessage('Cairn panel is not open');
+                vscode.window.showWarningMessage('Deek panel is not open');
             }
         }),
     );
@@ -349,7 +349,7 @@ export function activate(context: vscode.ExtensionContext) {
                     .map(id => ({ label: id, description: id }));
 
                 const picked = await vscode.window.showQuickPick(items, {
-                    placeHolder: 'Select Cairn project',
+                    placeHolder: 'Select Deek project',
                 });
 
                 if (picked) {
@@ -358,11 +358,11 @@ export function activate(context: vscode.ExtensionContext) {
                     if (CairnPanel.currentPanel) {
                         CairnPanel.currentPanel.switchProject(picked.label);
                     }
-                    vscode.window.showInformationMessage(`Cairn: Switched to project '${picked.label}'`);
+                    vscode.window.showInformationMessage(`Deek: Switched to project '${picked.label}'`);
                     updateStatusBar();
                 }
             } catch {
-                vscode.window.showErrorMessage(`Cairn: Cannot reach API at ${apiUrl}`);
+                vscode.window.showErrorMessage(`Deek: Cannot reach API at ${apiUrl}`);
             }
         }),
     );
@@ -440,7 +440,7 @@ export function activate(context: vscode.ExtensionContext) {
                     },
                 );
             } catch {
-                vscode.window.showErrorMessage(`Cairn: Cannot reach API at ${apiUrl}`);
+                vscode.window.showErrorMessage(`Deek: Cannot reach API at ${apiUrl}`);
             }
         }),
     );

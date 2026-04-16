@@ -50,7 +50,7 @@ class SessionSummariser:
     Appends compact session summaries to the project's core.md.
 
     Usage:
-        summariser = SessionSummariser(project_id='claw')
+        summariser = SessionSummariser(project_id='deek')
         await summariser.summarise(messages, session_id='abc')
     """
 

@@ -1,5 +1,5 @@
-# CLAW status — no admin required
-param([string]$ClawDir = "D:\claw")
+# DEEK status — no admin required
+param([string]$ClawDir = "D:\deek")
 
 function Show-Svc($name) {
     $s = Get-Service $name -ErrorAction SilentlyContinue
@@ -12,13 +12,13 @@ function Show-Svc($name) {
 }
 
 Write-Host "`nCLAW Services" -ForegroundColor Cyan
-Show-Svc "claw-api"
-Show-Svc "claw-web"
+Show-Svc "deek-api"
+Show-Svc "deek-web"
 
 Write-Host "`nAPI Health" -ForegroundColor Cyan
 try {
     $r = Invoke-RestMethod "http://localhost:8765/health" `
-         -Headers @{"X-API-Key"="claw-dev-key-change-in-production"} `
+         -Headers @{"X-API-Key"="deek-dev-key-change-in-production"} `
          -TimeoutSec 4
     Write-Host "  status  : $($r.status)"   -ForegroundColor Green
     Write-Host "  ollama  : $($r.ollama_available)"

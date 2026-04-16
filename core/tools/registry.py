@@ -315,7 +315,7 @@ TOOL_SCHEMAS: dict[str, dict] = {
         },
         'required': ['sql'],
     },
-    # ── Cairn federation + memory ────────────────────────────────────────────
+    # ── Deek federation + memory ────────────────────────────────────────────
     'get_module_snapshot': {
         'type': 'object',
         'properties': {

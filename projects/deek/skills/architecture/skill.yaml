@@ -1,0 +1,17 @@
+skill_id: architecture
+project_id: deek
+display_name: DEEK Architecture
+description: Internal architecture, routing, context, streaming, and validation for DEEK itself
+triggers:
+  - deek architecture
+  - chat flow
+  - request flow
+  - model routing
+  - context retrieval
+  - streaming
+  - output validator
+subproject_id:
+key_rules:
+  - Prefer the current request path over speculative rewrites
+  - Name exact files when explaining DEEK internals
+prompt_hint: Explain current behavior from source, not old design docs

@@ -82,7 +82,7 @@ Some customers may accept reduced quality, particularly for:
 
 ## Documentation
 
-Record all customer communications regarding artwork quality in Cairn:
+Record all customer communications regarding artwork quality in Deek:
 
 - Attach proof images showing the quality concern
 - Note which option the customer selected

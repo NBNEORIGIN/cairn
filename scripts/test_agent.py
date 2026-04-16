@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Quick sanity test for CLAW agent.
+Quick sanity test for DEEK agent.
 Run this after any config change to verify everything works.
 
 Usage: python scripts/test_agent.py
@@ -16,7 +16,7 @@ load_dotenv()
 
 
 async def test():
-    from core.agent import ClawAgent
+    from core.agent import DeekAgent
     import json
 
     config_path = Path('projects/phloe/config.json')
@@ -26,12 +26,12 @@ async def test():
 
     config = json.loads(config_path.read_text())
 
-    print(f"CLAW_FORCE_API : {os.getenv('CLAW_FORCE_API', 'true')}")
+    print(f"DEEK_FORCE_API : {os.getenv('DEEK_FORCE_API') or os.getenv('CLAW_FORCE_API', 'true')}")
     print(f"CLAUDE_MODEL   : {os.getenv('CLAUDE_MODEL', 'claude-sonnet-4-5')}")
     print(f"ANTHROPIC_KEY  : {'set' if os.getenv('ANTHROPIC_API_KEY') else '❌ NOT SET'}")
     print()
 
-    agent = ClawAgent(project_id='phloe', config=config)
+    agent = DeekAgent(project_id='phloe', config=config)
 
     from core.channels.envelope import MessageEnvelope, Channel
     import uuid
@@ -81,7 +81,7 @@ async def test():
     print(f"✓ All tests complete. Total cost: ${total:.4f}")
     print()
     print("Expected: Test 1 → sonnet, Test 2 → opus, Test 3 → sonnet")
-    print("If all responses are coherent and models match, CLAW is working.")
+    print("If all responses are coherent and models match, DEEK is working.")
 
 
 if __name__ == '__main__':

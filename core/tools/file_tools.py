@@ -6,9 +6,9 @@ import os
 from pathlib import Path
 from .registry import Tool, RiskLevel
 
-# Cairn repo root — always allowed so any project can read Cairn's own
+# Deek repo root — always allowed so any project can read Deek's own
 # source, project configs, core.md, and skill definitions.
-_CAIRN_ROOT = Path(__file__).resolve().parent.parent.parent
+_DEEK_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 def _resolve_safe(project_root: Path, file_path: str) -> Path:
@@ -16,8 +16,8 @@ def _resolve_safe(project_root: Path, file_path: str) -> Path:
 
     A resolved path is allowed if it lives under any of:
       1. The project's own codebase_path (passed as ``project_root``)
-      2. The Cairn repo root  (D:\\claw)
-      3. D:\\claw\\projects   (subset of 2, listed for clarity)
+      2. The Deek repo root  (D:\\deek)
+      3. D:\\deek\\projects   (subset of 2, listed for clarity)
 
     Accepts both relative and absolute ``file_path`` values.  Uses
     ``os.path.normcase`` so drive-letter case and separator differences
@@ -32,7 +32,7 @@ def _resolve_safe(project_root: Path, file_path: str) -> Path:
     norm_resolved = os.path.normcase(str(resolved))
     allowed_roots = [
         os.path.normcase(str(project_root.resolve())),
-        os.path.normcase(str(_CAIRN_ROOT)),
+        os.path.normcase(str(_DEEK_ROOT)),
     ]
     if any(norm_resolved.startswith(r) for r in allowed_roots):
         return resolved

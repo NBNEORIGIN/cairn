@@ -2,110 +2,97 @@
 
 ## Summary
 
-Facebook comment notification emails are automated messages sent by Meta when someone comments on a post you're connected to. These notifications are sent to the email address associated with your Facebook account and include a snippet of the comment, links to view the full content on Facebook, and options to unsubscribe from similar notifications. For NBNE operators, these emails may arrive at company email addresses if business Facebook pages or personal accounts are linked to those addresses.
+Facebook comment notification emails are automated messages sent when someone comments on a post or reel, even if the recipient hasn't viewed the content. These notifications are sent to the email address associated with your Facebook account (in NBNE's case, often toby@nbnesigns.com). While they can help monitor social media engagement, they can also create inbox clutter and may not always be relevant to daily operations.
 
-## Email Structure
+## Email Characteristics
 
-Facebook comment notification emails follow a consistent format:
+### Standard Components
 
-1. **Subject Line**: Begins with 💬 emoji, followed by the commenter's name and a truncated preview of their comment
-2. **Body Content**: Simple greeting, notification of the comment, and sign-off from "The Facebook team"
-3. **Footer Information**: Unsubscribe link, Meta's mailing address, and security notice about not forwarding emails
+1. **Subject Line**: Contains an emoji (💬), commenter's name, and preview of comment text
+2. **Recipient**: Shows as "Hi [First Name]" using the account holder's Facebook profile name
+3. **Notification Body**: Brief statement about the comment, often noting if you "haven't seen" the reel/post
+4. **Sender**: Appears as "The Facebook team"
+5. **Footer**: Includes unsubscribe link, Meta's address, and security notice about not forwarding
 
-## Understanding the Components
+### Identifying Information
 
-### Recipient Information
+- Recipient email: toby@nbnesigns.com
+- Contains unique tracking parameters (k, u, mid, ee values)
+- Links to facebook.com/o.php for unsubscribe actions
+- Meta Platforms, Inc. physical address (1 Meta Way, Menlo Park, CA 94025)
 
-The email shows which email address received the notification (e.g., `toby@nbnesigns.com`). This helps identify which Facebook account or page is connected to company email addresses.
+## When These Emails Appear
 
-### Unsubscribe Link
+Facebook sends these notifications when:
 
-The unsubscribe URL contains encoded parameters:
-- `k=` - Unique key for the notification type
-- `u=` - User ID number
-- `mid=` - Message ID with unique identifiers
+1. Someone comments on your business page's content
+2. Someone comments on a post where you're tagged
+3. Someone replies to your comment on another page
+4. Activity occurs on reels or posts you've shared or engaged with
+5. Comments are made on content you manage but haven't personally viewed
 
-### Security Features
+The phrase "on a reel you haven't seen" indicates Facebook is notifying you about engagement on content you may not be actively monitoring.
 
-Meta includes a notice asking recipients not to forward these emails, with a link to learn more about account security. This is part of their effort to prevent phishing and account compromise.
+## Managing Notification Volume
 
-## Common Scenarios for NBNE
+### Option 1: Adjust Facebook Settings
 
-### Business Page Notifications
+1. Log into the Facebook account (toby@nbnesigns.com)
+2. Navigate to Settings & Privacy > Settings > Notifications
+3. Select Email notifications
+4. Adjust settings for comments, tags, and activity
+5. Choose frequency (all notifications, important only, or none)
 
-If the NBNE Facebook business page is managed using a company email address, comment notifications will arrive whenever:
-- Customers comment on NBNE posts
-- Someone replies to existing comments
-- Tagged posts receive engagement
+### Option 2: Use Email Unsubscribe Link
 
-### Personal Account Linkage
+1. Click the unsubscribe link in the email footer
+2. Confirm preferences on the Facebook page that opens
+3. Select specific notification types to disable
 
-Employees who have linked personal Facebook accounts to their company email may receive notifications for:
-- Personal post comments
-- Group discussions
-- Tagged content
+### Option 3: Create Email Filters
 
-## Managing These Emails
+Set up Deek or email client rules to:
+- Auto-label Facebook notifications
+- Move to specific folders
+- Mark as read if not priority
+- Archive automatically while retaining for records
 
-### Email Filtering
+## ⚠️ Warnings and Considerations
 
-Create email rules to:
-1. Automatically label Facebook notifications
-2. Move them to a specific folder
-3. Prevent inbox clutter while maintaining records
+**Do Not Forward These Emails**: Facebook explicitly warns against forwarding for security reasons. Each email contains unique authentication tokens tied to the specific account.
 
-### Notification Preferences
+**Unsubscribe Links**: The unsubscribe URL contains personal identifiers. Clicking these links from a shared email (e.g., forwarded to another team member) may cause unintended changes to notification settings.
 
-To adjust settings:
-1. Click the unsubscribe link in the email
-2. Navigate to Facebook Settings > Notifications
-3. Customize which activities trigger email notifications
-4. Set frequency preferences (individual, digest, or off)
+**Missing Context**: These notifications often lack sufficient detail to act on without logging into Facebook. The comment preview in the subject line is truncated and may not show the full message.
 
-### Business Account Best Practices
+**Account Access**: Only the person with access to the toby@nbnesigns.com Facebook account can effectively manage these notifications or view the full context.
 
-1. Use a dedicated email address for business page management
-2. Set up shared access through Business Manager rather than individual emails
-3. Configure notifications to go to appropriate team members
-4. Consider using a shared inbox for customer engagement monitoring
+## Best Practices for NBNE
 
-## ⚠️ Warnings and Common Pitfalls
+### For Social Media Management
 
-### Security Concerns
+- Designate one person to monitor Facebook engagement
+- Use Facebook's native Business Suite or Creator Studio instead of relying on email notifications
+- Set up a separate folder/label for social media notifications
+- Review settings quarterly to ensure they align with current team structure
 
-- **Phishing Risk**: Legitimate Facebook emails come from `@facebookmail.com` or `@fb.com` domains. Always verify sender addresses.
-- **Link Safety**: Hover over links before clicking to confirm they direct to facebook.com domains
-- **Don't Share Credentials**: Never forward these emails as they contain account-specific security tokens
+### For Email Management
 
-### Privacy Issues
+- Document who has access to social accounts in Deek
+- Include social media notification preferences in onboarding documentation
+- Consider using a dedicated social media management email address
+- Archive notification emails for record-keeping but don't treat as primary engagement tool
 
-- Personal comments may appear in company email if accounts are improperly configured
-- Customer comments may contain sensitive information - handle according to data protection policies
-- Comment content visible in email may not reflect deleted or edited versions on Facebook
+## Common Pitfalls
 
-### Operational Challenges
-
-- High notification volume can bury important customer service requests
-- Multiple team members may respond to the same comment if using shared email
-- Email notifications lag behind real-time Facebook activity
-- Truncated comments in subject lines may lack context
-
-## Troubleshooting
-
-**If notifications aren't arriving:**
-- Check Facebook notification settings are enabled for comments
-- Verify the correct email address is set in Facebook account settings
-- Check spam/junk folders
-
-**If receiving unwanted notifications:**
-- Use the unsubscribe link specific to the notification type
-- Adjust granular settings in Facebook rather than blocking all Meta emails
-- Consider if business page access needs to be restructured
+1. **Notification Overload**: Leaving all notifications enabled can flood the inbox with low-priority messages
+2. **Missed Engagement**: Disabling all notifications may cause you to miss important customer comments or questions
+3. **Multiple Account Confusion**: If NBNE manages multiple Facebook pages, ensure you know which account each notification relates to
+4. **Delayed Response**: Relying solely on email notifications creates delays vs. checking Facebook directly
 
 ## Related Topics
 
-- **Facebook Business Manager Setup**: Managing business page access and permissions
-- **Email Filtering Rules**: Creating automated workflows for notification emails
-- **Social Media Policy**: NBNE guidelines for business and personal account usage
-- **Customer Engagement Protocols**: Responding to comments and inquiries on social platforms
-- **Data Protection Compliance**: Handling customer information from social media interactions
+- **Facebook Business Suite Management**: Managing NBNE's Facebook presence
+- **Social Media Response Protocols**: Guidelines for engaging with comments and messages
+- **Email Filter Configuration**: Setting up Deek rules for automated email sorting
+- **Customer Engagement Tracking**: Recording and responding to social media interactions

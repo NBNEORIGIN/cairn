@@ -1,4 +1,4 @@
-# Manufacturing / Origin Designed — CLAW Agent Core Context
+# Manufacturing / Origin Designed — DEEK Agent Core Context
 # Version: 1.0
 
 ## What this is
@@ -67,7 +67,7 @@ Django backend with models for:
   Procurement (materials, reorder points, supplier)
 
 ## Current state
-Application not yet built. CLAW is being used to design and build it.
+Application not yet built. DEEK is being used to design and build it.
 The Excel workbook (Shipment_Stock_Sheet.xlsx) is the authoritative
 reference for domain understanding and data structure.
 Key Excel sheets: ORDERS, MASTER STOCK, ASSEMBLY, DIBOND PLACEMENT,

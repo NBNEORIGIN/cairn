@@ -1,7 +1,7 @@
 """
-Cairn Social voice guide.
+Deek Social voice guide.
 
-This is the seed voice guide pasted verbatim from CAIRN_SOCIAL_MODULE_CC_PROMPT.md
+This is the seed voice guide pasted verbatim from DEEK_SOCIAL_MODULE_CC_PROMPT.md
 (written by Toby/Claude on 2026-04-10). Per the brief, this becomes the initial
 content of social_voice_guide v1 in the database — but during v0 we keep it as a
 Python constant so we can iterate on the drafting flow before adding the
@@ -121,7 +121,7 @@ Drafts must not contain:
 """
 
 # Per-platform adaptation rules. Three platforms only (no TikTok per blocker 3
-# in CAIRN_SOCIAL_V2_HANDOFF.md).
+# in DEEK_SOCIAL_V2_HANDOFF.md).
 PLATFORM_ADAPTATIONS = {
     'facebook': """\
 ## Facebook (primary platform)

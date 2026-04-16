@@ -130,9 +130,9 @@ class CodeIndexer:
 
     def _use_openai_embeddings(self) -> bool:
         """True if we should use OpenAI embeddings instead of Ollama."""
-        if os.getenv('CAIRN_EMBED_PROVIDER', '').lower() == 'openai':
+        if (os.getenv('DEEK_EMBED_PROVIDER') or os.getenv('CAIRN_EMBED_PROVIDER', '')).lower() == 'openai':
             return True
-        if os.getenv('CAIRN_EMBED_PROVIDER', '').lower() == 'ollama':
+        if (os.getenv('DEEK_EMBED_PROVIDER') or os.getenv('CAIRN_EMBED_PROVIDER', '')).lower() == 'ollama':
             return False
         # Auto-detect: try Ollama first, fall back to OpenAI
         try:
@@ -157,8 +157,8 @@ class CodeIndexer:
         text-embedding-3-small (truncated to 768 dims) if Ollama is
         unavailable and OPENAI_API_KEY is set.
 
-        Set CAIRN_EMBED_PROVIDER=openai to force OpenAI (faster for bulk indexing).
-        Set CAIRN_EMBED_PROVIDER=ollama to force Ollama (free, local).
+        Set DEEK_EMBED_PROVIDER=openai to force OpenAI (faster for bulk indexing).
+        Set DEEK_EMBED_PROVIDER=ollama to force Ollama (free, local).
         """
         import httpx
         if len(text) > MAX_CHUNK_CHARS:

@@ -25,7 +25,7 @@ write into ``cairn_intel.decisions``.
 Config
 ------
 
-    CAIRN_API_KEY    Required. Same token used by search_crm tool.
+    DEEK_API_KEY    Required. Same token used by search_crm tool.
     CRM_BASE_URL     Optional. Defaults to https://crm.nbnesigns.co.uk
 
 The source supports an offline JSON fallback for tests: pass
@@ -83,7 +83,7 @@ class CrmLessonsSource:
         records: list[dict] | None = None,
     ):
         self.base_url = (base_url or os.getenv('CRM_BASE_URL') or CRM_DEFAULT_BASE_URL).rstrip('/')
-        self.api_key = api_key or os.getenv('CAIRN_API_KEY', '')
+        self.api_key = api_key or os.getenv('DEEK_API_KEY') or os.getenv('CAIRN_API_KEY') or os.getenv('CLAW_API_KEY', '')
         self.limit = limit
         # Test hook — bypass HTTP entirely
         self._injected_records = records
@@ -110,7 +110,7 @@ class CrmLessonsSource:
     def _fetch(self) -> list[dict]:
         if not self.api_key:
             raise RuntimeError(
-                'crm_lessons: CAIRN_API_KEY is not set — cannot authenticate '
+                'crm_lessons: DEEK_API_KEY is not set — cannot authenticate '
                 'against the CRM /api/cairn/search endpoint'
             )
 

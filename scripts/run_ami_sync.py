@@ -6,8 +6,8 @@ process. Uses the same scheduler.py logic as the API endpoint but does not
 require the API to be running.
 
 Usage:
-    D:\claw\.venv\Scripts\python.exe D:\claw\scripts\run_ami_sync.py
-    D:\claw\.venv\Scripts\python.exe D:\claw\scripts\run_ami_sync.py --force
+    D:\deek\.venv\Scripts\python.exe D:\deek\scripts\run_ami_sync.py
+    D:\deek\.venv\Scripts\python.exe D:\deek\scripts\run_ami_sync.py --force
 """
 import sys
 import json
@@ -15,7 +15,7 @@ import logging
 from pathlib import Path
 from datetime import datetime
 
-# Resolve D:\claw as the working root regardless of where we're called from
+# Resolve D:\deek as the working root regardless of where we're called from
 CLAW_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(CLAW_ROOT))
 

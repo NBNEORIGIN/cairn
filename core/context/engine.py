@@ -78,8 +78,8 @@ class ContextEngine:
         but the implicit transaction on the shared connection stayed
         open indefinitely. This blocked DDL migrations (``ALTER TABLE
         claw_code_chunks``) that wait on ACCESS EXCLUSIVE and caused
-        two separate multi-hour Cairn outages (LAN DB and Hetzner
-        cairn-db). autocommit eliminates the class of bug across
+        two separate multi-hour Deek outages (LAN DB and Hetzner
+        deek-db). autocommit eliminates the class of bug across
         every read-only caller at once.
         """
         if not self._conn or self._conn.closed:
@@ -458,7 +458,7 @@ class ContextEngine:
         import sqlite3
         import glob as _glob
         # Find any SQLite DB that might contain this session
-        data_dir = Path(os.getenv('CLAW_DATA_DIR', './data'))
+        data_dir = Path(os.getenv('DEEK_DATA_DIR') or os.getenv('CLAW_DATA_DIR', './data'))
         dbs = list(data_dir.glob('*.db'))
         for db_path in dbs:
             try:

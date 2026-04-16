@@ -127,7 +127,9 @@ def test_classifier_handles_haiku_failure_gracefully():
 
 def test_project_matcher_returns_empty_without_token(monkeypatch):
     from scripts.email_triage.project_matcher import match_project
+    monkeypatch.delenv('DEEK_API_KEY', raising=False)
     monkeypatch.delenv('CAIRN_API_KEY', raising=False)
+    monkeypatch.delenv('CLAW_API_KEY', raising=False)
     result = match_project(
         email={'sender': 'foo@bar.com', 'subject': 'test', 'body_text': 'test'},
         classifier_result={'classification': 'existing_project_reply'},
@@ -214,14 +216,14 @@ def test_project_matcher_prefers_project_rows_over_client_rows():
 
 def test_runner_requires_kill_switch_enabled(monkeypatch, caplog):
     from scripts.email_triage.triage_runner import run_triage
-    monkeypatch.setenv('CAIRN_EMAIL_TRIAGE_ENABLED', 'false')
+    monkeypatch.setenv('DEEK_EMAIL_TRIAGE_ENABLED', 'false')
     result = run_triage(commit=True, max_emails=5, window_days=1)
     assert result == 0
 
 
 def test_runner_dry_run_writes_nothing(monkeypatch):
     from scripts.email_triage import triage_runner
-    monkeypatch.setenv('CAIRN_EMAIL_TRIAGE_ENABLED', 'true')
+    monkeypatch.setenv('DEEK_EMAIL_TRIAGE_ENABLED', 'true')
     monkeypatch.setenv('DATABASE_URL', 'postgresql://bogus:bogus@localhost:9999/bogus')
 
     # Mock the DB calls the runner makes
@@ -246,7 +248,7 @@ def test_runner_loop_prevention_filters_cairn_sender():
 def test_digest_sender_dry_run_when_smtp_missing(monkeypatch):
     """With no SMTP creds, digest_sender logs instead of sending."""
     from scripts.email_triage import digest_sender
-    monkeypatch.setenv('CAIRN_EMAIL_TRIAGE_ENABLED', 'true')
+    monkeypatch.setenv('DEEK_EMAIL_TRIAGE_ENABLED', 'true')
     monkeypatch.setenv('DATABASE_URL', 'postgresql://bogus:bogus@localhost:9999/bogus')
     monkeypatch.delenv('SMTP_HOST', raising=False)
     monkeypatch.delenv('SMTP_USER', raising=False)
@@ -293,7 +295,7 @@ def test_digest_sender_formats_body_for_new_enquiry():
     }
 
     subject, body = format_digest_body(row)
-    assert '[Cairn] new_enquiry' in subject
+    assert '[Deek] new_enquiry' in subject
     assert 'Quote for A board' in subject
     assert 'Classification: new_enquiry' in body
     assert 'Debbie Potter' in body

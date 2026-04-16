@@ -23,7 +23,7 @@ export async function GET(_req: NextRequest) {
       return NextResponse.json([], { status: 200 })
     }
     const data = await cairnRes.json()
-    // Cairn returns { results: [...] } or an array
+    // Deek returns { results: [...] } or an array
     const results = Array.isArray(data) ? data : data.results ?? []
     return NextResponse.json(results)
   } catch {

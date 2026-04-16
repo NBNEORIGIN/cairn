@@ -7,12 +7,12 @@ after wiki generation completes.
 Flow:
   1. Check for new/modified wiki/modules/*.md files in git
   2. If any found, commit + push to GitHub
-  3. POST to Hetzner Cairn /admin/wiki-sync (triggers git pull + embed)
+  3. POST to Hetzner Deek /admin/wiki-sync (triggers git pull + embed)
 
 Environment:
-  CLAW_API_KEY           — Cairn API key (same on all instances)
-  CAIRN_HETZNER_URL      — e.g. https://cairn.nbnesigns.co.uk or http://178.104.1.152:8765
-  CAIRN_HETZNER_API_KEY  — API key for Hetzner Cairn (can be same as CLAW_API_KEY)
+  DEEK_API_KEY           — Deek API key (same on all instances)
+  DEEK_HETZNER_URL      — e.g. https://deek.nbnesigns.co.uk or http://178.104.1.152:8765
+  DEEK_HETZNER_API_KEY  — API key for Hetzner Deek (can be same as DEEK_API_KEY)
 """
 
 from __future__ import annotations
@@ -91,18 +91,18 @@ def commit_and_push(changed_files: list[str]) -> bool:
 def notify_hetzner() -> bool:
     """Trigger wiki sync on Hetzner via SSH → internal API call.
 
-    The Cairn API on Hetzner is not publicly exposed, so we SSH in and
+    The Deek API on Hetzner is not publicly exposed, so we SSH in and
     call localhost:8765 from within the server. This also means no nginx
     changes are needed and the endpoint is never internet-accessible.
     """
-    hetzner_host = os.getenv('CAIRN_HETZNER_HOST', 'root@178.104.1.152')
-    api_key = os.getenv('CAIRN_HETZNER_API_KEY') or os.getenv('CLAW_API_KEY', 'claw-dev-key-change-in-production')
+    hetzner_host = os.getenv('DEEK_HETZNER_HOST') or os.getenv('CAIRN_HETZNER_HOST', 'root@178.104.1.152')
+    api_key = os.getenv('DEEK_HETZNER_API_KEY') or os.getenv('CAIRN_HETZNER_API_KEY') or os.getenv('DEEK_API_KEY') or os.getenv('CAIRN_API_KEY') or os.getenv('CLAW_API_KEY', 'deek-dev-key-change-in-production')
 
-    log.info('Notifying Hetzner Cairn via SSH: %s', hetzner_host)
+    log.info('Notifying Hetzner Deek via SSH: %s', hetzner_host)
     # git pull on the HOST first (wiki/modules is volume-mounted into container),
     # then call /admin/wiki-sync to embed the new files
     remote_cmd = (
-        'cd /opt/nbne/cairn'
+        'cd /opt/nbne/deek'
         ' && git pull --ff-only origin master'
         f' && curl -s -X POST http://localhost:8765/admin/wiki-sync'
         f' -H "X-API-Key: {api_key}"'
@@ -142,7 +142,7 @@ def notify_hetzner() -> bool:
 
 
 def main() -> int:
-    log.info('=== Cairn Wiki Deploy ===')
+    log.info('=== Deek Wiki Deploy ===')
 
     changed = get_changed_wiki_files()
     if not changed:

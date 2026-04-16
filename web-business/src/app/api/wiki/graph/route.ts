@@ -12,6 +12,6 @@ export async function GET() {
     const data = await res.json()
     return NextResponse.json(data)
   } catch {
-    return NextResponse.json({ error: 'Cairn API unavailable' }, { status: 503 })
+    return NextResponse.json({ error: 'Deek API unavailable' }, { status: 503 })
   }
 }

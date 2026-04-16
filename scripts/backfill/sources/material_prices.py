@@ -11,7 +11,7 @@ Why this exists
 NBNE's material costs drift over time: aluminium composite, vinyl
 films, acrylic sheet, paint, blanks. The CRM has a ``Material``
 table but it's a human-curated catalog, not a historical price
-trail — we can't ask Cairn "what was the last price we paid for
+trail — we can't ask Deek "what was the last price we paid for
 1.5mm Dibond from First Fix?" today because that data lives only
 in email threads with suppliers.
 

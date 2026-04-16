@@ -25,7 +25,7 @@ import sys
 import time
 from pathlib import Path
 
-# Add project root to path so we can import claw modules
+# Add project root to path so we can import deek modules
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
@@ -254,7 +254,7 @@ async def main():
     parser.add_argument('--skip-pull', action='store_true', help='Skip pull attempt')
     args = parser.parse_args()
 
-    banner('CLAW — Local Model VRAM Fit Test')
+    banner('DEEK — Local Model VRAM Fit Test')
     print(f'  Ollama: {OLLAMA_BASE}')
     print_gpu('baseline')
 

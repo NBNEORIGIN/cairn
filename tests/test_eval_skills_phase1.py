@@ -10,7 +10,7 @@ import pytest
 def test_eval_prompt_suite_loads_expected_prompt_count():
     from core.eval.suite import load_prompt_suite
 
-    suite = load_prompt_suite(Path('projects/claw/eval_prompt_suite.json'))
+    suite = load_prompt_suite(Path('projects/deek/eval_prompt_suite.json'))
 
     assert len(suite) == 10
     assert suite[0].prompt_id == 'chat-request-flow'
@@ -21,7 +21,7 @@ def test_eval_score_flags_missing_and_forbidden_markers():
 
     prompt = EvalPrompt(
         prompt_id='demo',
-        prompt='Explain CLAW.',
+        prompt='Explain DEEK.',
         required_markers=['api/main.py', 'core/agent.py'],
         forbidden_markers=['process_stream()'],
     )
@@ -53,7 +53,7 @@ def test_skill_manager_resolve_for_request_is_manual_only(tmp_path):
             'skill_id: architecture',
             'project_id: demo',
             'display_name: Architecture',
-            'description: CLAW architecture and request flow',
+            'description: DEEK architecture and request flow',
             'triggers:',
             '  - architecture',
             'key_rules:',
@@ -125,11 +125,11 @@ def test_summariser_appends_bullets_to_skill_decisions(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_process_streaming_emits_response_delta_events():
-    from core.agent import ClawAgent
+    from core.agent import DeekAgent
     from core.channels.envelope import Channel, MessageEnvelope
 
     long_answer = (
-        'CLAW routes requests through api/main.py into core/agent.py, then '
+        'DEEK routes requests through api/main.py into core/agent.py, then '
         'retrieves context, calls the model, validates the answer, and '
         'streams the finished response back to the web UI.'
     )
@@ -145,13 +145,13 @@ async def test_process_streaming_emits_response_delta_events():
              return_value=('mock ctx', {'context_files': [], 'context_file_count': 0}),
          ):
         mock_chat.return_value = fake_response
-        agent = ClawAgent(
+        agent = DeekAgent(
             project_id='test',
             config={'name': 'test', 'force_model': 'api', 'permissions': ['read_file']},
         )
 
         envelope = MessageEnvelope(
-            content='Explain the CLAW request flow',
+            content='Explain the DEEK request flow',
             channel=Channel.WEB,
             project_id='test',
             session_id='stream-delta-test',

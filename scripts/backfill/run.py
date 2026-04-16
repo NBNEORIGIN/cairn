@@ -1,5 +1,5 @@
 """
-CLI entry point for the Cairn counterfactual backfill importer.
+CLI entry point for the Deek counterfactual backfill importer.
 
 Run the smoke test from the dev box:
 
@@ -68,9 +68,9 @@ def _load_source(
                 'caller must supply both'
             )
         wiki_dir = Path(
-            os.getenv('CAIRN_WIKI_DIR', str(Path(__file__).parent.parent.parent / 'wiki'))
+            os.getenv('DEEK_WIKI_DIR') or os.getenv('CAIRN_WIKI_DIR', str(Path(__file__).parent.parent.parent / 'wiki'))
         )
-        max_files_env = os.getenv('CAIRN_PRINCIPLES_MAX_FILES')
+        max_files_env = os.getenv('DEEK_PRINCIPLES_MAX_FILES') or os.getenv('CAIRN_PRINCIPLES_MAX_FILES')
         max_files = int(max_files_env) if max_files_env else None
         return PrinciplesSource(
             wiki_dir=wiki_dir,
@@ -245,7 +245,7 @@ def _probe_ledger_db() -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog='python -m scripts.backfill.run',
-        description='Cairn counterfactual memory historical backfill importer',
+        description='Deek counterfactual memory historical backfill importer',
     )
     parser.add_argument(
         '--source',

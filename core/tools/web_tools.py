@@ -1,5 +1,5 @@
 """
-Web access tools for CLAW agent.
+Web access tools for DEEK agent.
 All operations are read-only — SAFE, auto-approved.
 
 Use cases:
@@ -16,7 +16,7 @@ from .registry import Tool, RiskLevel
 # Suppress the InsecureRequestWarning that appears when verify=False
 warnings.filterwarnings('ignore', message='Unverified HTTPS request')
 
-_HEADERS = {'User-Agent': 'CLAW/1.0 (NBNE Development Agent)'}
+_HEADERS = {'User-Agent': 'DEEK/1.0 (NBNE Development Agent)'}
 
 
 def _web_fetch(project_root: str, url: str = '') -> str:

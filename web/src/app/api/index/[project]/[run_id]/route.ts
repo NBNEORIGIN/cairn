@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 const CLAW_API = process.env.CLAW_API_URL || 'http://localhost:8765'
-const CLAW_KEY = process.env.CLAW_API_KEY || ''
+const CLAW_KEY = process.env.DEEK_API_KEY || ''
 
 export async function GET(
   _request: NextRequest,

@@ -1,7 +1,7 @@
 """
 Wiki Layer API routes.
 
-Mounted at /api/wiki/* in the Cairn FastAPI app.
+Mounted at /api/wiki/* in the Deek FastAPI app.
 
 Provides:
   GET  /api/wiki/search?q=&top_k=   — hybrid search with wiki boost
@@ -32,7 +32,7 @@ _WIKI_ROOT = _CLAW_ROOT / 'wiki'
 async def wiki_search(
     q: str = Query(..., description="Search query"),
     top_k: int = Query(5, ge=1, le=20, description="Max results"),
-    project: str = Query("claw", description="Project scope"),
+    project: str = Query("deek", description="Project scope"),
 ):
     """Semantic wiki search via pgvector cosine similarity.
 

@@ -1,8 +1,8 @@
 # Remove NSSM services — run ONCE as Administrator.
-# After this, the CLAW tray app manages all processes directly.
+# After this, the DEEK tray app manages all processes directly.
 # No admin rights are ever needed again.
 
-param([string]$ClawDir = "D:\claw")
+param([string]$ClawDir = "D:\deek")
 
 $NSSM = Join-Path $ClawDir "scripts\nssm.exe"
 
@@ -11,7 +11,7 @@ if (-not (Test-Path $NSSM)) {
     exit 1
 }
 
-foreach ($svc in @("claw-web", "claw-api")) {
+foreach ($svc in @("deek-web", "deek-api")) {
     $status = & $NSSM status $svc 2>&1
     if ($LASTEXITCODE -eq 0) {
         Write-Host "Removing $svc ..." -ForegroundColor Cyan
@@ -25,4 +25,4 @@ foreach ($svc in @("claw-web", "claw-api")) {
 }
 
 Write-Host ""
-Write-Host "Done. Run setup_tray.ps1 (no admin needed) to start CLAW." -ForegroundColor Green
+Write-Host "Done. Run setup_tray.ps1 (no admin needed) to start DEEK." -ForegroundColor Green

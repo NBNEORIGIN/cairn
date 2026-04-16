@@ -1,8 +1,8 @@
 """Cross-module delegation API.
 
-Mounted at ``/api/delegation/*`` in the Cairn FastAPI app.
+Mounted at ``/api/delegation/*`` in the Deek FastAPI app.
 
-``POST /api/delegation/call`` — invoked by the ``cairn_delegate`` MCP tool.
+``POST /api/delegation/call`` — invoked by the ``deek_delegate`` MCP tool.
 Routes a single one-shot request to Grok 4 Fast (generate) or Claude Haiku 4.5
 (review / extract / classify) via OpenRouter, with call-level cost logging
 into ``cairn_delegation_log`` (SQLite, ``CLAW_DATA_DIR/claw.db``).

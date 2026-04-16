@@ -1,4 +1,4 @@
-"""Pricing and cost computation for cairn_delegate calls.
+"""Pricing and cost computation for deek_delegate calls.
 
 Pricing verified 2026-04-15 against OpenRouter model pages. Hardcoded here;
 re-verify and bump if OpenRouter changes rates.

@@ -99,7 +99,7 @@ As shown in the example, circumstances change (customer returning to Cornwall). 
 ## Record Keeping
 
 Even for declined enquiries:
-- Log in CRM/Cairn with "Personal Project - Declined" tag
+- Log in CRM/Deek with "Personal Project - Declined" tag
 - Note reason for declining
 - Record any follow-up actions
 - Keep file examples if illustrative of common requests

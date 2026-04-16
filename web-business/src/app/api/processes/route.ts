@@ -73,7 +73,7 @@ export async function GET(req: NextRequest) {
       `/memory/retrieve?query=${encodeURIComponent(q)}&project=manufacturing&limit=10`,
     );
   } catch {
-    // Cairn unavailable — fall back to static list filtered by query
+    // Deek unavailable — fall back to static list filtered by query
     const lower = q.toLowerCase();
     const filtered = STATIC_PROCESSES.filter(
       (p) =>
@@ -86,7 +86,7 @@ export async function GET(req: NextRequest) {
 
   if (!cairnRes.ok) {
     return NextResponse.json(
-      { error: `Cairn retrieval failed: ${cairnRes.status}` },
+      { error: `Deek retrieval failed: ${cairnRes.status}` },
       { status: 502 },
     );
   }

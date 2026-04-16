@@ -58,7 +58,7 @@ If you cannot be present during the delivery window, the email provides an "opti
 ### After Delivery
 
 1. **Photograph packaging** if damage is evident
-2. **Report delivery** in Cairn using tracking number
+2. **Report delivery** in Deek using tracking number
 3. **Inspect contents immediately** (Colourbyte equipment is time-sensitive)
 4. **Log any discrepancies** within 24 hours
 
@@ -104,7 +104,7 @@ These elements can be ignored for operational purposes.
 
 - **Colourbyte Equipment Receiving Procedures** - Full checklist for Colourbyte deliveries
 - **NBNE Site Access Coordination** - Managing courier access at restricted sites
-- **Equipment Tracking in Cairn** - How to log deliveries and track equipment lifecycle
+- **Equipment Tracking in Deek** - How to log deliveries and track equipment lifecycle
 - **Damaged Shipment Protocol** - Steps for reporting and documenting shipping damage
 - **Alternative Courier Services** - Comparison of DPD, UPS, and other carriers used by suppliers
 - **Delivery Escalation Contacts** - Who to contact when deliveries fail or go missing

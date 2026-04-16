@@ -1,10 +1,10 @@
 /*
- * Cairn service worker.
+ * Deek service worker.
  *
  * Strategy:
  *   - network-first for navigation requests (always try fresh HTML),
  *     falling back to the cached shell or an offline page if the
- *     network is unreachable. This matters because Cairn is a live
+ *     network is unreachable. This matters because Deek is a live
  *     agent — stale UI would be misleading.
  *   - network-only for /api/* (no caching of agent responses; the
  *     chat stream is an SSE connection the SW shouldn't touch).

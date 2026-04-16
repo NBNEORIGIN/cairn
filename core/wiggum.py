@@ -1,14 +1,14 @@
 """
 WIGGUM — Workbench Iterative Goal-Guided Update Machine
 
-The outer loop that drives CLAW toward an end goal.
+The outer loop that drives DEEK toward an end goal.
 
 Architecture:
     OUTER LOOP (WiggumOrchestrator) — this file
         Holds: goal, success criteria, iteration history
-        Does:  assess state → plan task → delegate to CLAW → repeat
+        Does:  assess state → plan task → delegate to DEEK → repeat
 
-    INNER LOOP (ClawAgent) — core/agent.py
+    INNER LOOP (DeekAgent) — core/agent.py
         Does:  implement the task, call tools, return result
 
     HUMAN
@@ -16,10 +16,10 @@ Architecture:
         Reviews: final changes before commit/push
 
 Phases per iteration:
-    1. ASSESS  — read-only CLAW call: evaluate codebase vs. success criteria
+    1. ASSESS  — read-only DEEK call: evaluate codebase vs. success criteria
     2. CHECK   — parse for PASS/PARTIAL/FAIL per criterion
-    3. PLAN    — read-only CLAW call: determine highest-priority next task
-    4. EXECUTE — full CLAW call: implement the task
+    3. PLAN    — read-only DEEK call: determine highest-priority next task
+    4. EXECUTE — full DEEK call: implement the task
     5. RECORD  — save iteration to history
 
 Safety model:
@@ -34,7 +34,7 @@ from datetime import datetime
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from core.agent import ClawAgent
+    from core.agent import DeekAgent
 
 
 class WiggumOrchestrator:
@@ -50,7 +50,7 @@ class WiggumOrchestrator:
         api_key: str = '',
         session_id: str | None = None,
         max_iterations: int = MAX_ITERATIONS,
-        agent: 'ClawAgent | None' = None,
+        agent: 'DeekAgent | None' = None,
         auto_approve_review: bool = True,
         batch_mode: bool = False,
     ):
@@ -181,7 +181,7 @@ class WiggumOrchestrator:
 
     async def _assess_state(self) -> str:
         """
-        Read-only CLAW call: evaluate the codebase against the success criteria.
+        Read-only DEEK call: evaluate the codebase against the success criteria.
         Returns the assessment text from the model.
         """
         criteria_lines = '\n'.join(
@@ -254,7 +254,7 @@ class WiggumOrchestrator:
 
     async def _plan_next_task(self, assessment: str) -> str:
         """
-        Read-only CLAW call: given the current assessment, decide the single
+        Read-only DEEK call: given the current assessment, decide the single
         most important next task to make progress toward the goal.
         Returns empty string if there are no unmet criteria (all PASS).
         """
@@ -286,7 +286,7 @@ class WiggumOrchestrator:
 
     async def _call_claw(self, task: str, read_only: bool = False) -> dict:
         """
-        Call CLAW with the given task.
+        Call DEEK with the given task.
         Uses direct agent call when an agent is available (in-process mode),
         falls back to HTTP when running as an external orchestrator.
         """
@@ -340,7 +340,7 @@ class WiggumOrchestrator:
         raise last_exc
 
     async def _call_claw_http(self, task: str, read_only: bool) -> dict:
-        """POST to CLAW /chat for external orchestrator use."""
+        """POST to DEEK /chat for external orchestrator use."""
         import httpx
 
         payload = {

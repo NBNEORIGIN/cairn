@@ -44,7 +44,7 @@ For operators unfamiliar with proper procurement channels, here's how real telec
 1. **IT Department Assessment** - Infrastructure reviews are conducted internally on planned schedules
 2. **Formal RFP Process** - When upgrades are needed, procurement issues formal Requests for Proposal
 3. **Known Vendor Relationships** - NBNE works with established, vetted telecommunications partners
-4. **Internal Communication** - Upgrade notifications come through official NBNE channels (Cairn, internal email, team meetings)
+4. **Internal Communication** - Upgrade notifications come through official NBNE channels (Deek, internal email, team meetings)
 5. **Budget Allocation** - All major system changes go through financial planning cycles
 
 **If you're unsure whether your department needs phone system upgrades, contact IT Service Desk through proper channels.**

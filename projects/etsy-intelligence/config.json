@@ -1,7 +1,7 @@
 {
   "name": "Etsy Intelligence",
   "description": "Etsy listing health pipeline — orders, listings, stats via Etsy API v3. Mirrors Amazon Intelligence pattern.",
-  "codebase_path": "D:/claw",
+  "codebase_path": "D:/deek",
   "project_type": "coding",
   "force_model": "api",
 
@@ -29,12 +29,12 @@
   "model_preferences": {
     "force_model": "api",
     "opus_keywords": [
-      "architecture", "cross-module", "Cairn integration",
+      "architecture", "cross-module", "Deek integration",
       "health scoring", "API design"
     ]
   },
 
-  "related_projects": ["amazon-intelligence", "manufacturing", "claw"],
+  "related_projects": ["amazon-intelligence", "manufacturing", "deek"],
 
   "indexing": {
     "auto_reindex": false,

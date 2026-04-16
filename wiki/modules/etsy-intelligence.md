@@ -13,8 +13,8 @@ is handled by [[modules/render]] via its own Etsy OAuth + API integration.
 - **Toby Fletcher** — Etsy listing review, sales tracking
 
 ## Tech Stack
-- Backend: Python (embedded in Cairn FastAPI at core/etsy_intel/)
-- Database: 4 etsy_* tables in Cairn's PostgreSQL on nbne1
+- Backend: Python (embedded in Deek FastAPI at core/etsy_intel/)
+- Database: 4 etsy_* tables in Deek's PostgreSQL on nbne1
 - API routes: /etsy/* (mounted in api/routes/etsy_intel.py)
 - Etsy API: v3, API key auth (read-only), 5 QPS rate limiting via asyncio semaphore
 

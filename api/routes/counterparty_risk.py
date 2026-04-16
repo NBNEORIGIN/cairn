@@ -1,5 +1,5 @@
 """
-Cairn Counterparty Risk proxy endpoint.
+Deek Counterparty Risk proxy endpoint.
 
 Proxies to CRM's counterparty-risk API. Sub-agents consume this endpoint
 to get terms profiles — they never access CRM's database directly.
@@ -18,7 +18,9 @@ router = APIRouter(
 )
 
 _CRM_BASE = os.getenv("CRM_BASE_URL", "https://crm.nbnesigns.co.uk")
-_CRM_API_KEY = os.getenv("CAIRN_API_KEY", "")
+_CRM_API_KEY = (os.getenv("DEEK_API_KEY")
+                or os.getenv("CAIRN_API_KEY")
+                or os.getenv("CLAW_API_KEY", ""))
 
 
 async def _proxy_to_crm(path: str) -> dict:
@@ -58,7 +60,7 @@ async def get_counterparty_risk(counterparty_risk_id: str):
     Proxy to CRM: GET /api/counterparty-risk/{id}
 
     The CRM enforces access control based on the session role.
-    This endpoint uses the Cairn service account which gets sub-agent
+    This endpoint uses the Deek service account which gets sub-agent
     level access (band + terms profile only, no signal evidence).
     """
     data = await _proxy_to_crm(counterparty_risk_id)

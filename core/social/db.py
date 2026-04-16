@@ -1,7 +1,7 @@
 """
-Cairn Social database schema + query helpers.
+Deek Social database schema + query helpers.
 
-Tables use the `social_` prefix and live in the same Cairn PostgreSQL DB as
+Tables use the `social_` prefix and live in the same Deek PostgreSQL DB as
 everything else. Same psycopg2 pattern as core/amazon_intel/db.py.
 """
 import json
@@ -17,7 +17,7 @@ import psycopg2.extras
 def get_db_url() -> str:
     return os.getenv(
         'DATABASE_URL',
-        'postgresql://postgres:postgres123@localhost:5432/claw',
+        'postgresql://postgres:postgres123@localhost:5432/deek',
     )
 
 
@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS social_draft_variant (
     is_published       BOOLEAN NOT NULL DEFAULT FALSE,
     published_at       TIMESTAMPTZ,
     published_url      TEXT,
-    cairn_memory_id    VARCHAR(128)
+    deek_memory_id    VARCHAR(128)
 );
 CREATE INDEX IF NOT EXISTS idx_social_variant_draft
     ON social_draft_variant (draft_id);
@@ -77,7 +77,7 @@ CREATE INDEX IF NOT EXISTS idx_social_variant_platform
 
 
 def ensure_schema() -> None:
-    """Create social_* tables if they don't exist. Called at Cairn startup."""
+    """Create social_* tables if they don't exist. Called at Deek startup."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(_SQL_SCHEMA)
@@ -228,7 +228,7 @@ def mark_variant_published(
     *,
     variant_id: int,
     published_url: Optional[str],
-    cairn_memory_id: Optional[str],
+    deek_memory_id: Optional[str],
 ) -> Optional[dict]:
     with get_conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -238,11 +238,11 @@ def mark_variant_published(
                 SET is_published = TRUE,
                     published_at = NOW(),
                     published_url = COALESCE(%s, published_url),
-                    cairn_memory_id = COALESCE(%s, cairn_memory_id)
+                    deek_memory_id = COALESCE(%s, deek_memory_id)
                 WHERE id = %s
                 RETURNING *
                 """,
-                (published_url, cairn_memory_id, variant_id),
+                (published_url, deek_memory_id, variant_id),
             )
             row = cur.fetchone()
             conn.commit()

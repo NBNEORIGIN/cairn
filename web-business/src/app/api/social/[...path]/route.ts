@@ -4,11 +4,11 @@ import { cairnFetch } from '@/lib/api'
 import { AUTH_COOKIE_NAME, isTokenExpired } from '@/lib/auth'
 
 /**
- * Auth-guarded catch-all proxy to the Cairn Social module.
+ * Auth-guarded catch-all proxy to the Deek Social module.
  *
  * The browser calls /api/social/<anything>, this route checks the Next
- * auth cookie, then forwards to the Cairn API with the server-side
- * X-API-Key via cairnFetch. Keeps the Cairn key out of the browser and
+ * auth cookie, then forwards to the Deek API with the server-side
+ * X-API-Key via cairnFetch. Keeps the Deek key out of the browser and
  * means adding new social endpoints on the backend requires no web
  * changes — they're reachable immediately.
  */
@@ -64,7 +64,7 @@ async function forward(
     })
   } catch {
     return NextResponse.json(
-      { error: 'Cairn social service unavailable' },
+      { error: 'Deek social service unavailable' },
       { status: 503 },
     )
   }

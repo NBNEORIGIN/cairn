@@ -1,5 +1,5 @@
 """
-CLAW product-hardening smoke + light stress test.
+DEEK product-hardening smoke + light stress test.
 
 Runs against the FastAPI app in-process with model calls mocked so the script is
 deterministic and does not spend API credits.
@@ -25,18 +25,23 @@ sys.path.insert(0, str(ROOT))
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
 os.environ.setdefault("OPENAI_API_KEY", "")
 os.environ.setdefault("API_PROVIDER", "claude")
-os.environ.setdefault("CLAW_API_KEY", "claw-dev-key-change-in-production")
-os.environ.setdefault("DATABASE_URL", "postgresql://postgres:postgres123@localhost:5432/claw")
-os.environ.setdefault("CLAW_DATA_DIR", tempfile.mkdtemp(prefix="claw-smoke-data-"))
+os.environ.setdefault("DEEK_API_KEY", "deek-dev-key-change-in-production")
+os.environ.setdefault("CAIRN_API_KEY", "deek-dev-key-change-in-production")
+os.environ.setdefault("CLAW_API_KEY", "deek-dev-key-change-in-production")
+os.environ.setdefault("DATABASE_URL", "postgresql://postgres:postgres123@localhost:5432/deek")
+os.environ.setdefault("DEEK_DATA_DIR", tempfile.mkdtemp(prefix="deek-smoke-data-"))
+os.environ.setdefault("CLAW_DATA_DIR", os.environ.get("DEEK_DATA_DIR", ""))
 os.environ.setdefault("OLLAMA_BASE_URL", "http://localhost:11434")
 os.environ.setdefault("OLLAMA_MODEL", "qwen2.5-coder:7b")
+os.environ.setdefault("DEEK_FORCE_API", "true")
 os.environ.setdefault("CLAW_FORCE_API", "true")
+os.environ.setdefault("DEEK_ENABLE_WATCHER", "false")
 os.environ.setdefault("CLAW_ENABLE_WATCHER", "false")
 os.environ.setdefault("CLAUDE_MODEL", "claude-sonnet-4-6")
 os.environ.setdefault("CLAUDE_OPUS_MODEL", "claude-opus-4-6")
 
 ARCHITECTURE_PROMPT = (
-    "Read the CLAW codebase and explain how chat requests flow from the web UI "
+    "Read the DEEK codebase and explain how chat requests flow from the web UI "
     "to the model response. Name the main files involved and point out where "
     "model routing, context retrieval, validation, and streaming happen."
 )
@@ -83,7 +88,7 @@ def _read_stream_events(client: TestClient, headers: dict[str, str]) -> list[dic
         "/chat/stream",
         headers=headers,
         params={
-            "project": "claw",
+            "project": "deek",
             "session_id": f"stream-{uuid.uuid4().hex[:8]}",
             "message": ARCHITECTURE_PROMPT,
             "model_override": "sonnet",
@@ -98,7 +103,7 @@ def _read_stream_events(client: TestClient, headers: dict[str, str]) -> list[dic
 
 
 def run() -> dict:
-    headers = {"X-API-Key": os.environ["CLAW_API_KEY"]}
+    headers = {"X-API-Key": os.environ["DEEK_API_KEY"]}
     fake_response = (
         (
             "Chat requests start in web/src/components/ChatWindow.tsx, go through "
@@ -122,7 +127,7 @@ def run() -> dict:
     ):
         mock_chat.return_value = fake_response
         import api.main as main
-        from core.agent import ClawAgent
+        from core.agent import DeekAgent
 
         @asynccontextmanager
         async def _noop_lifespan(_app):
@@ -130,8 +135,8 @@ def run() -> dict:
 
         main.app.router.lifespan_context = _noop_lifespan
         main._agents.clear()
-        config = json.loads((ROOT / "projects" / "claw" / "config.json").read_text())
-        main._agents["claw"] = ClawAgent("claw", config)
+        config = json.loads((ROOT / "projects" / "deek" / "config.json").read_text())
+        main._agents["deek"] = DeekAgent("deek", config)
         main._ollama_status_fast = AsyncMock(return_value={
             "available": False,
             "active_model": None,
@@ -149,7 +154,7 @@ def run() -> dict:
             "/chat",
             headers=headers,
             json={
-                "project_id": "claw",
+                "project_id": "deek",
                 "session_id": session_id,
                 "content": ARCHITECTURE_PROMPT,
                 "model_override": "sonnet",
@@ -161,7 +166,7 @@ def run() -> dict:
         stop = client.post(
             "/chat/stop",
             headers=headers,
-            json={"project_id": "claw", "session_id": session_id},
+            json={"project_id": "deek", "session_id": session_id},
         )
 
         stress_results = []
@@ -171,7 +176,7 @@ def run() -> dict:
                 "/chat",
                 headers=headers,
                 json={
-                    "project_id": "claw",
+                    "project_id": "deek",
                     "session_id": sid,
                     "content": f"smoke message {i}",
                 },

@@ -34,7 +34,7 @@ When contacting the customer about logo quality issues, always provide **three c
    - Guarantees crisp, high-quality finish at any size
    - Be upfront: this takes time and incurs additional cost
    - Typical turnaround: 2-3 working days depending on logo complexity
-   - Quote this option but don't quote specific pricing in initial email (check current rates in Cairn first)
+   - Quote this option but don't quote specific pricing in initial email (check current rates in Deek first)
 
 3. **Simplified vectorisation**
    - Create a cleaner, simplified version of the logo
@@ -68,7 +68,7 @@ When contacting the customer about logo quality issues, always provide **three c
 
 ⚠️ **Watch for scope creep** – if the customer requests colour changes or design modifications during vectorisation, this is additional work and should be quoted separately.
 
-## Recording the Decision in Cairn
+## Recording the Decision in Deek
 
 Once the customer responds:
 

@@ -1,8 +1,8 @@
 """
-Cairn Social API routes — drafting, proof-reading, refining, and publishing
+Deek Social API routes — drafting, proof-reading, refining, and publishing
 posts for Jo at NBNE.
 
-Mounted at /social/* in the Cairn FastAPI app. Reference structural pattern:
+Mounted at /social/* in the Deek FastAPI app. Reference structural pattern:
 api/routes/amazon_intel.py.
 
 Phase 1 endpoints:
@@ -32,7 +32,7 @@ from pydantic import BaseModel, Field
 
 from api.middleware.auth import verify_api_key
 
-router = APIRouter(prefix='/social', tags=['Cairn Social'])
+router = APIRouter(prefix='/social', tags=['Deek Social'])
 
 
 # ── Request/response models ──────────────────────────────────────────────────
@@ -459,13 +459,13 @@ async def publish_variant(
     body: PublishRequest,
     _: bool = Depends(verify_api_key),
 ):
-    """Mark a variant as published and write it to Cairn memory.
+    """Mark a variant as published and write it to Deek memory.
 
-    Per CAIRN_SOCIAL_V2_HANDOFF.md Blocker 2 + implementation note 6:
+    Per DEEK_SOCIAL_V2_HANDOFF.md Blocker 2 + implementation note 6:
     this is the most important flow in the module. We do a dual write:
 
       1. claw_code_chunks (chunk_type='social_post') with embedding —
-         makes the post discoverable via Cairn's Ask interface
+         makes the post discoverable via Deek's Ask interface
       2. core.memory.store decision row — equivalent to /memory/write,
          makes the post visible in chat history retrieval
 
@@ -514,12 +514,12 @@ async def publish_variant(
         source_mode=draft.get('source_mode') or 'brief',
     )
 
-    cairn_memory_id = chunk_path or decision_session
+    deek_memory_id = chunk_path or decision_session
 
     updated = mark_variant_published(
         variant_id=variant_id,
         published_url=body.published_url,
-        cairn_memory_id=cairn_memory_id,
+        deek_memory_id=deek_memory_id,
     )
 
     return {

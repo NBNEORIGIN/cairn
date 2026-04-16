@@ -1,9 +1,9 @@
 /**
- * Shared file content extraction for Cairn uploads.
+ * Shared file content extraction for Deek uploads.
  * Handles PDF, DOCX, images (via Claude Vision), and plain text.
  */
 
-import { CAIRN_API_URL, CAIRN_API_KEY } from './api'
+import { DEEK_API_URL, DEEK_API_KEY } from './api'
 
 const MAX_TEXT_LENGTH = 50000
 
@@ -43,7 +43,7 @@ export async function extractText(
     }
   }
 
-  // Images — route through Cairn API for Claude Vision
+  // Images — route through Deek API for Claude Vision
   if (['.png', '.jpg', '.jpeg', '.webp', '.gif'].includes(ext)) {
     try {
       const text = await analyzeImageViaCairn(buffer, filename, ext)
@@ -57,8 +57,8 @@ export async function extractText(
 }
 
 /**
- * Send image to Cairn backend for Claude Vision analysis.
- * Uses a dedicated endpoint on the Cairn API.
+ * Send image to Deek backend for Claude Vision analysis.
+ * Uses a dedicated endpoint on the Deek API.
  */
 async function analyzeImageViaCairn(
   buffer: Buffer,
@@ -75,10 +75,10 @@ async function analyzeImageViaCairn(
   const mediaType = mimeMap[ext] || 'image/png'
   const base64 = buffer.toString('base64')
 
-  const res = await fetch(`${CAIRN_API_URL}/analyze-image`, {
+  const res = await fetch(`${DEEK_API_URL}/analyze-image`, {
     method: 'POST',
     headers: {
-      'X-API-Key': CAIRN_API_KEY,
+      'X-API-Key': DEEK_API_KEY,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({

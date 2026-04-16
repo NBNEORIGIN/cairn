@@ -32,7 +32,7 @@ class GenerationTimedOut(Exception):
     """Raised when a request exceeds the end-to-end deadline."""
 
 
-class ClawAgent:
+class DeekAgent:
     """
     Core agent orchestrator.
     Receives normalised MessageEnvelope from any channel.
@@ -59,7 +59,7 @@ class ClawAgent:
         )
         self.memory = MemoryStore(
             project_id=project_id,
-            data_dir=os.getenv('CLAW_DATA_DIR', './data'),
+            data_dir=os.getenv('DEEK_DATA_DIR') or os.getenv('CLAW_DATA_DIR', './data'),
         )
         self.ollama = OllamaClient(
             base_url=os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434'),
@@ -127,7 +127,7 @@ class ClawAgent:
 
     def _system_prompt_prefix(self) -> str:
         return (
-            "You are CLAW, a sovereign AI coding agent.\n"
+            "You are DEEK, a sovereign AI coding agent.\n"
             "Rules:\n"
             "1. Use your provided tools to answer requests — do not describe "
             "what you would do, just do it.\n"
@@ -141,7 +141,7 @@ class ClawAgent:
         )
 
     def _request_deadline_seconds(self) -> float:
-        raw = os.getenv('CLAW_REQUEST_TIMEOUT_SECONDS', '90')
+        raw = os.getenv('DEEK_REQUEST_TIMEOUT_SECONDS') or os.getenv('CLAW_REQUEST_TIMEOUT_SECONDS', '90')
         try:
             return max(15.0, float(raw))
         except (TypeError, ValueError):
@@ -206,7 +206,7 @@ class ClawAgent:
                 or self.skills.get_skill_subproject_id(active_skill_ids)
             )
         except Exception as exc:
-            logger.debug('[CLAW] Async skill resolution failed, using legacy: %s', exc)
+            logger.debug('[DEEK] Async skill resolution failed, using legacy: %s', exc)
             active_skills = self.skills.resolve_for_request(
                 query=envelope.content,
                 subproject_id=envelope.subproject_id,
@@ -295,7 +295,7 @@ class ClawAgent:
             and self.skills.should_escalate_to_opus(envelope.content, active_skill_ids)
         ):
             envelope.model_override = 'opus'
-            logger.info('[CLAW] Opus escalation from skill keywords')
+            logger.info('[DEEK] Opus escalation from skill keywords')
 
         # Bind subproject to this session on first set
         if effective_subproject_id:
@@ -326,7 +326,7 @@ class ClawAgent:
                     config=self.config,
                 )
             except Exception as exc:
-                logger.warning(f"[CLAW] mention resolution failed: {exc}")
+                logger.warning(f"[DEEK] mention resolution failed: {exc}")
 
         # Build context prompt (scoped to subproject when set)
         raw_context_prompt, context_meta = self.context.build_context_prompt(
@@ -485,7 +485,7 @@ class ClawAgent:
                 mentions=resolved_mentions,
             )
         except Exception as exc:
-            logger.warning('[CLAW] assembler.assemble failed: %s', exc)
+            logger.warning('[DEEK] assembler.assemble failed: %s', exc)
 
         context_tokens = estimate_tokens(context_prompt + envelope.content)
         memory_meta = self._build_memory_metadata(
@@ -1294,7 +1294,7 @@ class ClawAgent:
         # explicitly asking for a synthesis. This is the safety net.
         if not (current_text or '').strip():
             logger.info(
-                f"[CLAW] tool loop produced empty response — synthesising answer"
+                f"[DEEK] tool loop produced empty response — synthesising answer"
             )
             synthesis_msg = (
                 f"Based on the information you just retrieved, please answer "
@@ -1378,7 +1378,7 @@ class ClawAgent:
             if self.memory.should_trim(session_id):
                 removed = self.memory.trim_session(session_id)
                 logger.info(
-                    f"[CLAW] Trimmed {removed} messages from session {session_id}"
+                    f"[DEEK] Trimmed {removed} messages from session {session_id}"
                 )
                 meta['session_trimmed'] = True
                 meta['messages_removed'] = removed
@@ -1393,11 +1393,11 @@ class ClawAgent:
                 )
                 summary = '\n'.join(f'- {b}' for b in summary_bullets)
                 self.memory.archive_session(session_id, summary)
-                logger.info(f"[CLAW] Archived session {session_id}")
+                logger.info(f"[DEEK] Archived session {session_id}")
                 meta['session_archived'] = True
                 meta['archive_summary'] = summary
         except Exception as exc:
-            logger.warning(f"[CLAW] trim/archive check failed: {exc}")
+            logger.warning(f"[DEEK] trim/archive check failed: {exc}")
         return meta
 
     async def _handle_tool_approval(
@@ -1949,7 +1949,7 @@ class ClawAgent:
 
         response = (
             f"I gathered context for your request, `{original_message}`.\n\n"
-            "Here are the main sources CLAW inspected:"
+            "Here are the main sources DEEK inspected:"
         )
         if files_reviewed:
             response += '\n' + '\n'.join(f"- `{path}`" for path in files_reviewed[:8])
@@ -2018,9 +2018,9 @@ class ClawAgent:
 
     def _embed(self, text: str) -> list[float]:
         """Embedding function for Tier 2 context retrieval.
-        Respects CAIRN_EMBED_PROVIDER: 'openai' uses OpenAI, otherwise Ollama."""
+        Respects DEEK_EMBED_PROVIDER: 'openai' uses OpenAI, otherwise Ollama."""
         import httpx
-        provider = os.getenv('CAIRN_EMBED_PROVIDER', '').lower()
+        provider = (os.getenv('DEEK_EMBED_PROVIDER') or os.getenv('CAIRN_EMBED_PROVIDER', '')).lower()
 
         if provider == 'openai' or (provider != 'ollama' and not self._ollama_available()):
             # Use OpenAI text-embedding-3-small (768 dims)
@@ -2260,7 +2260,7 @@ class ClawAgent:
         ))
 
     def _model_timeout_seconds(self) -> float:
-        raw = os.getenv('CLAW_MODEL_TIMEOUT_SECONDS', '45')
+        raw = os.getenv('DEEK_MODEL_TIMEOUT_SECONDS') or os.getenv('CLAW_MODEL_TIMEOUT_SECONDS', '45')
         try:
             return max(5.0, float(raw))
         except (TypeError, ValueError):
@@ -2372,7 +2372,7 @@ class ClawAgent:
         from .tools.video_tools import generate_video_tool
         from .tools.image_tools import generate_image_tool
         from .tools.ami_tools import query_amazon_intel_tool
-        from .tools.cairn_tools import (
+        from .tools.deek_tools import (
             get_module_snapshot_tool,
             search_emails_tool,
             search_wiki_tool,
@@ -2398,7 +2398,7 @@ class ClawAgent:
             generate_video_tool, generate_image_tool,
             # Amazon Intelligence
             query_amazon_intel_tool,
-            # Cairn federation + memory (module snapshots, emails, wiki)
+            # Deek federation + memory (module snapshots, emails, wiki)
             get_module_snapshot_tool,
             search_emails_tool,
             search_wiki_tool,

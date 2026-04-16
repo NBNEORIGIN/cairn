@@ -1,0 +1,32 @@
+[
+  {
+    "id": "stop-button-flow",
+    "prompt": "Read the DEEK codebase and explain how the stop button works end to end. Only use files inside the DEEK repo itself. Name the web UI file, the Next.js proxy route, the FastAPI endpoint, and where the agent cooperatively stops an in-flight request.",
+    "required_markers": [
+      "ChatWindow.tsx",
+      "web/src/app/api/chat/stop/route.ts",
+      "api/main.py",
+      "core/agent.py",
+      "request_stop",
+      "GenerationStopped"
+    ],
+    "forbidden_markers": [
+      "pages/api/stop.ts"
+    ]
+  },
+  {
+    "id": "context-assembly-flow",
+    "prompt": "Explain how DEEK assembles context for a chat request, including core.md, hybrid retrieval, mentions, recent history, and manual skills.",
+    "required_markers": [
+      "core.md",
+      "hybrid",
+      "core/context/engine.py",
+      "core/memory/assembler.py",
+      "mentions",
+      "skills"
+    ],
+    "forbidden_markers": [
+      "pages/api/"
+    ]
+  }
+]

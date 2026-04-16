@@ -34,7 +34,7 @@ When receiving client feedback:
 
 Once design is confirmed:
 
-1. Update project status in Cairn to "Design Approved"
+1. Update project status in Deek to "Design Approved"
 2. Move the approved design (Design 2 in this case) to the production-ready folder
 3. Archive rejected design options with the project files
 4. Schedule production timeline
@@ -74,7 +74,7 @@ After receiving approval:
 
 1. **Rename approved file**: Change from "poster_design_option2.pdf" to "poster_design_APPROVED_[date].pdf"
 2. **Update project folder**: Move to "03_Approved_Designs" subfolder
-3. **Tag in Cairn**: Add "design approved" tag and client name
+3. **Tag in Deek**: Add "design approved" tag and client name
 4. **Archive alternatives**: Move rejected options to "Archive_Design_Options" with date stamp
 5. **Link approval email**: Save or link the approval email in project documentation
 
@@ -89,6 +89,6 @@ After receiving approval:
 - **Design Revision Requests** - What to do when clients request changes
 - **Client Communication Standards** - NBNE email and messaging guidelines
 - **Production Workflow** - Moving from approved design to printing
-- **Project File Structure** - How to organize design projects in Cairn
+- **Project File Structure** - How to organize design projects in Deek
 - **Holiday Period Protocols** - Managing client projects during vacation periods
 - **Multi-Option Design Presentations** - Best practices for presenting design choices

@@ -43,7 +43,7 @@ This is a common phishing/spam email that uses social engineering tactics to con
 If you're unsure whether a system upgrade is actually scheduled:
 
 - Check internal IT communications and project boards
-- Review Cairn for planned infrastructure work
+- Review Deek for planned infrastructure work
 - Contact IT Service Desk through official channels
 - Verify with your line manager or department head
 

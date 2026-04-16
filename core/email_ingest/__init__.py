@@ -1,5 +1,5 @@
 """
-Cairn Email Ingestion — cairn@ memory inbox + bulk ingest from sales@ / toby@.
+Deek Email Ingestion — cairn@ memory inbox + bulk ingest from sales@ / toby@.
 
 Modules:
     db          — schema + get_conn

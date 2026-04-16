@@ -1,7 +1,7 @@
 """
 Etsy Intelligence API routes.
 
-Mounted at /etsy/* in the Cairn FastAPI app.
+Mounted at /etsy/* in the Deek FastAPI app.
 """
 import os
 import secrets
@@ -257,15 +257,15 @@ async def list_sales(
     Returns one row per Etsy listing that had any sales in the window, with
     the listing's stored SKU plus total units. Built for the manufacture app's
     Sales Velocity module (Phase 2B.3) which consumes it via HTTP as a
-    cross-module read — manufacture does not query Cairn's Postgres directly,
+    cross-module read — manufacture does not query Deek's Postgres directly,
     per the hard rule in `CLAUDE.md`.
 
-    Requires `X-API-Key` header matching `CLAW_API_KEY`. The other `/etsy/*`
+    Requires `X-API-Key` header matching `DEEK_API_KEY`. The other `/etsy/*`
     routes are currently unauthenticated; this endpoint is explicitly gated
     because it crosses a module boundary.
 
     Defensive behaviour: rows where `etsy_listings.sku` is NULL or contains
-    a comma (indicating Cairn's `skus[0]` ingest collapsed a multi-SKU
+    a comma (indicating Deek's `skus[0]` ingest collapsed a multi-SKU
     variation — see `core/etsy_intel/sync.py::_parse_receipts`) are
     excluded from the result and counted in the returned `skipped_*`
     fields so callers can detect data-quality regressions.
@@ -303,7 +303,7 @@ async def list_sales(
             skipped_null_sku += 1
             continue
         if "," in sku:
-            # Cairn's ingest collapsed a multi-SKU variation into a single
+            # Deek's ingest collapsed a multi-SKU variation into a single
             # cell. We cannot safely attribute per-variation sales without a
             # schema change upstream — skip and count, so a regression shows.
             log.warning(
@@ -359,18 +359,18 @@ async def latest_report():
 
 @router.post("/index-to-memory")
 async def index_to_memory():
-    """Push Etsy Intelligence context into Cairn memory."""
-    from core.etsy_intel.reports import build_cairn_context
+    """Push Etsy Intelligence context into Deek memory."""
+    from core.etsy_intel.reports import build_deek_context
     import httpx
     import os
 
-    context = build_cairn_context()
-    cairn_url = os.getenv('CAIRN_API_URL', 'http://localhost:8765')
+    context = build_deek_context()
+    deek_url = os.getenv('DEEK_API_URL') or os.getenv('CAIRN_API_URL', 'http://localhost:8765')
 
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.post(
-                f'{cairn_url}/memory/write',
+                f'{deek_url}/memory/write',
                 json={
                     'project': 'etsy-intelligence',
                     'query': 'Etsy Intelligence weekly context snapshot',
@@ -388,10 +388,10 @@ async def index_to_memory():
         return {'status': 'partial', 'context': context, 'memory_error': str(e)}
 
 
-# ── Cairn Context ────────────────────────────────────────────────────────────
+# ── Deek Context ────────────────────────────────────────────────────────────
 
 @router.get("/cairn/context")
-async def cairn_context():
-    """Module context endpoint per CAIRN_MODULES.md spec."""
-    from core.etsy_intel.reports import build_cairn_context
-    return build_cairn_context()
+async def deek_context():
+    """Module context endpoint per DEEK_MODULES.md spec."""
+    from core.etsy_intel.reports import build_deek_context
+    return build_deek_context()

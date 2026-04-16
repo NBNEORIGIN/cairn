@@ -1,5 +1,5 @@
 """
-Shared fixtures for the CLAW test suite.
+Shared fixtures for the DEEK test suite.
 """
 import os
 import sys
@@ -17,11 +17,15 @@ sys.path.insert(0, str(ROOT))
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
 os.environ.setdefault("OPENAI_API_KEY", "")
 os.environ.setdefault("API_PROVIDER", "claude")
-os.environ.setdefault("CLAW_API_KEY", "claw-dev-key-change-in-production")
-os.environ.setdefault("DATABASE_URL", "postgresql://postgres:postgres123@localhost:5432/claw")
-os.environ.setdefault("CLAW_DATA_DIR", tempfile.mkdtemp(prefix="claw-pytest-data-"))
+os.environ.setdefault("DEEK_API_KEY", "deek-dev-key-change-in-production")
+os.environ.setdefault("CAIRN_API_KEY", "deek-dev-key-change-in-production")
+os.environ.setdefault("CLAW_API_KEY", "deek-dev-key-change-in-production")
+os.environ.setdefault("DATABASE_URL", "postgresql://postgres:postgres123@localhost:5432/deek")
+os.environ.setdefault("DEEK_DATA_DIR", tempfile.mkdtemp(prefix="deek-pytest-data-"))
+os.environ.setdefault("CLAW_DATA_DIR", os.environ.get("DEEK_DATA_DIR", ""))
 os.environ.setdefault("OLLAMA_BASE_URL", "http://localhost:11434")
 os.environ.setdefault("OLLAMA_MODEL", "qwen2.5-coder:7b")
+os.environ.setdefault("DEEK_FORCE_API", "true")
 os.environ.setdefault("CLAW_FORCE_API", "true")
 os.environ.setdefault("CLAUDE_MODEL", "claude-sonnet-4-6")
 os.environ.setdefault("CLAUDE_OPUS_MODEL", "claude-opus-4-6")
@@ -32,7 +36,7 @@ _FAKE_EMBEDDING = [0.1] * 768
 
 @pytest.fixture(scope="session")
 def api_key():
-    return os.environ["CLAW_API_KEY"]
+    return os.environ["DEEK_API_KEY"]
 
 
 @pytest.fixture(scope="session")
@@ -47,12 +51,12 @@ def mock_ollama_in_tests(monkeypatch):
     for a real Ollama response. Tests run fast regardless of Ollama state.
 
     Patches at two levels:
-      1. Class methods — ClawAgent._embed, CodeIndexer.embed/check_embedding_model
+      1. Class methods — DeekAgent._embed, CodeIndexer.embed/check_embedding_model
       2. httpx.post catch-all — intercepts any Ollama URL before it hits the network
     """
     # Patch agent embedding at class level
     monkeypatch.setattr(
-        'core.agent.ClawAgent._embed',
+        'core.agent.DeekAgent._embed',
         lambda self, text: _FAKE_EMBEDDING,
     )
 

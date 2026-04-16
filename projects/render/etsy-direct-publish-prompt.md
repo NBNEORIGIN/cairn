@@ -13,8 +13,8 @@ Render currently exports Etsy listings as an XLSX file (`export_etsy.py`) format
 for the **Etsy Shop Uploader** third-party tool. The user downloads the XLSX, then
 manually uploads it to Shop Uploader, which creates the listings on Etsy.
 
-NBNE now has Etsy API v3 OAuth working in the Cairn codebase (`core/etsy_intel/`).
-The OAuth flow is live at `cairn.nbnesigns.co.uk/etsy/oauth/` with `transactions_r`
+NBNE now has Etsy API v3 OAuth working in the Deek codebase (`core/etsy_intel/`).
+The OAuth flow is live at `deek.nbnesigns.co.uk/etsy/oauth/` with `transactions_r`
 and `shops_r` scopes. The next step is to add `listings_w` scope and build direct
 API publishing in Render — eliminating Shop Uploader from the workflow entirely.
 
@@ -182,7 +182,7 @@ with a "Connect Etsy" button that triggers the OAuth flow.
 | `content_generator.py` | AI content generation (Claude) — reuse for Etsy titles/descriptions |
 | `config.py` | Single source of truth for sizes, prices, colours — **read from here, never duplicate** |
 | `image_generator.py` | Image generation pipeline — images are at `{PUBLIC_BASE_URL}/{m_number} - {NNN}.jpg` |
-| `D:\claw\core\etsy_intel\api_client.py` | Cairn's Etsy API client — reference for auth header format and rate limiting |
+| `D:\deek\core\etsy_intel\api_client.py` | Deek's Etsy API client — reference for auth header format and rate limiting |
 
 ## Config Values (from `export_etsy.py` and Etsy account)
 
@@ -202,7 +202,7 @@ ETSY_RETURN_POLICY_ID = 1074420280634      # return=true, exchange=true, 30 days
 - **Keep `export_etsy.py`** as a fallback for bulk operations or if API is down.
 - **Store Etsy listing_id** on the product record after creation for future updates/deletes.
 - **Images are served from the Render server** — use `PUBLIC_BASE_URL` env var for the URL base.
-- **Don't touch Cairn's etsy_intel module** — that's read-only analytics. This is Render's publish pipeline.
+- **Don't touch Deek's etsy_intel module** — that's read-only analytics. This is Render's publish pipeline.
 
 ## Testing
 

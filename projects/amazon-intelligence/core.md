@@ -1,9 +1,9 @@
 # Amazon Listing Intelligence — Core Context
 
 ## What this is
-Amazon listing health pipeline for NBNE. Ingests data from Seller Central (manual upload or SP-API automated), cross-references with Manufacture margin data, and produces prioritised snapshots with health scores, diagnosis codes, and recommended actions. Live data flows automatically into Cairn chat.
+Amazon listing health pipeline for NBNE. Ingests data from Seller Central (manual upload or SP-API automated), cross-references with Manufacture margin data, and produces prioritised snapshots with health scores, diagnosis codes, and recommended actions. Live data flows automatically into Deek chat.
 
-**Phase 1 (complete):** Manual uploads + health scoring + Cairn context endpoint
+**Phase 1 (complete):** Manual uploads + health scoring + Deek context endpoint
 **Phase 2 (complete):** SP-API automated sync 4x daily + auto snapshot rebuild
 
 ## Data sources
@@ -52,14 +52,14 @@ Until then, advertising data continues via manual upload — working fine.
 
 ## Architecture
 
-Code lives inside the Cairn repo at `D:\claw`, not standalone.
+Code lives inside the Deek repo at `D:\deek`, not standalone.
 
 | Component | Path |
 |---|---|
 | Core logic | `core/amazon_intel/` |
 | SP-API modules | `core/amazon_intel/spapi/` |
 | API routes | `api/routes/amazon_intel.py` (mounted at `/ami/*`) |
-| Database | 8 `ami_*` tables in Cairn's PostgreSQL |
+| Database | 8 `ami_*` tables in Deek's PostgreSQL |
 | Config | `projects/amazon-intelligence/config.json` |
 
 ### Data pipeline
@@ -71,7 +71,7 @@ Business Report (manual or SP-API GET_SALES_AND_TRAFFIC_REPORT) → ami_business
 Advertising (manual or Ads API Sponsored Products report) ───→ ami_advertising_data ───┘        ↓
                                                                                /ami/cairn/context
                                                                                         ↓
-                                                                             Cairn chat (every message)
+                                                                             Deek chat (every message)
 ```
 
 ### Automated sync chain (SP-API)
@@ -90,7 +90,7 @@ cron (0 0,6,12,18 * * * /etc/cron.d/cairn-spapi)
 **SP-API sync:** `/spapi/sync`, `/spapi/sync/inventory`, `/spapi/sync/analytics`, `/spapi/sync/advertising`, `/spapi/status`, `/spapi/advertising/profiles`
 **Listings write:** `/spapi/listings/{sku}`, `/spapi/listings/{sku}/price`, `/spapi/listings/{sku}/bullets`, `/spapi/listings/{sku}/title`
 **Analysis:** `/snapshots/build`, `/snapshots`, `/snapshots/{asin}`, `/underperformers`, `/report/generate`, `/report/latest`
-**Cairn:** `/cairn/context`, `/index-to-memory`
+**Deek:** `/cairn/context`, `/index-to-memory`
 **Utility:** `/health`, `/sku-mapping/sync`, `/sku-mapping/stats`, `/migrate`, `/new-products/ingest`
 
 ### Database tables
@@ -125,8 +125,8 @@ GET {url} → download + optional gunzip → bytes → existing parser
 ### 2026-04-03 — All Listings Report as primary SKU→ASIN bridge
 Business report join was 144/4,142 (3.5%) without it. Added parser, join went to 627 matches (4.4x). 3,638 flatfile rows gained ASINs.
 
-### 2026-04-03 — Code embedded in Cairn repo
-AMI is tightly coupled to Cairn's FastAPI app. Extracting to standalone service adds infrastructure with no benefit. `include_paths` in config.json scopes Cairn indexer to AMI files only.
+### 2026-04-03 — Code embedded in Deek repo
+AMI is tightly coupled to Deek's FastAPI app. Extracting to standalone service adds infrastructure with no benefit. `include_paths` in config.json scopes Deek indexer to AMI files only.
 
 ### 2026-04-06 — SP-API embedded in core/amazon_intel/spapi/, not standalone service
 Shares DB connection, same process, same `.env`. Standalone service only justified if rate limiting becomes a problem (it hasn't).
@@ -135,4 +135,4 @@ Shares DB connection, same process, same `.env`. Standalone service only justifi
 SP-API refresh tokens don't include advertising scope. Manual advertising uploads continue to work. SP-API advertising will follow once separate Ads API authorization is completed.
 
 ### 2026-04-07 — Auto snapshot build after sync
-Snapshots now rebuild automatically after any SP-API sync. Full chain is zero-touch: cron → sync → snapshots → Cairn context → chat.
+Snapshots now rebuild automatically after any SP-API sync. Full chain is zero-touch: cron → sync → snapshots → Deek context → chat.

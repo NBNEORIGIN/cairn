@@ -1,5 +1,5 @@
 """
-Cairn counterfactual intelligence module.
+Deek counterfactual intelligence module.
 
 Stores historical and live decisions so new questions can be answered
 by retrieving structurally similar past situations and their outcomes.

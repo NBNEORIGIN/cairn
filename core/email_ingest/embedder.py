@@ -23,7 +23,7 @@ from core.email_ingest.db import get_conn, get_db_url
 logger = logging.getLogger(__name__)
 
 MAX_CHUNK_CHARS = 1500
-EMBED_PROJECT_ID = 'claw'
+EMBED_PROJECT_ID = 'deek'
 
 
 def _chunk_email(body_text: str, window_words: int = 500, overlap_words: int = 50) -> list[str]:
@@ -58,7 +58,7 @@ def _get_indexer():
         from core.context.indexer import CodeIndexer
         _indexer = CodeIndexer(
             project_id=EMBED_PROJECT_ID,
-            codebase_path=os.getenv('CLAW_DATA_DIR', 'D:/claw'),
+            codebase_path=os.getenv('DEEK_DATA_DIR') or os.getenv('CLAW_DATA_DIR', 'D:/deek'),
             db_url=get_db_url(),
         )
     return _indexer

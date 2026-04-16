@@ -1,125 +1,125 @@
 # Signage and Menus
 
-This article covers the standard signage package and menu ordering process for NBNE venues. Based on a typical client brief, this outlines the common signage requirements for roadside visibility, on-site wayfinding, boundary marking, and customer-facing printed materials. Use this as a template when quoting for similar venue setups.
+This article covers the standard workflow for ordering external signage and printed marketing materials for NBNE venue setups. Based on a typical order placed for The Northumbrian Artisan Pizza Co., this covers decision-making around A-frame signs, flags vs. banners, lane signage, and bulk menu printing.
 
-## Summary
+## Overview
 
-A comprehensive signage order typically includes roadside A-frame signs with directional arrows and QR codes, branded flags for visibility, specialty signage for lane entrances and boundaries, fence-mounted tall signs, and printed menus on card stock. This article breaks down each component, specifications to confirm with clients, and common pitfalls to avoid during the ordering process.
+When setting up or refreshing venue signage, orders typically need to be phased based on budget and priority. The client in this example opted for immediate delivery of menus, A-frame signs, flags, and one lane sign, with fence-mounted signs deferred. Key decisions included material selection (plastic vs. wood A-frames) and cost management (flags vs. banner poles).
 
-## Signage Components
+## Order Breakdown
 
-### 1. Roadside A-Frame Signs
+### 1. Menus (3,000 qty)
 
-**Quantity:** 3 units (standard for multi-approach venues)
+**Specification:**
+- A5 format
+- Full colour, heavy paper/thin card stock
+- Suitable for handouts, menu boxes, letterbox drops
+- Outsourced to local press printer for volume efficiency
 
-**Specifications to confirm:**
-- Directional arrow orientation (left/right/straight)
-- QR code destination URL
-- Material preference (typically weather-resistant correx or metal)
-- Branding/color scheme
-- Size (standard is 600mm x 800mm but verify based on road positioning regulations)
+**Cost:** £295 + VAT
 
-**Key considerations:**
-- Ensure QR codes are tested and functional before print
-- Check local authority requirements for roadside signage placement
-- Consider separate artwork for each sign if arrows differ
+**Priority:** Immediate (confirmed in final response)
 
-### 2. Flags
+### 2. A-Frame Signs (x3)
 
-**Quantity:** 4 units
+**Specification:**
+- Double-sided wooden or plastic A-frames
+- Printed chalkboard-style panels
+- Include arrows and QR codes
+- Proofs supplied before production
 
-**Specifications to confirm:**
-- Flag type (feather, teardrop, or rectangular)
-- Height (typically 2.5m, 3m, or 4m)
-- Single or double-sided printing
-- Base type (ground spike for grass, water base for hard surfaces)
-- Design artwork orientation
+**Cost:** £215 + VAT each (£645 + VAT total for wood)
 
-⚠️ **Warning:** Always confirm base type based on installation surface. Ground spikes are unsuitable for tarmac/concrete and water bases are unstable on soft ground in high winds.
+**Material decision:**
+- Plastic wood-effect frames available but more expensive (example linked: Cestrian Signs recycled plastic option)
+- Alternative: aluminium frames with green powder coating
+- Client requested plastic if heavy; otherwise default to wood
+- **Final decision:** Plastic if weight/stability confirmed; wood otherwise
 
-### 3. Lane Entrance Sign ("Road Sign" Style)
+⚠️ **Warning:** Wooden A-frames rot over time in outdoor conditions. Budget for replacement or choose plastic/aluminium for long-term deployments.
 
-**Quantity:** 1 unit
+### 3. Flags (x2)
 
-**Specifications to confirm:**
-- Mounting method (post-mounted or wall-mounted)
-- Reflective material requirement (if used in low-light conditions)
-- Size and visibility distance
-- Regulatory compliance if resembling official road signage
+**Original quote (x4):**
+- 4150mm x 910mm outdoor-rated flags
+- Heavy-duty aluminium poles with ground spikes
+- £450 + VAT each (£1,800 + VAT for four)
 
-⚠️ **Warning:** Signs resembling official highway signage must not use prohibited colors/shapes (e.g., red triangles, blue circles). Verify local regulations.
+**Client decision:** Two flags only (cost reduction)
 
-### 4. Boundary Line Sign
+**Alternative considered:** Banner poles
+- Significantly cheaper than flags
+- Can be secured to trees or large fence posts
+- Recommended when budget is constrained or mounting points available
 
-**Quantity:** 1 unit
+**Key consideration:** Proper outdoor-rated flags are substantially more expensive than promotional flags. Size and quantity are the main cost levers.
 
-**Specifications to confirm:**
-- Purpose (property boundary marker, safety demarcation, customer instruction)
-- Material durability (especially if boundary is in exposed location)
-- Mounting height and method
-- Visibility requirements from different approaches
+### 4. Lane Sign (x1)
 
-### 5. Walk Fence Tall Signs
+**Specification:**
+- Roadside sponsor-board style
+- 8' × 2' (2440mm × 610mm)
+- Printed ACM panel with medium channel rail
+- VHB and butterfly clip fixings
 
-**Quantity:** 2 units
+**Cost:** £295 + VAT
 
-**Specifications to confirm:**
-- Height above fence line
-- Fixing method (cable ties, brackets, posts)
-- Material (must withstand outdoor exposure)
-- Visibility from customer walking routes
-- Design orientation (portrait typically works best for tall formats)
+**Recommendation from supplier:** Add mains-powered lighting for visibility (not quoted in initial order)
 
-## Menu Ordering
+**Priority:** Immediate (one unit confirmed)
 
-### Standard Specifications
+### 5. Deferred Items
 
-**Size:** A5 (148mm x 210mm)
-- Confirm this is correct size - A5 is indeed half of A4
-- Consider A6 if counter space is limited
+**Fence-mounted ACM signs (x2):**
+- 900 × 600mm ACM panels
+- Screw fixings only
+- £95 + VAT each
+- **Status:** Held pending sizing confirmation
 
-**Material:** Thin card stock (typically 250-350gsm)
-- 250gsm: Budget-friendly, adequate for indoor use
-- 300gsm: Better durability, resists handling wear
-- 350gsm: Premium feel, longest lifespan
+**Two tall fence signs:**
+- Sizing/specification still outstanding
+- Not included in initial order total
 
-**Finish options:**
-- Matt lamination (reduces glare, easier to read)
-- Gloss lamination (more vibrant, easier to wipe clean)
-- Unlaminated (cheapest, but least durable)
+## Cost Management Strategy
 
-**Quantity considerations:**
-- Request previous order quantity as baseline
-- Add 20-30% buffer for wear and tear replacement
-- Confirm whether double-sided printing is required
+The client employed a phased approach:
 
-## Artwork Requirements Checklist
+1. **Immediate priorities:** Menus (£295), A-frames (£645), flags (2 units, approx. £900), lane sign (£295)
+2. **Estimated immediate total:** ~£2,135 + VAT
+3. **Deferred:** Fence-mounted signs and tall signs
 
-Before providing a quote, confirm with client:
+This is standard practice when working within budget constraints. Always clarify:
+- Which items are revenue-critical (e.g., menus)
+- Which provide wayfinding vs. branding
+- Whether items can be added in a second phase
 
-1. **New artwork needed?** Check what exists vs. what requires design work
-2. **Logo and branding files** available in vector format (AI, EPS, PDF)
-3. **QR code destinations** confirmed and tested
-4. **Directional information** for each roadside sign
-5. **Menu content** finalized (many delays occur here)
-6. **Color matching** requirements (PMS/CMYK specifications)
-7. **Proofing timeline** - allow 48-72 hours for client approval
+## Key Decision Points
+
+### Material Selection
+- **Wood:** Lower upfront cost, limited lifespan outdoors
+- **Plastic wood-effect:** Higher cost, weather-resistant, requires weight verification
+- **Aluminium powder-coated:** Durable alternative, requires custom quote
+
+### Flags vs. Banners
+- **Flags:** Higher visibility, premium appearance, exposed locations
+- **Banner poles:** Cost-effective, suitable for tree/post mounting, lower profile
+
+### Artwork and Proofs
+Standard practice: proofs supplied for all items before production. Ensure client reviews QR codes, spelling, and directional arrows before sign-off.
 
 ## Common Pitfalls
 
-⚠️ **Artwork delays:** Menu content changes are the most common cause of project delays. Set a clear artwork deadline before production begins.
+⚠️ **Size specifications missing:** Always confirm dimensions before finalizing quotes (see tall fence signs in this example)
 
-⚠️ **QR code testing:** Always verify QR codes scan correctly and direct to the intended destination before printing. Test on multiple devices.
+⚠️ **Underestimating outdoor flag costs:** Promotional flags ≠ outdoor-rated flags. Set expectations early.
 
-⚠️ **Material durability:** External signage should be UV-resistant and weatherproof. Standard indoor materials will fade and deteriorate quickly.
+⚠️ **Lighting on lane signs:** Visibility drops significantly without lighting. Price this upfront even if client defers.
 
-⚠️ **Installation hardware:** Confirm who is providing installation (NBNE or client) and ensure appropriate fixings are included in the quote.
-
-⚠️ **Permissions:** Client is responsible for planning permission or landowner approval for roadside signs, but flag this requirement proactively.
+⚠️ **Phased ordering without documentation:** Document what's immediate vs. deferred to avoid confusion on delivery.
 
 ## Related Topics
 
-- **Brand Guidelines Setup** - Establishing consistent visual identity across venues
-- **QR Code Campaign Management** - Creating and tracking marketing QR codes
-- **Venue Photography** - Capturing images for marketing materials and menus
-- **Print Supplier Management** - Approved vendors and pricing structures
+- **ACM Panel Specifications** – material properties and fixing methods
+- **Outdoor Signage Durability** – lifespan expectations by material
+- **Bulk Print Ordering** – when to use press printers vs. in-house
+- **QR Code Integration** – best practices for signage

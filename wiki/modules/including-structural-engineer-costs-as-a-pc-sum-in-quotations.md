@@ -49,7 +49,7 @@ State clearly: *"This is a Provisional Cost Sum based on similar projects. Actua
 
 Before issuing your quotation:
 
-- Contact a structural engineering firm we have worked with previously (check Cairn for approved suppliers)
+- Contact a structural engineering firm we have worked with previously (check Deek for approved suppliers)
 - Provide outline scope: number of units, typical heights, ground conditions if known, location/wind exposure
 - Request an **indicative fee estimate** for design and certification
 - Use this figure (with small contingency if appropriate) as your PC sum

@@ -1,17 +1,17 @@
-# CAIRN_PROTOCOL.md
-# Cairn Memory Protocol — Claude Code Session Instructions
+# DEEK_PROTOCOL.md
+# Deek Memory Protocol — Claude Code Session Instructions
 # North By North East Print & Sign Ltd
 # Last updated: 29 March 2026
 
 ---
 
-## What Cairn Is
+## What Deek Is
 
-Cairn is NBNE's sovereign AI development memory system. It runs on NBNE hardware
-at D:\claw. It is not a Cursor or Windsurf replacement — it is a persistent memory
+Deek is NBNE's sovereign AI development memory system. It runs on NBNE hardware
+at D:\deek. It is not a Cursor or Windsurf replacement — it is a persistent memory
 substrate that makes every development session aware of every decision that came before.
 
-You are stateless between sessions. Cairn holds the state you cannot hold.
+You are stateless between sessions. Deek holds the state you cannot hold.
 Read from it before you act. Write back after you act. The memory is the product.
 
 ### The Philosophy
@@ -26,8 +26,8 @@ What has changed now is that the intent layer has become genuinely natural langu
 The model bridges the gap between plain English and execution. The GUI was a thirty
 year detour necessitated by the fact that computers couldn't understand people.
 
-Cairn inherits that lineage directly. The shell is the execution layer. You (CC) are
-the intent interpreter. Cairn's memory is the accumulating institutional knowledge —
+Deek inherits that lineage directly. The shell is the execution layer. You (CC) are
+the intent interpreter. Deek's memory is the accumulating institutional knowledge —
 a developer who has memorised every decision, every dead end, every workaround, and
 never forgets any of it.
 
@@ -69,9 +69,9 @@ depends on.
 ## On Every Session Start
 
 1. Read this file completely before doing anything else.
-2. Read `projects/claw/core.md` — Cairn's own domain context and decision log.
+2. Read `projects/deek/core.md` — Deek's own domain context and decision log.
 3. Read the `core.md` for whichever project you are working on today.
-4. Pull relevant memory from Cairn's retrieval API before beginning work:
+4. Pull relevant memory from Deek's retrieval API before beginning work:
 
 ```
 GET http://localhost:8765/retrieve?query=<your_task_description>&project=<project_name>&limit=10
@@ -84,7 +84,7 @@ approaches that are not in core.md. Acting without it wastes time and repeats mi
 
 ## Shell Frontend — Planned Feature
 
-When the time is right, build a PowerShell / CMD frontend for Cairn that displays
+When the time is right, build a PowerShell / CMD frontend for Deek that displays
 on session start. The interface should feel like a developer tool, not a chatbot.
 
 The splash screen should render:
@@ -146,12 +146,12 @@ Implementation notes:
 
 | Project | Path | GitHub | Notes |
 |---|---|---|---|
-| claw | D:\claw | nbne/claw | Cairn itself |
+| deek | D:\deek | nbne/deek | Deek itself |
 | phloe | D:\nbne_business\nbne_platform | nbne/phloe | WaaS booking platform |
 | crm | TBC — confirm with Toby | nbne/crm | Fully built, C: drive, path TBC |
 | bookkeeping | TBC — greenfield | TBC | Stack not yet decided |
 | render | TBC — confirm with Toby | https://github.com/NBNEORIGIN/render | Flask/Python, migrating from Render.com to Hetzner |
-| studio | D:\claw\projects\studio | TBC | See note below |
+| studio | D:\deek\projects\studio | TBC | See note below |
 
 ### Signmaker (working name — rename pending)
 
@@ -173,7 +173,7 @@ ahead of Signmaker stability.
 ### Client Static Sites
 
 GitHub is the source of truth for code. Google Drive is the asset source.
-No local Cairn indexing needed — lightweight maintenance only.
+No local Deek indexing needed — lightweight maintenance only.
 
 | Project | URL | GitHub | Google Drive |
 |---|---|---|---|
@@ -259,10 +259,10 @@ Append only. Never overwrite.
 
 ## MCP Integration
 
-Cairn exposes its memory and retrieval as an MCP server so any compatible head model
-(Claude Code, Codex, etc.) treats Cairn's tools as native capabilities.
+Deek exposes its memory and retrieval as an MCP server so any compatible head model
+(Claude Code, Codex, etc.) treats Deek's tools as native capabilities.
 
-Full specification: `CAIRN_MCP_SPEC.md`
+Full specification: `DEEK_MCP_SPEC.md`
 
 ### The five MCP tools
 
@@ -272,10 +272,10 @@ Full specification: `CAIRN_MCP_SPEC.md`
 | `retrieve_chat_history` | Prior session decisions and chat memory |
 | `update_memory` | Write-back after every non-trivial task |
 | `list_projects` | All loaded projects with chunk counts |
-| `get_project_status` | Cairn health, model availability, memory stats |
+| `get_project_status` | Deek health, model availability, memory stats |
 
-MCP server lives at `D:\claw\mcp\cairn_mcp_server.py`.
-Register in Claude Code's MCP config — see CAIRN_MCP_SPEC.md for full setup.
+MCP server lives at `D:\deek\mcp\deek_mcp_server.py`.
+Register in Claude Code's MCP config — see DEEK_MCP_SPEC.md for full setup.
 
 ### Structured output requirement
 
@@ -295,7 +295,7 @@ Nothing gets committed without `approved_for_commit: true` from the reviewer tie
 
 ### Priority 1 — Fix git_commit tool mapping
 
-**Problem**: `git_commit` resolves to `git_add`. Cairn cannot commit its own work.
+**Problem**: `git_commit` resolves to `git_add`. Deek cannot commit its own work.
 
 1. Read `core/tools/git_tools.py` in full.
 2. Read `core/tools/registry.py` in full.
@@ -309,17 +309,17 @@ Write back at Sonnet level or above.
 
 ### Priority 2 — Build the MCP server
 
-**Brief**: `CAIRN_MCP_SPEC.md` contains the full specification.
+**Brief**: `DEEK_MCP_SPEC.md` contains the full specification.
 
 In summary:
-1. Create `D:\claw\mcp\cairn_mcp_server.py` — thin wrapper over Cairn's FastAPI
+1. Create `D:\deek\mcp\deek_mcp_server.py` — thin wrapper over Deek's FastAPI
 2. Implement all 5 tools as defined in the spec
 3. Install MCP SDK: `pip install mcp --break-system-packages`
 4. Register in Claude Code's MCP config
-5. Test each tool against the live Cairn API
+5. Test each tool against the live Deek API
 
 Delegate implementation to DeepSeek. Review with Sonnet before committing.
-Commit: `feat(mcp): Cairn MCP server with 5 tools`
+Commit: `feat(mcp): Deek MCP server with 5 tools`
 Write back at Sonnet level.
 
 ### Priority 3 — Confirm and register missing projects
@@ -346,7 +346,7 @@ Run `git rm -r --cached logs/` if logs reappear in tracking.
 **Commit atomically.** One logical change per commit. Conventional commit messages:
 `fix(scope): description`, `feat(scope): description`, `chore(scope): description`.
 
-**Do not start the web UI unless asked.** Use `build-cairn.bat` + `npm start`,
+**Do not start the web UI unless asked.** Use `build-deek.bat` + `npm start`,
 not `npm run dev`. The API on port 8765 is the system; localhost:3000 is optional.
 
 **Kill port conflicts via Task Manager**, not PowerShell Stop-Process (access denied).
@@ -356,7 +356,7 @@ Do not bypass the ToolRegistry safety tier.
 
 ---
 
-## Cairn API Reference
+## Deek API Reference
 
 ```
 Base URL: http://localhost:8765
@@ -372,12 +372,12 @@ POST /index?project=                  — trigger manual reindex
 
 ## Business Brain Architecture
 
-Cairn's second goal beyond coding agent is the NBNE business brain — a system
+Deek's second goal beyond coding agent is the NBNE business brain — a system
 that understands the business deeply enough to reason across all operations.
 
 **The value chain**: Make → Measure → Sell
 
-Each module exposes a context endpoint Cairn queries to assemble business state:
+Each module exposes a context endpoint Deek queries to assemble business state:
 
 | Module | Endpoint | Purpose | Priority |
 |---|---|---|---|
@@ -385,10 +385,10 @@ Each module exposes a context endpoint Cairn queries to assemble business state:
 | Ledger | GET /api/cairn/context | Cash, margins, revenue by channel | 2 |
 | Marketing | GET /api/cairn/context | Ad spend, ROAS, CRM pipeline, Phloe | 3 |
 
-Full context endpoint schemas: `CAIRN_MODULES.md`
+Full context endpoint schemas: `DEEK_MODULES.md`
 
 **Architecture rule**: No module has direct database access to another module.
-Everything communicates via API. Cairn is the memory layer above all modules.
+Everything communicates via API. Deek is the memory layer above all modules.
 
 **Hardware dependency**: The brain requires dual RTX 3090 (48GB VRAM) for a
 72b-class local model. Build the context endpoints now. Run the brain when
@@ -426,7 +426,7 @@ Termination conditions are explicit and only these:
 ### Cost Governance
 
 Loops default to the local model tier appropriate to the current
-`CAIRN_HARDWARE_PROFILE` (see CLAUDE.md for the routing matrix):
+`DEEK_HARDWARE_PROFILE` (see CLAUDE.md for the routing matrix):
 
 - On `dev_desktop`: Qwen 2.5 Coder 7B or DeepSeek-Coder-V2 16B locally.
   Slow. Suitable for overnight runs on small eval sets only.
@@ -452,7 +452,7 @@ Every iteration must be a clean atomic commit. WIGGUM may not:
 - Run database migrations during a loop.
 - Modify files outside the target artefact's directory.
 - Touch seeded test state.
-- Cross module boundaries (see CAIRN_MODULES.md).
+- Cross module boundaries (see DEEK_MODULES.md).
 
 If a proposed change would violate these, WIGGUM logs it as out-of-scope and
 tries a different change.
@@ -461,7 +461,7 @@ tries a different change.
 
 ## Hardware Context
 
-**Current**: RTX 3050 8GB. Local models: qwen2.5-coder:7b (coding), gemma4-nbne (general reasoning/PA, via Ollama). Set `CLAW_FORCE_API=false` for general tasks.
+**Current**: RTX 3050 8GB. Local models: qwen2.5-coder:7b (coding), gemma4-nbne (general reasoning/PA, via Ollama). Set `DEEK_FORCE_API=false` for general tasks.
 
 **RTX 3090 arriving imminently** — pull immediately on arrival:
 ```
@@ -469,7 +469,7 @@ ollama pull deepseek-coder-v2:16b
 ollama pull qwen2.5-coder:32b
 ollama pull mxbai-embed-large
 ```
-Then set `CLAW_FORCE_API=false`. API cost drops from ~£40-60/day to ~£5-15/month.
+Then set `DEEK_FORCE_API=false`. API cost drops from ~£40-60/day to ~£5-15/month.
 
 **Second RTX 3090 (planned)**: Dedicated to ComfyUI / FLUX / Wan2.1 for Studio and
 the Signmaker product image pipeline. Keep workloads separated by card — do not

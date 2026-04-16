@@ -1,5 +1,5 @@
 """
-Cairn Wiki Generation — mines email store to produce Karpathy wiki articles.
+Deek Wiki Generation — mines email store to produce Karpathy wiki articles.
 
 Modules:
     db          — schema (cairn_wiki_generation_log) + get_conn

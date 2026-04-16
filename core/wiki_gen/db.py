@@ -10,7 +10,7 @@ from contextlib import contextmanager
 
 
 def get_db_url() -> str:
-    return os.getenv('DATABASE_URL', 'postgresql://postgres:postgres123@localhost:5432/claw')
+    return os.getenv('DATABASE_URL', 'postgresql://postgres:postgres123@localhost:5432/deek')
 
 
 @contextmanager
@@ -23,7 +23,7 @@ def get_conn():
 
 
 def ensure_schema():
-    """Create wiki generation tables if they don't exist. Called at Cairn startup."""
+    """Create wiki generation tables if they don't exist. Called at Deek startup."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(_SQL_SCHEMA)

@@ -64,7 +64,7 @@ Even after clarification, request images of:
 - Existing structures (for panel replacements) to verify condition and mounting method
 - Proposed locations (for new units) to assess ground conditions, obstructions, access
 
-⚠️ **Client sent image in this case** — always save to job folder and Cairn record.
+⚠️ **Client sent image in this case** — always save to job folder and Deek record.
 
 ## Common Pitfalls
 
@@ -111,7 +111,7 @@ For locations requiring full new units:
 
 - [ ] Save client response email to job folder
 - [ ] Download and file any site images sent
-- [ ] Update Cairn with confirmed scope breakdown
+- [ ] Update Deek with confirmed scope breakdown
 - [ ] If photos show issues (damaged frames, poor access), flag before quoting
 - [ ] Confirm artwork supply format and timeline
 - [ ] Check if client has planning/highways approval already

@@ -1,4 +1,4 @@
-# Render — Cairn Agent Core Context
+# Render — Deek Agent Core Context
 # Version: 2.0
 # Updated: 2026-04-06
 
@@ -15,7 +15,7 @@ decisions here are written back at Opus level.
 
 - GitHub: https://github.com/NBNEORIGIN/render
 - Local: D:\render
-- Stack: Flask 3.0 + Gunicorn, PostgreSQL (Cairn claw DB on nbne1), Playwright, Pillow
+- Stack: Flask 3.0 + Gunicorn, PostgreSQL (Deek deek DB on nbne1), Playwright, Pillow
 - Database: render_ prefixed tables in postgresql://cairn:cairn_nbne_2026@192.168.1.228:5432/claw
 - Deploy: Docker on nbne1 (192.168.1.228), public via Cloudflare Tunnel at render.nbnesigns.co.uk
 
@@ -29,10 +29,10 @@ decisions here are written back at Opus level.
 6. eBay direct publish — OAuth, Inventory API + Marketing API auto-promote
 7. Amazon export — XLSX flatfiles for Seller Central upload
 8. Website publish — auto-push QA-approved products to app.nbnesigns.co.uk/shop via Phloe API
-9. Cairn context — /api/cairn/context exposes pipeline state to business brain
+9. Deek context — /api/cairn/context exposes pipeline state to business brain
 10. AI product assistant — GPT-4o chat for product development guidance
 
-## Database tables (render_ prefix in claw DB)
+## Database tables (render_ prefix in deek DB)
 
 - render_products — M-number catalogue, QA status, AI content
 - render_blanks — physical sign substrate dimensions
@@ -57,7 +57,7 @@ decisions here are written back at Opus level.
 1. Never publish a product that isn't QA-approved. The approval gate prevents broken listings.
 2. All Etsy listings created as **draft** — staff review before activating.
 3. Read sizes/prices from config.py only. Never duplicate SIZE_CONFIG elsewhere.
-4. Never access Render's database directly from Cairn — use /api/cairn/context endpoint.
+4. Never access Render's database directly from Deek — use /api/cairn/context endpoint.
 5. Authentication required on all routes except /health, /login, /etsy/oauth/callback.
 6. Keep export_etsy.py as fallback — don't delete it even though direct API publish exists.
 
@@ -79,16 +79,16 @@ local FLUX (primary).
 
 ## Decision Log
 
-### 2026-03-30 — Project renamed SignMaker → Render, registered in Cairn
+### 2026-03-30 — Project renamed SignMaker → Render, registered in Deek
 
-### 2026-04-06 — DB migrated to Cairn PG, Etsy direct publish, Cairn integration
+### 2026-04-06 — DB migrated to Deek PG, Etsy direct publish, Deek integration
 
-**Decision**: Moved from standalone Docker PG to render_ prefixed tables in Cairn's
-claw database on nbne1. Removed SQLite fallback. Added Etsy OAuth 2.0 PKCE flow
+**Decision**: Moved from standalone Docker PG to render_ prefixed tables in Deek's
+deek database on nbne1. Removed SQLite fallback. Added Etsy OAuth 2.0 PKCE flow
 and direct API publishing (etsy_auth.py, etsy_api.py). Added /api/cairn/context
 endpoint for business brain. Added render_publish_log table for cross-channel
 publish tracking.
 
-**Rejected**: Keeping separate database — prevents Cairn from accessing product data
+**Rejected**: Keeping separate database — prevents Deek from accessing product data
 for business intelligence. Keeping Shop Uploader middleware — adds manual step,
 slower, no automation possible.

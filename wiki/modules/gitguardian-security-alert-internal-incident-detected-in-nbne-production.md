@@ -30,7 +30,7 @@ This alert indicates that GitGuardian has detected exposed credentials or secret
 
 5. **Update the Code Properly**
    - Move credentials to environment variables or secure secret management systems
-   - Use Cairn's approved secret management: AWS Secrets Manager or HashiCorp Vault
+   - Use Deek's approved secret management: AWS Secrets Manager or HashiCorp Vault
    - Update application code to retrieve secrets at runtime, not build time
    - Add affected file patterns to `.gitignore` to prevent future commits
 
@@ -68,7 +68,7 @@ The `NBNEORIGIN/nbne_production` repository is a critical production codebase. A
 
 ## Related Topics
 
-- **Cairn Security Policies**: Review organization-wide secret management standards
+- **Deek Security Policies**: Review organization-wide secret management standards
 - **AWS Secrets Manager Integration**: Guide for retrieving secrets in NBNE applications
 - **HashiCorp Vault Setup**: Alternative secret management for on-premise deployments
 - **Git History Rewriting**: Detailed procedures for BFG Repo Cleaner and filter-branch

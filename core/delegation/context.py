@@ -1,11 +1,11 @@
 """Delegation cost-discipline aggregates from ``cairn_delegation_log``.
 
 Read-only helper used by ``GET /api/cairn/context`` to surface delegation
-spend and outcome rates across all cairn_delegate calls. Never raises —
+spend and outcome rates across all deek_delegate calls. Never raises —
 callers treat this as a dashboard feed; missing DB or missing table
 returns the zero-state dict.
 
-Produced by cairn_delegate dogfooding session 2026-04-15 (D-...). Grok
+Produced by deek_delegate dogfooding session 2026-04-15 (D-...). Grok
 Fast drafted the core query logic; the slash-less module derivation and
 float-return coercion were tweaked by Sonnet in review.
 """
@@ -32,7 +32,7 @@ def _zero_state() -> dict:
 
 
 def _module_for(session: str) -> str:
-    """Derive module from delegating_session ('claw/foo' -> 'claw').
+    """Derive module from delegating_session ('deek/foo' -> 'deek').
 
     Slash-less or empty session → 'unknown'.
     """
@@ -44,12 +44,12 @@ def _module_for(session: str) -> str:
 def build_delegation_context(db_path: Path | None = None) -> dict:
     """Aggregate cairn_delegation_log into the /api/cairn/context delegation block.
 
-    Returns a dict matching the shape documented in projects/claw/core.md
+    Returns a dict matching the shape documented in projects/deek/core.md
     (D-... dogfooding entry). Missing DB, missing table → zero state.
     """
     if db_path is None:
-        data_dir = os.getenv("CLAW_DATA_DIR", "./data")
-        db_path = Path(data_dir) / "claw.db"
+        data_dir = os.getenv("DEEK_DATA_DIR", "./data")
+        db_path = Path(data_dir) / "deek.db"
 
     if not db_path.exists():
         return _zero_state()

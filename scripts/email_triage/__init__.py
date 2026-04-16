@@ -13,7 +13,7 @@ Design principles:
     - Mode A only (no direct client reply, no direct CRM writes)
     - Idempotent via cairn_intel.email_triage UNIQUE constraint
     - Loop-safe (filters out emails from cairn@nbnesigns.com)
-    - Kill switch: CAIRN_EMAIL_TRIAGE_ENABLED env var must be 'true'
+    - Kill switch: DEEK_EMAIL_TRIAGE_ENABLED env var must be 'true'
     - Graceful degradation when SMTP credentials are missing
       (dry-run mode: logs what would be sent)
     - Every action recorded in cairn_intel.email_triage with

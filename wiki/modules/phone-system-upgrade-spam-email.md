@@ -49,7 +49,7 @@ This is a **spam/phishing email** disguised as a business telephone system upgra
 For reference, **actual** NBNE phone system upgrades would follow these channels:
 
 - Initiated by IT/Facilities department through proper change management
-- Communicated via internal channels (Cairn, official NBNE email domain)
+- Communicated via internal channels (Deek, official NBNE email domain)
 - Include specific project codes, timelines, and named internal contacts
 - Never solicit information via external marketing links
 - Include proper procurement and approval workflows

@@ -1,7 +1,7 @@
 # NBNE Business Brain — Core Context
 
 ## What this is
-The NBNE Business Brain is the staff-facing interface to Cairn's business intelligence.
+The NBNE Business Brain is the staff-facing interface to Deek's business intelligence.
 It serves three purposes:
 1. **Operations dashboard** — what to make today, stock alerts, cash position
 2. **Business Q&A** — staff ask questions about operations in plain English
@@ -41,13 +41,13 @@ Design → Print → Cut → Laminate → Clean → Pack → Stock → Ship
 
 You have LIVE access to NBNE's operational state through dedicated tools.
 **Do NOT try to web_fetch `localhost:<port>` URLs — they will fail from
-inside the Cairn container because `localhost` there is the container
+inside the Deek container because `localhost` there is the container
 itself, not the host machine.** Use the right tool for each question.
 
 | Data source | Tool | What it provides |
 |---|---|---|
 | **Manufacturing** — make list, stock deficits, in-flight FBA, open production orders | `get_module_snapshot(module="manufacture")` | Live markdown snapshot auto-refreshed every 15 min from Manufacture's federation endpoint |
-| **Any other registered module** (Ledger, CRM, Render, Beacon as they come online) | `get_module_snapshot(module="<name>")` — call with no argument to list all registered modules | Same federation pattern; each module exposes its own state and Cairn ingests on a cron |
+| **Any other registered module** (Ledger, CRM, Render, Beacon as they come online) | `get_module_snapshot(module="<name>")` — call with no argument to list all registered modules | Same federation pattern; each module exposes its own state and Deek ingests on a cron |
 | **Amazon listing intelligence** — SKUs, ASINs, sales, ads, health | `query_amazon_intel(sql="SELECT ...")` | SQL against ami_* tables — 4000+ listings with revenue, conversion, ad spend, margins |
 | **Inbox** — cairn@nbnesigns.com messages, forwarded threads, direct notes | `search_emails(query="...")` | Hybrid semantic + lexical search over embedded email chunks, refreshed every 15 min |
 | **Wiki** — SOPs, supplier notes, decision logs, incident reports | `search_wiki(query="...")` | Hybrid search over ~300 compiled wiki articles |
@@ -81,7 +81,7 @@ about.
 ## Decision Log
 
 ### 2026-04-02 — Project created
-**Context**: Building cairn.nbnesigns.co.uk as a staff-facing business brain
-**Decision**: Created nbne project in Cairn with business project type, read-only permissions, process docs in memory
+**Context**: Building deek.nbnesigns.co.uk as a staff-facing business brain
+**Decision**: Created nbne project in Deek with business project type, read-only permissions, process docs in memory
 **Rationale**: Staff need plain-English access to operational knowledge without developer tool complexity
-**Rejected**: Using the existing claw project (wrong audience, wrong permissions)
+**Rejected**: Using the existing deek project (wrong audience, wrong permissions)

@@ -58,7 +58,7 @@ If the client opts to search for a vector file, give them a reasonable timeframe
 
 ### 6. Document the Decision
 
-Once the client responds, update the job notes in Cairn with:
+Once the client responds, update the job notes in Deek with:
 - Which option they selected
 - Any relevant file names or version numbers
 - Written acknowledgment if they chose to proceed with low-resolution artwork
@@ -84,4 +84,4 @@ If the client (like Sally in the example) indicates they'll search for the file,
 - **Quoting for Additional Design Services**
 - **Managing Client Expectations on Quality**
 - **Creating Effective Proof Emails**
-- **Documenting Job Variations in Cairn**
+- **Documenting Job Variations in Deek**

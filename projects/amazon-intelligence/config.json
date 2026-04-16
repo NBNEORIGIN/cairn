@@ -1,7 +1,7 @@
 {
   "name": "Amazon Listing Intelligence",
-  "description": "Amazon listing health pipeline — SP-API automated sync 4x daily, health scoring, diagnosis codes. Feeds live data to Cairn chat via context endpoint. Includes listings write API.",
-  "codebase_path": "D:/claw",
+  "description": "Amazon listing health pipeline — SP-API automated sync 4x daily, health scoring, diagnosis codes. Feeds live data to Deek chat via context endpoint. Includes listings write API.",
+  "codebase_path": "D:/deek",
   "project_type": "coding",
   "force_model": "api",
 
@@ -30,12 +30,12 @@
   "model_preferences": {
     "force_model": "api",
     "opus_keywords": [
-      "architecture", "cross-module", "Cairn integration",
+      "architecture", "cross-module", "Deek integration",
       "SKU mapping", "health scoring", "diagnosis rules"
     ]
   },
 
-  "related_projects": ["manufacturing", "render", "claw"],
+  "related_projects": ["manufacturing", "render", "deek"],
 
   "indexing": {
     "auto_reindex": false,

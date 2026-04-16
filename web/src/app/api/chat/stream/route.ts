@@ -1,5 +1,5 @@
 /**
- * Next.js SSE proxy for CLAW's /chat/stream endpoint.
+ * Next.js SSE proxy for DEEK's /chat/stream endpoint.
  *
  * Forwards GET requests (with query params) to the FastAPI backend,
  * adding the X-API-Key header so the browser never needs to hold the key.
@@ -7,7 +7,7 @@
  */
 
 const CLAW_API = process.env.CLAW_API_URL || 'http://localhost:8765'
-const CLAW_API_KEY = process.env.CLAW_API_KEY || 'claw-dev-key-change-in-production'
+const DEEK_API_KEY = process.env.DEEK_API_KEY || 'deek-dev-key-change-in-production'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,7 +22,7 @@ export async function GET(request: Request) {
     backendRes = await fetch(upstream, {
       headers: {
         Accept: 'text/event-stream',
-        'X-API-Key': CLAW_API_KEY,
+        'X-API-Key': DEEK_API_KEY,
         'Cache-Control': 'no-cache',
       },
       // @ts-expect-error — Next.js fetch supports duplex for streaming
@@ -30,7 +30,7 @@ export async function GET(request: Request) {
     })
   } catch (err) {
     return new Response(
-      `data: {"type":"error","message":"Cannot reach CLAW API: ${err}"}\n\ndata: {"type":"done"}\n\n`,
+      `data: {"type":"error","message":"Cannot reach DEEK API: ${err}"}\n\ndata: {"type":"done"}\n\n`,
       {
         status: 200,
         headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' },

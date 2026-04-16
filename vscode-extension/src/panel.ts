@@ -25,7 +25,7 @@ export class CairnPanel {
 
         const panel = vscode.window.createWebviewPanel(
             'cairnAgent',
-            'Cairn',
+            'Deek',
             column,
             {
                 enableScripts: true,
@@ -42,9 +42,9 @@ export class CairnPanel {
         let apiKey = config.get<string>('apiKey', '');
         if (!apiKey) {
             try {
-                const envPath = path.join('D:', 'claw', '.env');
+                const envPath = path.join('D:', 'deek', '.env');
                 const envContent = fs.readFileSync(envPath, 'utf-8');
-                const match = envContent.match(/^CLAW_API_KEY=(.+)$/m);
+                const match = envContent.match(/^DEEK_API_KEY=(.+)$/m);
                 if (match) { apiKey = match[1].trim(); }
             } catch { /* ignore */ }
         }
@@ -59,7 +59,7 @@ export class CairnPanel {
         this._extensionUri = extensionUri;
         this._sessionId = Math.random().toString(36).slice(2) + Date.now().toString(36);
         const config = vscode.workspace.getConfiguration('cairn');
-        this._projectId = config.get<string>('defaultProject', '') || 'claw';
+        this._projectId = config.get<string>('defaultProject', '') || 'deek';
 
         this._panel.webview.html = this._getHtml();
 
@@ -249,7 +249,7 @@ export class CairnPanel {
         } catch (err) {
             this._panel.webview.postMessage({
                 type: 'error',
-                message: `Cannot reach Cairn API at ${apiUrl}. Is it running?`,
+                message: `Cannot reach Deek API at ${apiUrl}. Is it running?`,
             });
         }
     }
@@ -330,7 +330,7 @@ export class CairnPanel {
             'vscode.diff',
             originalUri,
             modifiedUri,
-            `Cairn: proposed changes to ${baseName}`
+            `Deek: proposed changes to ${baseName}`
         );
     }
 
@@ -340,7 +340,7 @@ export class CairnPanel {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Cairn</title>
+<title>Deek</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{
@@ -496,7 +496,7 @@ export class CairnPanel {
 </head>
 <body>
 <div id="header">
-  <span id="header-title">Cairn</span>
+  <span id="header-title">Deek</span>
   <select id="project-select"><option value="">loading...</option></select>
   <span id="model-badge">connecting...</span>
 </div>
@@ -504,7 +504,7 @@ export class CairnPanel {
 <div id="cost-row">$0.0000 | local: 0 | api: 0</div>
 <div id="mentions-row"></div>
 <div id="input-row">
-  <textarea id="inp" placeholder="Ask Cairn... (@ to mention, Shift+Enter newline)" rows="1"></textarea>
+  <textarea id="inp" placeholder="Ask Deek... (@ to mention, Shift+Enter newline)" rows="1"></textarea>
   <select id="model-select">
     <option value="">Auto</option>
     <option value="local">Local</option>

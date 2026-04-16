@@ -1,14 +1,14 @@
-# Delegation via cairn_delegate
+# Delegation via deek_delegate
 
 ## What it does
 
-`cairn_delegate` is a Cairn API tool that lets any module session push a small,
+`deek_delegate` is a Deek API tool that lets any module session push a small,
 well-bounded piece of work to a cheaper model tier (Grok Fast or Claude Haiku
 4.5) via OpenRouter, and get back the output plus token and cost accounting.
-It is exposed as `POST https://cairn.nbnesigns.co.uk/api/delegation/call`,
-authenticated by `X-API-Key: $CLAW_API_KEY`. Every call is logged to the
+It is exposed as `POST https://deek.nbnesigns.co.uk/api/delegation/call`,
+authenticated by `X-API-Key: $DEEK_API_KEY`. Every call is logged to the
 `cairn_delegation_log` SQLite table on the Cairn host and surfaced via the
-Cairn context endpoint. Returns: `{ output, model_used, tokens_in, tokens_out,
+Deek context endpoint. Returns: `{ output, model_used, tokens_in, tokens_out,
 cost_gbp, outcome, schema_valid, duration_ms }`.
 
 ## When to use it
@@ -73,8 +73,8 @@ cost_gbp, outcome, schema_valid, duration_ms }`.
 ## How to call it
 
 ```bash
-curl -X POST https://cairn.nbnesigns.co.uk/api/delegation/call \
-  -H "X-API-Key: $CLAW_API_KEY" \
+curl -X POST https://deek.nbnesigns.co.uk/api/delegation/call \
+  -H "X-API-Key: $DEEK_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "task_type": "generate",
@@ -89,9 +89,9 @@ Required fields: `task_type`, `instructions`, `delegating_session`,
 `output_schema` (permissive JSON schema — only pass on review/extract/classify,
 never on generate), `max_tokens`, `timeout_ms`.
 
-`CLAW_API_KEY` lives in `D:\claw\.env` for local use and in the Hetzner host
-environment for production. It is not `CAIRN_API_KEY` — see
-`docs/cairn/LOCAL_CONVENTIONS.md` for the canonical env var name.
+`DEEK_API_KEY` lives in `D:\deek\.env` for local use and in the Hetzner host
+environment for production. It is not `DEEK_API_KEY` — see
+`docs/deek/LOCAL_CONVENTIONS.md` for the canonical env var name.
 
 Response shape (success):
 
@@ -178,7 +178,7 @@ edits before committing. Acceptable — this is draft material, not final.
 
 ### Example 4: anti-example — do NOT delegate this
 
-Task: decide whether Cairn's memory retrieval should use RRF or weighted
+Task: decide whether Deek's memory retrieval should use RRF or weighted
 sum fusion when combining BM25 and pgvector results.
 
 This is a cross-module architectural decision. It affects every project's
@@ -191,9 +191,9 @@ loses context-depth. Self-execute.
 
 ## Sovereignty position
 
-Cairn's code and memory stay on NBNE hardware. OpenRouter is an existing
+Deek's code and memory stay on NBNE hardware. OpenRouter is an existing
 accepted external relationship (already used by `core/social/drafter.py`,
-`core/wiki/compiler.py`, and the internal model router). `cairn_delegate`
+`core/wiki/compiler.py`, and the internal model router). `deek_delegate`
 adds no new trust boundary — it exercises the existing one.
 
 The practical claim the project makes is "inputs and outputs are not fed
@@ -242,7 +242,7 @@ content. Those are stronger claims the evidence does not support.
 ## Cost log: how to read it
 
 Every call writes one row to `cairn_delegation_log` in the claw SQLite DB
-(`CLAW_DATA_DIR/claw.db`, default `data/claw.db`). Schema:
+(`DEEK_DATA_DIR/deek.db`, default `data/deek.db`). Schema:
 
 ```sql
 CREATE TABLE cairn_delegation_log (
@@ -262,12 +262,12 @@ CREATE TABLE cairn_delegation_log (
 );
 ```
 
-The Cairn context endpoint surfaces aggregates (per-module spend, per-model
+The Deek context endpoint surfaces aggregates (per-module spend, per-model
 totals, schema failure rate, MTD/YTD windows) via `GET /api/cairn/context`.
 Note: that endpoint is currently Hetzner-loopback only — it is NOT exposed
 via nginx, per the minimum-surface principle in D-102. If you need
 aggregates from outside the host, either SSH to the host and query
-`sqlite3 data/claw.db` directly, or request a public route and justify the
+`sqlite3 data/deek.db` directly, or request a public route and justify the
 caller.
 
 Sample query — delegation spend in the current month:
@@ -336,7 +336,7 @@ Per D-103 and the prior T2 finding (session 5):
 
 ## Lessons from initial dogfooding (D-103)
 
-D-103 is the only empirical observation of `cairn_delegate` in production
+D-103 is the only empirical observation of `deek_delegate` in production
 as of 2026-04-15. The verbatim findings below are preserved rather than
 summarised — they are the evidence the rest of this article rests on.
 
@@ -346,7 +346,7 @@ summarised — they are the evidence the rest of this article rests on.
 > minutes end-to-end (Grok call 26s + Sonnet review ~3 min + tweak /
 > integrate / test / commit / deploy ~9 min).
 >
-> **Cost:** 1 cairn_delegate call (plus one £0.00 ping for connectivity;
+> **Cost:** 1 deek_delegate call (plus one £0.00 ping for connectivity;
 > no retries). Total OpenRouter spend £0.0022 (1829 in / 4946 out via Grok
 > Fast). Estimated cost if Sonnet had written this directly: roughly
 > £0.05–£0.10. Net delta: saved roughly £0.05. Not the headline number;
@@ -383,11 +383,11 @@ summarised — they are the evidence the rest of this article rests on.
 > validation is appropriate for structured review/extract/classify calls
 > and inappropriate for `generate` calls targeting code.
 
-The honest summary for future sessions: Grok Fast via `cairn_delegate`
+The honest summary for future sessions: Grok Fast via `deek_delegate`
 produced acceptable production code on the first attempt for a
 well-specified SQLite aggregation helper. Two small bugs (one contract
 violation, one type drift) were caught by Sonnet review and fixed in under
-three minutes. Use `cairn_delegate` for discrete helper functions, SQL
+three minutes. Use `deek_delegate` for discrete helper functions, SQL
 query builders, and schema-stable extraction where the spec can be written
 in under 500 words. Do not use it for multi-file refactors, cross-module
 design decisions, or anything requiring holding invariants across the
@@ -396,15 +396,15 @@ codebase.
 ## Related
 
 - `core/delegation/router.py` — task_type → model routing (NOT to be
-  confused with `core/models/router.py`, which governs Cairn's internal
+  confused with `core/models/router.py`, which governs Deek's internal
   agent loop).
 - `core/delegation/cost.py` — pricing table, USD→GBP conversion.
 - `core/delegation/log.py` — `cairn_delegation_log` schema and insert.
 - `core/delegation/context.py` — aggregate helpers used by
   `GET /api/cairn/context`; see `_module_for` for the D-103 fix.
-- `docs/cairn/LOCAL_CONVENTIONS.md` — `CLAW_API_KEY` env var, project
-  naming, code layout for Cairn.
-- `projects/claw/core.md` — D-103 in full (the empirical evidence this
+- `docs/deek/LOCAL_CONVENTIONS.md` — `DEEK_API_KEY` env var, project
+  naming, code layout for Deek.
+- `projects/deek/core.md` — D-103 in full (the empirical evidence this
   article summarises).
 - `wiki/decisions/delegation-tier-routing.md` — decision record D-A
   through D-F plus D-101, D-102, D-103.

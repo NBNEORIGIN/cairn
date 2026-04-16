@@ -16,7 +16,7 @@ This article covers the process for handling pricing requests for tourist direct
 - Check the attachment for exact dimensions, quantities, and material specifications
 - Note any specific mounting requirements or finish details
 - Verify if multiple map locations are required throughout Berwick-upon-Tweed
-- Document all requirements in Cairn quote record
+- Document all requirements in Deek quote record
 
 ### 2. Clarify Artwork Specifications
 Since the client is supplying artwork, confirm:

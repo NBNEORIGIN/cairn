@@ -39,7 +39,7 @@ class SkillManager:
             SkillManager(skill_loader=loader, skill_classifier=classifier)
 
         Legacy (backward compat):
-            SkillManager(project_id='claw')
+            SkillManager(project_id='deek')
             Uses old loader.py internally. No classifier.
         """
         if skill_loader is not None:

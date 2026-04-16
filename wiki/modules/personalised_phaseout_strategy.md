@@ -1,5 +1,5 @@
 # NBNE — Personalised Product Phase-Out Strategy
-# For Cairn memory and ongoing strategic reference
+# For Deek memory and ongoing strategic reference
 # Compiled: April 2026
 
 ---
@@ -151,9 +151,9 @@ Continued investment in automation is the multiplier on this strategy.
 
 ---
 
-## Implications for Cairn / Manufacturing App
+## Implications for Deek / Manufacturing App
 
-### Data Cairn needs to track
+### Data Deek needs to track
 1. **M-number status per product** — personalised / pre-designed generic /
    fully generic (no personalisation option)
 2. **Price ladder progress** — current price vs target price per SKU,
@@ -232,6 +232,6 @@ volume while protecting the listing asset and diverting customers
 to generics, and (3) sustained generic product publishing at
 25-30+ products/month to build replacement revenue. The first price
 increase (£19.99 → £22.99) is overdue and should be actioned now.
-The manufacturing app (Cairn/Manufacture) should track phase-out
+The manufacturing app (Deek/Manufacture) should track phase-out
 status, price ladder progress, and labour time per product type
 to validate the economics and flag when actions are due.

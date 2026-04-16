@@ -127,7 +127,7 @@ async def generation_status():
 
             cur.execute(
                 "SELECT COUNT(*) FROM claw_code_chunks "
-                "WHERE project_id='claw' AND chunk_type='wiki'"
+                "WHERE project_id='deek' AND chunk_type='wiki'"
             )
             wiki_chunks = cur.fetchone()[0]
 

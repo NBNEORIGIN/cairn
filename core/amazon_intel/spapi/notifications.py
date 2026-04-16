@@ -2,14 +2,14 @@
 SP-API Notifications — SQS integration for real-time listing change events.
 
 Architecture:
-  Amazon SP-API → SQS Queue (per region) → Cairn long-poll processor
+  Amazon SP-API → SQS Queue (per region) → Deek long-poll processor
 
 Notification types:
   LISTINGS_ITEM_STATUS_CHANGE — listing active/inactive/suppressed
   LISTINGS_ITEM_ISSUES_CHANGE — quality/compliance issues
   LISTINGS_ITEM_MFN_QUANTITY_CHANGE — MFN inventory quantity
 
-Setup: see docs/cairn/amazon_notifications_setup.md
+Setup: see docs/deek/amazon_notifications_setup.md
 """
 import json
 import logging

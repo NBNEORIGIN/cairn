@@ -1,14 +1,14 @@
 version: '3.8'
 
 services:
-  cairn-web:
+  deek-web:
     build:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      CAIRN_API_URL: ${CAIRN_API_URL:-http://cairn-api:8765}
-      CAIRN_API_KEY: ${CAIRN_API_KEY}
+      DEEK_API_URL: ${DEEK_API_URL:-http://deek-api:8765}
+      DEEK_API_KEY: ${DEEK_API_KEY}
       PHLOE_API_URL: ${PHLOE_API_URL:-https://phloe.co.uk}
       PHLOE_TENANT_SLUG: ${PHLOE_TENANT_SLUG:-nbne}
     ports:

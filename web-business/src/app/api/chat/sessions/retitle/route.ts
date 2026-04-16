@@ -6,7 +6,7 @@ import { AUTH_COOKIE_NAME, isTokenExpired } from '@/lib/auth'
 /**
  * One-off migration endpoint — recomputes session titles that were polluted
  * with context-injection blocks ([PERSONALITY] / [LIVE BUSINESS DATA] / ...).
- * Safe to call repeatedly; the underlying Cairn endpoint is idempotent.
+ * Safe to call repeatedly; the underlying Deek endpoint is idempotent.
  */
 export async function POST(_req: NextRequest) {
   const cookieStore = await cookies()
@@ -28,6 +28,6 @@ export async function POST(_req: NextRequest) {
     }
     return NextResponse.json(await res.json())
   } catch {
-    return NextResponse.json({ error: 'Cairn API unavailable' }, { status: 503 })
+    return NextResponse.json({ error: 'Deek API unavailable' }, { status: 503 })
   }
 }

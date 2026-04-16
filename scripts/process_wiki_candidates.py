@@ -1,11 +1,11 @@
 """
-Cairn wiki candidate processor — run by Windows Scheduled Task every 20 minutes.
+Deek wiki candidate processor — run by Windows Scheduled Task every 20 minutes.
 
 Processes all wiki_candidate emails in cairn_email_raw that haven't yet been
 turned into wiki articles. Writes articles to wiki/modules/ and embeds them.
 
 Usage:
-    D:\claw\.venv\Scripts\python.exe D:\claw\scripts\process_wiki_candidates.py
+    D:\deek\.venv\Scripts\python.exe D:\deek\scripts\process_wiki_candidates.py
 
 Registered by: scripts\install_scheduled_tasks.ps1 (CairnWikiCandidates task)
 """

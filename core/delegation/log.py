@@ -1,9 +1,9 @@
-"""SQLite-backed append log for cairn_delegate calls.
+"""SQLite-backed append log for deek_delegate calls.
 
 One row per call, success or failure. Separate from the prompt-level
 ``cost_log`` (different grain — see handover §1 issue 4). Stored in
-the claw project's SQLite DB (``CLAW_DATA_DIR/claw.db`` by default) so
-it sits alongside the rest of Cairn's per-project state.
+the deek project's SQLite DB (``DEEK_DATA_DIR/deek.db`` by default) so
+it sits alongside the rest of Deek's per-project state.
 
 ``outcome`` is one of: success, schema_failure, api_error, refusal, timeout.
 """
@@ -58,8 +58,8 @@ CREATE_INDEX_SESSION = (
 
 
 def _default_db_path() -> Path:
-    data_dir = os.getenv("CLAW_DATA_DIR", "./data")
-    return Path(data_dir) / "claw.db"
+    data_dir = os.getenv("DEEK_DATA_DIR", "./data")
+    return Path(data_dir) / "deek.db"
 
 
 def ensure_table(db_path: Path | None = None) -> Path:
@@ -90,7 +90,7 @@ def insert_log(
     db_path: Path | None = None,
 ) -> str:
     """Insert one row. Returns the generated id. Never raises for the caller —
-    the ``cairn_delegate`` endpoint wraps this in its own try/except so that
+    the ``deek_delegate`` endpoint wraps this in its own try/except so that
     log-write failure cannot bring down the delegating session."""
     if outcome not in VALID_OUTCOMES:
         raise ValueError(f"outcome must be one of {sorted(VALID_OUTCOMES)}; got {outcome!r}")

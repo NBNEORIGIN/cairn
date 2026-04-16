@@ -43,14 +43,14 @@ const STATUS_INDICATORS: Record<string, string> = {
 
 /**
  * Compute fixed positions in a radial layout.
- * Cairn at centre, other nodes arranged in a circle around it.
+ * Deek at centre, other nodes arranged in a circle around it.
  */
 function computeRadialPositions(nodes: GraphNode[]): GraphNode[] {
   const cx = 0
   const cy = 0
   const radius = 220
 
-  // Cairn goes in the centre
+  // Deek goes in the centre
   const centre = nodes.find((n) => n.id === 'cairn')
   const others = nodes.filter((n) => n.id !== 'cairn')
 

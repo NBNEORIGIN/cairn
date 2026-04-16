@@ -8,7 +8,7 @@ Classifies incoming mail into two types:
         Sender is sales@ or toby@, or subject contains 'Fwd:'.
         Standard ingest + embed. Label: forwarded_business.
 
-    Type 2 — Direct notes to Cairn
+    Type 2 — Direct notes to Deek
         Sent directly to cairn@, not forwarded.
         Ingest + embed immediately (higher priority).
         Labels: direct_note, wiki_candidate.
@@ -29,7 +29,7 @@ from core.email_ingest.embedder import embed_email_batch
 
 logger = logging.getLogger(__name__)
 
-CAIRN_INBOX = 'cairn'
+DEEK_INBOX = 'cairn'
 
 # Senders whose forwarded mail should be treated as business email
 FORWARDING_SOURCES = {
@@ -51,7 +51,7 @@ def _classify_labels(parsed: dict) -> list[str]:
     if is_forwarded:
         return ['forwarded_business']
 
-    # Direct note to Cairn
+    # Direct note to Deek
     return ['direct_note', 'wiki_candidate']
 
 
@@ -60,7 +60,7 @@ def _load_known_ids() -> set[str]:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT message_id FROM cairn_email_raw WHERE mailbox=%s",
-                (CAIRN_INBOX,),
+                (DEEK_INBOX,),
             )
             return {row[0] for row in cur.fetchall()}
 
@@ -97,7 +97,7 @@ def _store_email(parsed: dict, labels: list[str]) -> bool:
     return inserted
 
 
-def process_cairn_inbox(embed_immediately: bool = True) -> dict:
+def process_deek_inbox(embed_immediately: bool = True) -> dict:
     """
     Check cairn@ for new messages, ingest and embed them.
     Called by the Windows Scheduled Task every 15 minutes.
@@ -114,7 +114,7 @@ def process_cairn_inbox(embed_immediately: bool = True) -> dict:
     errors = 0
 
     try:
-        imap = connect_imap(CAIRN_INBOX)
+        imap = connect_imap(DEEK_INBOX)
     except EnvironmentError as exc:
         logger.error('[cairn@] Cannot connect: %s', exc)
         return {'status': 'error', 'reason': str(exc)}
@@ -130,7 +130,7 @@ def process_cairn_inbox(embed_immediately: bool = True) -> dict:
                     errors += 1
                     continue
 
-                parsed = parse_message(msg, CAIRN_INBOX)
+                parsed = parse_message(msg, DEEK_INBOX)
 
                 if not parsed['message_id']:
                     import hashlib
@@ -157,7 +157,7 @@ def process_cairn_inbox(embed_immediately: bool = True) -> dict:
                                 ON CONFLICT (message_id) DO NOTHING
                                 """,
                                 (
-                                    parsed['message_id'], CAIRN_INBOX,
+                                    parsed['message_id'], DEEK_INBOX,
                                     parsed['sender'], parsed['subject'], skip_reason,
                                 ),
                             )

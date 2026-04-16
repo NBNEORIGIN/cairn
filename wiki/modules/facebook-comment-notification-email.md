@@ -23,7 +23,7 @@ This is a standard Facebook notification email alerting the recipient that anoth
 
 ## Handling Instructions
 
-### When This Email Arrives in Cairn
+### When This Email Arrives in Deek
 
 1. **Assess Relevance**: Determine if this is business-related or personal social media activity
 2. **Check Context**: If unclear whether this relates to NBNE business (e.g., company Facebook page vs. personal profile), flag for review
@@ -39,7 +39,7 @@ This is a standard Facebook notification email alerting the recipient that anoth
 
 ## Common Pitfalls
 
-⚠️ **Warning: Do Not Click Unsubscribe Links** - Never click unsubscribe or verification links in emails being processed through Cairn. These are intended for the original recipient only.
+⚠️ **Warning: Do Not Click Unsubscribe Links** - Never click unsubscribe or verification links in emails being processed through Deek. These are intended for the original recipient only.
 
 ⚠️ **Warning: Potential Phishing Vector** - While this example appears legitimate, Facebook/Meta notification emails are commonly spoofed. Look for:
 - Suspicious sender addresses
@@ -70,7 +70,7 @@ Legitimate Meta/Facebook emails typically come from:
 
 ## Related Topics
 
-- **Social Media Notifications in Cairn** - General handling procedures for social platform emails
+- **Social Media Notifications in Deek** - General handling procedures for social platform emails
 - **Personal vs. Business Email Classification** - Guidelines for categorizing mixed-use email accounts
 - **Phishing Identification** - How to spot fraudulent notification emails
 - **Email Privacy Guidelines** - NBNE policies on handling personal communications

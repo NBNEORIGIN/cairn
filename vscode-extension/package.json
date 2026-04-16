@@ -1,6 +1,6 @@
 {
   "name": "cairn",
-  "displayName": "Cairn — Sovereign AI Agent",
+  "displayName": "Deek — Sovereign AI Agent",
   "description": "Per-project AI coding agent with permanent context",
   "version": "0.2.0",
   "publisher": "nbne",
@@ -19,27 +19,27 @@
     "commands": [
       {
         "command": "cairn.openPanel",
-        "title": "Cairn: Open Agent Panel"
+        "title": "Deek: Open Agent Panel"
       },
       {
         "command": "cairn.indexProject",
-        "title": "Cairn: Index Current Project"
+        "title": "Deek: Index Current Project"
       },
       {
         "command": "cairn.selectProject",
-        "title": "Cairn: Switch Project"
+        "title": "Deek: Switch Project"
       },
       {
         "command": "cairn.newSession",
-        "title": "Cairn: New Session"
+        "title": "Deek: New Session"
       },
       {
         "command": "cairn.addMention",
-        "title": "Cairn: Add @ Mention Context"
+        "title": "Deek: Add @ Mention Context"
       },
       {
         "command": "cairn.runWiggum",
-        "title": "Cairn: Run autonomous task (WIGGUM)"
+        "title": "Deek: Run autonomous task (WIGGUM)"
       }
     ],
     "keybindings": [
@@ -50,17 +50,17 @@
       }
     ],
     "configuration": {
-      "title": "Cairn",
+      "title": "Deek",
       "properties": {
         "cairn.apiUrl": {
           "type": "string",
           "default": "http://localhost:8765",
-          "description": "Cairn API URL"
+          "description": "Deek API URL"
         },
         "cairn.apiKey": {
           "type": "string",
           "default": "",
-          "description": "Cairn API key (from .env). Leave blank to auto-read from D:\\claw\\.env"
+          "description": "Deek API key (from .env). Leave blank to auto-read from D:\\deek\\.env"
         },
         "cairn.defaultProject": {
           "type": "string",

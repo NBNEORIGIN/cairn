@@ -47,7 +47,7 @@ In the Berwick example, the client clarified:
 - Only **Location C (Parade Car Park)** attaches to existing structure = **panel replacement**
 - Implied: Other locations = **new free-standing units**
 
-Log this in Cairn immediately under the enquiry notes to ensure the quotation matches the confirmed scope.
+Log this in Deek immediately under the enquiry notes to ensure the quotation matches the confirmed scope.
 
 ## Common Scope Scenarios
 

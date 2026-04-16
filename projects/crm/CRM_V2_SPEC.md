@@ -1,4 +1,4 @@
-# CRM v2 — Cairn-Integrated Business Development Platform
+# CRM v2 — Deek-Integrated Business Development Platform
 # North By North East Print & Sign Ltd
 # Development Specification
 # Date: 03 April 2026
@@ -7,7 +7,7 @@
 
 ## Purpose
 
-The NBNE CRM is being upgraded from a standalone project management tool to a Cairn-connected business development platform. The end objective is to allow Cairn to function as a B2B project manager and business advisor — monitoring the sales pipeline, reading and triaging inbound emails, identifying follow-up opportunities, and providing cross-module intelligence by connecting CRM data with Ledger (margins), Manufacture (capacity), and Phloe (bookings).
+The NBNE CRM is being upgraded from a standalone project management tool to a Deek-connected business development platform. The end objective is to allow Deek to function as a B2B project manager and business advisor — monitoring the sales pipeline, reading and triaging inbound emails, identifying follow-up opportunities, and providing cross-module intelligence by connecting CRM data with Ledger (margins), Manufacture (capacity), and Phloe (bookings).
 
 This document is a CC (Claude Code) implementation prompt.
 
@@ -35,10 +35,10 @@ This document is a CC (Claude Code) implementation prompt.
 
 ## Architecture Principle
 
-Every NBNE module owns its own data and exposes it via API. No module has direct database access to another module. Cairn is the memory layer that sits above all modules.
+Every NBNE module owns its own data and exposes it via API. No module has direct database access to another module. Deek is the memory layer that sits above all modules.
 
 ```
-                        CAIRN
+                        DEEK
                    (memory + brain)
                          |
          ┌───────────────┼───────────────┐
@@ -58,15 +58,15 @@ CRM is the third module in the Make → Measure → Sell value chain. It answers
 
 ### Why This Matters — The Boardroom Scenario
 
-Toby is standing with a client in their boardroom. The client asks: "What are our options for an internal illuminated sign?" Toby gets his phone out and asks Cairn. Within seconds, Cairn responds with:
+Toby is standing with a client in their boardroom. The client asks: "What are our options for an internal illuminated sign?" Toby gets his phone out and asks Deek. Within seconds, Deek responds with:
 
 > "You've done three internal illuminated projects in the last 18 months. The Bamburgh Golf Club boardroom sign was a 1200x400mm LED-backlit acrylic panel at £1,850. Paton & Co got a halo-lit aluminium composite at £2,400. The Glendale Show stand used edge-lit acrylic at £680 but that was a smaller piece. Based on typical boardroom dimensions, I'd suggest the LED-backlit acrylic or halo-lit options. Guideline price for this type of project: £1,500–£2,800 depending on size and finish. Want me to draft a quote?"
 
-That answer requires semantic search across project descriptions, email threads, materials used, prices quoted, and photos — not a SQL query on a status field. This is the same hybrid BM25 + cosine similarity retrieval architecture used in Cairn's codebase memory and in the other NBNE modules.
+That answer requires semantic search across project descriptions, email threads, materials used, prices quoted, and photos — not a SQL query on a status field. This is the same hybrid BM25 + cosine similarity retrieval architecture used in Deek's codebase memory and in the other NBNE modules.
 
 ### Retrieval Architecture
 
-CRM uses the same three-layer retrieval as all Cairn-connected modules:
+CRM uses the same three-layer retrieval as all Deek-connected modules:
 
 **Layer 1 — BM25 (lexical/keyword)**
 Fast keyword matching. When the query contains specific terms like "illuminated sign", "LED", "halo-lit", "boardroom", BM25 finds exact and near-exact matches in project descriptions, email bodies, material names, and knowledge base entries.
@@ -75,7 +75,7 @@ Fast keyword matching. When the query contains specific terms like "illuminated 
 Embedding-based search using `nomic-embed-text` via Ollama (local) or an API fallback. Catches conceptual matches that BM25 misses — e.g., a project described as "backlit reception panel" is semantically similar to "internal illuminated sign" even though the keywords differ.
 
 **Layer 3 — Hybrid RRF (Reciprocal Rank Fusion)**
-Merges BM25 and pgvector results using RRF scoring, same as Cairn's codebase retrieval. This consistently outperforms either method alone.
+Merges BM25 and pgvector results using RRF scoring, same as Deek's codebase retrieval. This consistently outperforms either method alone.
 
 ### What Gets Indexed
 
@@ -152,7 +152,7 @@ On quote creation:
 ### Hybrid Search Endpoint
 
 **Endpoint**: `GET /api/cairn/search`
-**Auth**: Bearer token via `CAIRN_API_KEY`
+**Auth**: Bearer token via `DEEK_API_KEY`
 **Purpose**: Semantic + lexical search across all CRM data. This is what powers the boardroom scenario.
 
 ```json
@@ -224,15 +224,15 @@ The CRM already has an "AI Knowledge Search (Powered by RAG)" panel. This should
 
 ## What Needs Building
 
-### 1. Cairn Context API Endpoint
+### 1. Deek Context API Endpoint
 
 **Required from day one.** CRM v2 must not go live without this endpoint —
-Cairn's module federation loop polls it every 15 minutes and without a
+Deek's module federation loop polls it every 15 minutes and without a
 snapshot route CRM is invisible to the business brain.
 
 **Primary endpoint**: `GET /api/cairn/snapshot`
-**Auth**: Bearer token via `CAIRN_API_KEY` environment variable
-**Response type**: `text/markdown` (pre-rendered summary the Cairn embedder
+**Auth**: Bearer token via `DEEK_API_KEY` environment variable
+**Response type**: `text/markdown` (pre-rendered summary the Deek embedder
 ingests directly into `claw_code_chunks` with `chunk_type='module_snapshot'`)
 
 The snapshot body is a short markdown report covering pipeline totals, stage
@@ -242,14 +242,14 @@ full body fits in a single embedding call. The exact schema mirrors the
 `manufacture` snapshot at `D:/manufacture/backend/core/cairn_views.py` —
 match that pattern for consistency.
 
-**Registration**: add the module to `D:/claw/deploy/modules.json` alongside
+**Registration**: add the module to `D:/deek/deploy/modules.json` alongside
 Manufacture, with `snapshot_url` set to the production CRM URL and
-`auth_header_env` set to `CAIRN_MODULE_TOKEN`. Cairn's poll loop
-(`api/routes/cairn_federation.py`) does the rest.
+`auth_header_env` set to `DEEK_MODULE_TOKEN`. Deek's poll loop
+(`api/routes/deek_federation.py`) does the rest.
 
 **Companion endpoint (optional, structured)**: `GET /api/cairn/context`
 Returns the same data as JSON for clients that prefer structured access.
-The snapshot markdown route is the one Cairn federation uses.
+The snapshot markdown route is the one Deek federation uses.
 
 Example JSON payload for the companion `/api/cairn/context` endpoint:
 
@@ -296,12 +296,12 @@ Example JSON payload for the companion `/api/cairn/context` endpoint:
 }
 ```
 
-### 2. Cairn Write-Back Endpoint
+### 2. Deek Write-Back Endpoint
 
 **Endpoint**: `POST /api/cairn/memory`
-**Auth**: Bearer token via `CAIRN_API_KEY`
+**Auth**: Bearer token via `DEEK_API_KEY`
 
-Allows Cairn to push observations, recommendations, or memory entries back into CRM.
+Allows Deek to push observations, recommendations, or memory entries back into CRM.
 
 ```json
 {
@@ -314,13 +314,13 @@ Allows Cairn to push observations, recommendations, or memory entries back into 
 }
 ```
 
-These should appear in the existing "Live Recommendations" panel and be flagged as Cairn-generated.
+These should appear in the existing "Live Recommendations" panel and be flagged as Deek-generated.
 
 ### 3. Email Integration — cairn@nbnesigns.com
 
 **Dedicated email**: cairn@nbnesigns.com (IONOS, to be created by Toby)
 **Protocol**: IMAP (read) + SMTP (send)
-**Purpose**: Cairn monitors this inbox for inbound B2B enquiries, client replies, and supplier correspondence. This is NOT a replacement for personal email — it's a shared business intelligence inbox.
+**Purpose**: Deek monitors this inbox for inbound B2B enquiries, client replies, and supplier correspondence. This is NOT a replacement for personal email — it's a shared business intelligence inbox.
 
 #### 3a. Email Ingestion Service
 
@@ -339,13 +339,13 @@ A background service (Vercel Cron or separate worker) that:
    - If `existing_project`: attaches to project timeline, updates last_contact date
    - If `supplier`: logs in supplier correspondence, flags if procurement-relevant
 
-#### 3b. Email Sending (Cairn-Drafted)
+#### 3b. Email Sending (Deek-Drafted)
 
-Cairn can draft emails but **never sends without human approval**. The flow:
+Deek can draft emails but **never sends without human approval**. The flow:
 
-1. Cairn identifies a follow-up is needed (e.g., quote sent 15 days ago)
-2. Cairn drafts an email using project context + client history
-3. Draft appears in CRM UI under the project, flagged "Cairn Draft — Review & Send"
+1. Deek identifies a follow-up is needed (e.g., quote sent 15 days ago)
+2. Deek drafts an email using project context + client history
+3. Draft appears in CRM UI under the project, flagged "Deek Draft — Review & Send"
 4. Jo or Toby reviews, edits if needed, clicks Send
 5. Email sent via SMTP from cairn@nbnesigns.com (or forwarded to personal email for sending)
 6. Sent email logged against project timeline
@@ -354,11 +354,11 @@ Cairn can draft emails but **never sends without human approval**. The flow:
 
 ```env
 CAIRN_EMAIL_ADDRESS=cairn@nbnesigns.com
-CAIRN_EMAIL_IMAP_HOST=imap.ionos.co.uk
-CAIRN_EMAIL_IMAP_PORT=993
-CAIRN_EMAIL_SMTP_HOST=smtp.ionos.co.uk
-CAIRN_EMAIL_SMTP_PORT=587
-CAIRN_EMAIL_PASSWORD=<secure>
+DEEK_EMAIL_IMAP_HOST=imap.ionos.co.uk
+DEEK_EMAIL_IMAP_PORT=993
+DEEK_EMAIL_SMTP_HOST=smtp.ionos.co.uk
+DEEK_EMAIL_SMTP_PORT=587
+DEEK_EMAIL_PASSWORD=<secure>
 ```
 
 #### 3d. Email-to-CRM Matching Rules
@@ -380,7 +380,7 @@ The current Revenue Overview is a good start. Add:
 - **Revenue attribution**: When a project completes, tag which source generated it
 - **Stale pipeline alerts**: Projects stuck in a stage beyond the average time get flagged
 
-This data feeds directly into the Cairn context endpoint and allows the business brain to answer: "Is Google Ads at £3/day actually producing traceable B2B revenue?"
+This data feeds directly into the Deek context endpoint and allows the business brain to answer: "Is Google Ads at £3/day actually producing traceable B2B revenue?"
 
 ### 5. Google Ads Integration (Phase 2)
 
@@ -410,7 +410,7 @@ Extend the Clients section to track:
 - **Repeat rate**: How many projects has this client commissioned?
 - **Last contact date**: Auto-updated from email integration
 - **Preferred contact method**: Email / Phone / In person
-- **Notes / context**: Free text that Cairn can index (e.g., "Prefers to deal with Jo", "Budget-conscious but loyal", "Seasonal — orders before Easter and Christmas")
+- **Notes / context**: Free text that Deek can index (e.g., "Prefers to deal with Jo", "Budget-conscious but loyal", "Seasonal — orders before Easter and Christmas")
 - **Linked Ledger data**: If the client has Xero invoices, link to Ledger revenue data
 
 ### 7. Project Reference System
@@ -422,7 +422,7 @@ Example: `NBNE-2026-042` for the 42nd project created in 2026.
 This reference:
 - Appears in all email subjects (for matching)
 - Appears on quotes and invoices
-- Is searchable in CRM and by Cairn
+- Is searchable in CRM and by Deek
 - Is auto-generated on project creation
 
 ---
@@ -443,7 +443,7 @@ CREATE TABLE emails (
     classification TEXT,                     -- new_enquiry, existing_project, supplier, spam
     is_inbound BOOLEAN DEFAULT true,
     is_read BOOLEAN DEFAULT false,
-    is_cairn_draft BOOLEAN DEFAULT false,    -- true if Cairn drafted this
+    is_cairn_draft BOOLEAN DEFAULT false,    -- true if Deek drafted this
     is_approved BOOLEAN DEFAULT false,       -- true if human approved for sending
     approved_by TEXT,                        -- staff who approved
     received_at TIMESTAMPTZ,
@@ -489,7 +489,7 @@ ALTER TABLE clients ADD COLUMN IF NOT EXISTS
     lifetime_value DECIMAL(10,2) DEFAULT 0,
     project_count INTEGER DEFAULT 0,
     preferred_contact TEXT,                  -- email, phone, in_person
-    notes TEXT,                              -- free text, Cairn-indexable
+    notes TEXT,                              -- free text, Deek-indexable
     last_contact_at TIMESTAMPTZ;
 ```
 
@@ -498,16 +498,16 @@ ALTER TABLE clients ADD COLUMN IF NOT EXISTS
 ## Environment Variables (New)
 
 ```env
-# Cairn API
-CAIRN_API_KEY=<shared secret across all modules>
+# Deek API
+DEEK_API_KEY=<shared secret across all modules>
 
 # Email (IONOS)
 CAIRN_EMAIL_ADDRESS=cairn@nbnesigns.com
-CAIRN_EMAIL_IMAP_HOST=imap.ionos.co.uk
-CAIRN_EMAIL_IMAP_PORT=993
-CAIRN_EMAIL_SMTP_HOST=smtp.ionos.co.uk
-CAIRN_EMAIL_SMTP_PORT=587
-CAIRN_EMAIL_PASSWORD=<secure>
+DEEK_EMAIL_IMAP_HOST=imap.ionos.co.uk
+DEEK_EMAIL_IMAP_PORT=993
+DEEK_EMAIL_SMTP_HOST=smtp.ionos.co.uk
+DEEK_EMAIL_SMTP_PORT=587
+DEEK_EMAIL_PASSWORD=<secure>
 
 # Existing
 NEON_DATABASE_URL=<existing>
@@ -518,7 +518,7 @@ LLAMA_API_KEY=<existing, for AI insights>
 
 ## Build Order
 
-### Phase 1 — Cairn API + Semantic Memory (Priority: Immediate)
+### Phase 1 — Deek API + Semantic Memory (Priority: Immediate)
 1. Enable pgvector and pg_trgm extensions on Neon
 2. Create `crm_embeddings` table with HNSW and GIN indexes
 3. Build embedding pipeline (nomic-embed-text via Ollama, API fallback)
@@ -527,7 +527,7 @@ LLAMA_API_KEY=<existing, for AI insights>
 6. Migrate existing RAG Knowledge Search to unified `crm_embeddings` index
 7. Implement `GET /api/cairn/context` endpoint
 8. Implement `POST /api/cairn/memory` endpoint
-9. Surface Cairn recommendations in Live Recommendations panel
+9. Surface Deek recommendations in Live Recommendations panel
 10. Add project reference system (NBNE-YYYY-NNN)
 11. Add `lead_source` field to projects
 
@@ -538,7 +538,7 @@ LLAMA_API_KEY=<existing, for AI insights>
 4. Build email-to-project matching logic
 5. Embed all ingested emails into `crm_embeddings` (source_type='email')
 6. Build email timeline view on project pages
-7. Build Cairn draft review/approve/send UI
+7. Build Deek draft review/approve/send UI
 8. Auto-update `last_contact_at` on projects and clients from email activity
 
 ### Phase 3 — Pipeline Intelligence (Priority: Medium)
@@ -552,15 +552,15 @@ LLAMA_API_KEY=<existing, for AI insights>
 1. UTM parameter capture from web forms
 2. Google Ads API connection for spend/click data
 3. Automated lead source attribution from gclid
-4. ROAS calculation per campaign feeding into Cairn context
+4. ROAS calculation per campaign feeding into Deek context
 
 ---
 
-## Cross-Module Queries Cairn Should Be Able To Answer
+## Cross-Module Queries Deek Should Be Able To Answer
 
-Once CRM, Ledger, and Manufacture are all feeding Cairn:
+Once CRM, Ledger, and Manufacture are all feeding Deek:
 
-1. **"What are our options for an internal illuminated sign in a boardroom?"** — CRM semantic search finds past projects, quotes, materials, and prices. Cairn synthesises into client-facing options with guideline pricing. **This is the primary use case.**
+1. **"What are our options for an internal illuminated sign in a boardroom?"** — CRM semantic search finds past projects, quotes, materials, and prices. Deek synthesises into client-facing options with guideline pricing. **This is the primary use case.**
 2. **"What's our most profitable type of B2B project?"** — CRM knows project types, Ledger knows margins
 3. **"Should we quote this job?"** — CRM knows pipeline load, Manufacture knows capacity, Ledger knows cash position
 4. **"Which leads came from Google Ads and were they profitable?"** — CRM knows source, Ledger knows final margin
@@ -574,7 +574,7 @@ Once CRM, Ledger, and Manufacture are all feeding Cairn:
 
 ## Constraints
 
-- **Human-in-the-loop for all outbound communication.** Cairn drafts, humans approve.
+- **Human-in-the-loop for all outbound communication.** Deek drafts, humans approve.
 - **No direct database access between modules.** CRM calls Ledger via API, never queries Ledger's database.
 - **Email data is sensitive.** Encrypt at rest in Neon. Retention policy: active project emails indefinite, orphaned emails deleted after 12 months.
 - **GDPR compliance.** Client data export and deletion must be functional. Privacy policy must cover email processing.
@@ -591,15 +591,15 @@ Once CRM, Ledger, and Manufacture are all feeding Cairn:
 | Manufacture | 8002        | 3002          | manufacture.nbnesigns.co.uk|
 | CRM         | Vercel      | Vercel        | crm.nbnesigns.co.uk       |
 | Render      | 8004        | 3004          | render.nbnesigns.co.uk    |
-| Cairn API   | 8765        | —             | localhost (sovereign)      |
+| Deek API   | 8765        | —             | localhost (sovereign)      |
 
-Note: CRM runs on Vercel (serverless), not on the sovereign server. The Cairn API endpoint is exposed via the Vercel deployment. If CRM migrates to the sovereign server in future, assign port 8003/3003.
+Note: CRM runs on Vercel (serverless), not on the sovereign server. The Deek API endpoint is exposed via the Vercel deployment. If CRM migrates to the sovereign server in future, assign port 8003/3003.
 
 ---
 
 ## Success Criteria
 
-The CRM upgrade is complete when Cairn can:
+The CRM upgrade is complete when Deek can:
 
 1. ✅ Semantic search across all CRM data via `/api/cairn/search` using hybrid BM25 + cosine similarity with RRF
 2. ✅ Answer "what are our options for X?" with past projects, materials, methods, and guideline prices — in a client-facing conversation on Toby's phone

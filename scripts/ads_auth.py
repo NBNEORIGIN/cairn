@@ -1,5 +1,5 @@
 """
-Amazon Ads API OAuth flow — NBNE / Cairn Intelligence
+Amazon Ads API OAuth flow — NBNE / Deek Intelligence
 =====================================================
 
 Captures refresh tokens and marketplace profile IDs across all three
@@ -9,7 +9,7 @@ Usage:
     python ads_auth.py
 
 Prerequisites:
-    - AMAZON_ADS_CLIENT_ID and AMAZON_ADS_CLIENT_SECRET in D:\\claw\\.env
+    - AMAZON_ADS_CLIENT_ID and AMAZON_ADS_CLIENT_SECRET in D:\\deek\\.env
     - Redirect URI http://localhost:8766/callback added to the
       Cairn_Intelligence LWA security profile's allowed return URLs
       at developer.amazon.com/loginwithamazon
@@ -18,7 +18,7 @@ Prerequisites:
       each region when prompted
 
 Output:
-    Appends AMAZON_ADS_* entries to D:\\claw\\.env
+    Appends AMAZON_ADS_* entries to D:\\deek\\.env
     Prints refresh tokens and profile IDs to console for sanity check
 
 Why three runs:
@@ -45,10 +45,10 @@ import requests
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-CALLBACK_PORT = 8766  # 8765 is occupied by Cairn FastAPI; must match LWA Allowed Return URL
+CALLBACK_PORT = 8766  # 8765 is occupied by Deek FastAPI; must match LWA Allowed Return URL
 REDIRECT_URI = f"http://localhost:{CALLBACK_PORT}/callback"
-ENV_PATH = Path(r"D:\claw\.env")
-PROFILES_PATH = Path(r"D:\claw\amazon_ads_profiles.json")
+ENV_PATH = Path(r"D:\deek\.env")
+PROFILES_PATH = Path(r"D:\deek\amazon_ads_profiles.json")
 
 
 def _load_credentials_from_env() -> tuple[str, str]:

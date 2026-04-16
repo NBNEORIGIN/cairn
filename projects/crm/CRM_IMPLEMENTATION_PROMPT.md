@@ -1,12 +1,12 @@
-# CRM v2 — Cairn-Integrated Business Development Platform
+# CRM v2 — Deek-Integrated Business Development Platform
 # Implementation Session
 
 ---
 
-Read CLAUDE.md and CAIRN_PROTOCOL.md before starting.
-Pull memory for projects "crm", "claw", and "manufacturing" before starting.
-Read D:\claw\projects\crm\CRM_V2_SPEC.md — the full specification.
-Read D:\claw\projects\crm\core.md — current state and decisions.
+Read CLAUDE.md and DEEK_PROTOCOL.md before starting.
+Pull memory for projects "crm", "deek", and "manufacturing" before starting.
+Read D:\deek\projects\crm\CRM_V2_SPEC.md — the full specification.
+Read D:\deek\projects\crm\core.md — current state and decisions.
 
 ---
 
@@ -21,7 +21,7 @@ Key points:
 - Pipeline: £50,309 across 37 projects
 - Primary use case: semantic search — "what are our options for an illuminated
   sign?" returns past projects, materials, methods, and pricing from memory
-- Architecture: Cairn sits above all modules. No direct DB access between modules.
+- Architecture: Deek sits above all modules. No direct DB access between modules.
 
 ## UI Changes (IMPORTANT — read before touching the frontend)
 
@@ -34,18 +34,18 @@ The snapshot overview / AI insights panel is unused.
    ONLY as the default. No cards toggle. Clean, sortable table with columns:
    Reference, Project, Client, Stage, Value, Last Contact, Lead Source.
 
-2. **Replace the snapshot/insights panel** with a **Cairn chat interface**.
-   This is the same streaming chat component used on cairn.nbnesigns.co.uk
-   (see D:\claw\web-business\src\app\(authenticated)\ask\page.tsx for the
+2. **Replace the snapshot/insights panel** with a **Deek chat interface**.
+   This is the same streaming chat component used on deek.nbnesigns.co.uk
+   (see D:\deek\web-business\src\app\(authenticated)\ask\page.tsx for the
    pattern). Key differences for the CRM version:
    - Scoped to CRM data: queries hit GET /api/cairn/search (hybrid BM25 +
-     cosine over crm_embeddings) instead of general Cairn memory
+     cosine over crm_embeddings) instead of general Deek memory
    - The chat panel sits alongside the project table (sidebar or split view)
    - Staff can ask: "what options do we have for illuminated signs?",
      "show me all work for golf clubs", "what materials did we use on
      the Glendale Show signs?"
-   - Uses SSE streaming from the Cairn API, same EventSource pattern
-   - Include the 🎤 voice-to-ask button (same as cairn.nbnesigns.co.uk)
+   - Uses SSE streaming from the Deek API, same EventSource pattern
+   - Include the 🎤 voice-to-ask button (same as deek.nbnesigns.co.uk)
    - Include the 🔊 Listen button on responses
    - Include the 💾 Remember this button on responses
 
@@ -53,7 +53,7 @@ The snapshot overview / AI insights panel is unused.
    Knowledge Base) but add a "New Lead from Email" flow that creates leads
    from the email integration (Phase 2 — just keep the button for now).
 
-4. **Keep Live Recommendations** but wire them to Cairn recommendations
+4. **Keep Live Recommendations** but wire them to Deek recommendations
    from POST /api/cairn/memory write-back (Phase 1, step 9).
 
 ## Infrastructure (CONFIRMED)
@@ -61,7 +61,7 @@ The snapshot overview / AI insights panel is unused.
 ### Database
 PostgreSQL + pgvector on nbne1 RAID server. Create the CRM database:
 ```
-# Credentials: see Cairn memory (reference_local_server.md) or .env
+# Credentials: see Deek memory (reference_local_server.md) or .env
 ssh toby@192.168.1.228
 sudo -u postgres createdb cairn_crm
 sudo -u postgres psql -d cairn_crm -c "GRANT ALL PRIVILEGES ON DATABASE cairn_crm TO cairn;"
@@ -81,7 +81,7 @@ SSL: Cloudflare origin cert at /etc/ssl/cloudflare/nbne/origin.pem (wildcard *.n
 
 ### Embeddings
 Use OpenAI text-embedding-3-small (768 dims) — CRM is on Hetzner, not the
-local server with Ollama. ~£0.01 per 1M tokens. Consistent with Cairn's
+local server with Ollama. ~£0.01 per 1M tokens. Consistent with Deek's
 existing batch indexer approach (see core/context/indexer.py).
 
 ### Email (3 sources — Phase 2, but design schema now)
@@ -96,7 +96,7 @@ Toby will create cairn@nbnesigns.com and provide all credentials.
 ## Existing Data on nbne1
 
 Other databases on the same server (for cross-module queries via API, NOT direct access):
-- claw (136 MB) — Cairn core
+- deek (136 MB) — Deek core
 - amazon_manager (53 MB) — Amazon Intelligence
 - manufacture (13 MB) — Manufacturing
 - ledger (9.5 MB) — Financial system
@@ -130,7 +130,7 @@ After every phase:
 
 ## Build Order (Phase 1 only — this session)
 
-0. Register CRM project in Cairn:
+0. Register CRM project in Deek:
    - Create projects/crm/config.json with codebase_path: "D:\\crm"
    - POST /index?project=crm to seed the index
    - Verify: GET /projects returns "crm"
@@ -174,16 +174,16 @@ After every phase:
     Sortable by any column. Filterable by stage.
     (Delegate to Sonnet)
 
-11. **UI: Replace snapshot/insights panel with Cairn chat**
+11. **UI: Replace snapshot/insights panel with Deek chat**
     Build a chat panel (sidebar or right-side split) that queries
     GET /api/cairn/search with SSE streaming. Include:
     - Voice input (🎤 mic button, Whisper transcription)
     - Text-to-speech (🔊 Listen button on responses)
-    - Remember this (💾 saves to Cairn memory)
-    Follow the pattern from D:\claw\web-business\src\app\(authenticated)\ask\page.tsx
+    - Remember this (💾 saves to Deek memory)
+    Follow the pattern from D:\deek\web-business\src\app\(authenticated)\ask\page.tsx
     (Delegate to Sonnet for structure, review the search integration yourself)
 
-12. Wire Live Recommendations to Cairn recommendations table
+12. Wire Live Recommendations to Deek recommendations table
 
 13. Add project reference system NBNE-YYYY-NNN (Sonnet)
 
@@ -193,17 +193,17 @@ After every phase:
     (Sonnet — schema in CRM_V2_SPEC.md)
 
 16. Create Dockerfile + docker-compose for Hetzner deployment
-    (Sonnet — follow D:\claw\deploy\docker-compose.yml pattern)
+    (Sonnet — follow D:\deek\deploy\docker-compose.yml pattern)
 
 17. Deploy to Hetzner: build, push, nginx config, test
 
-18. Wire to cairn.nbnesigns.co.uk dashboard:
-    Update D:\claw\web-business\src\app\api\context\route.ts:
+18. Wire to deek.nbnesigns.co.uk dashboard:
+    Update D:\deek\web-business\src\app\api\context\route.ts:
     { key: 'crm', name: 'Customers', url: `${process.env.CRM_API_URL || 'http://localhost:8003'}/api/cairn/context` }
     Note: on Hetzner, use the Docker bridge IP or container name, not host.docker.internal (Linux-only limitation).
 
 Commit after each step. One logical change per commit.
-Write back to Cairn memory after each step.
+Write back to Deek memory after each step.
 
 ## Phases 2-4 (separate sessions)
 - Phase 2: Email integration (cairn@, sales@, toby@ IMAP ingestion, classification, project matching)

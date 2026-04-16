@@ -67,7 +67,7 @@ Northumberland
 
 1. **Follow up** - Connect with any useful contacts made during the event within 48 hours
 2. **Share intelligence** - Brief relevant NBNE colleagues on any operational insights or local developments discussed
-3. **Document outcomes** - Update Cairn with any new contacts, partnership opportunities, or local intelligence gathered
+3. **Document outcomes** - Update Deek with any new contacts, partnership opportunities, or local intelligence gathered
 4. **Future events** - If this event series is valuable, consider adding future Northumberland Networking dates to your calendar
 
 ## Value for NBNE Operations

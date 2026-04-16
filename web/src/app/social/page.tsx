@@ -1,16 +1,16 @@
 'use client'
 
 /**
- * Cairn Social — Phase 1 UI
+ * Deek Social — Phase 1 UI
  *
- * Two-panel layout (centre + right) per CAIRN_SOCIAL_V2_HANDOFF.md Blocker 4.
+ * Two-panel layout (centre + right) per DEEK_SOCIAL_V2_HANDOFF.md Blocker 4.
  * Three platforms: Facebook, Instagram, LinkedIn (no TikTok per Blocker 3).
  * Two input modes:
  *   - Brief    : Jo gives a short prompt → tool drafts in her voice
  *   - Proofread: Jo writes a finished post → tool refines/adapts per platform
  *
  * Calls proxied through /api/social/[...path] → backend /social/*
- * so they work in Docker where the browser can't reach cairn-api:8765.
+ * so they work in Docker where the browser can't reach deek-api:8765.
  */
 
 import { useEffect, useState } from 'react'
@@ -262,7 +262,7 @@ export default function SocialPage() {
       <div className="mx-auto max-w-[1400px]">
         <header className="mb-6 flex items-end justify-between">
           <div>
-            <h1 className="text-2xl font-semibold text-slate-900">Cairn Social</h1>
+            <h1 className="text-2xl font-semibold text-slate-900">Deek Social</h1>
             <p className="mt-1 text-sm text-slate-600">
               Drafting + proof-reading for Jo. Three platforms, no direct posting,
               copy-to-clipboard only.

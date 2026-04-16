@@ -2,7 +2,7 @@
 Model routing — selects which inference provider to use per request.
 
 Tier priority (lowest cost first):
-  Tier 1 — Ollama (local, free)     CLAW_FORCE_API=false + Ollama reachable
+  Tier 1 — Ollama (local, free)     DEEK_FORCE_API=false + Ollama reachable
   Tier 2 — DeepSeek (cheap API)     DEEPSEEK_API_KEY set + DEEPSEEK_ENABLED=true
   Tier 3 — Claude Sonnet (default)  ANTHROPIC_API_KEY set
   Tier 4 — Claude Opus (premium)    Architecture / security keywords only
@@ -12,16 +12,16 @@ Routing summary table:
   ┌────────────────────────────────────────┬──────────────────────┐
   │ Condition                               │ Provider             │
   ├────────────────────────────────────────┼──────────────────────┤
-  │ CLAW_FORCE_API=false + Ollama          │ Ollama (local)       │
+  │ DEEK_FORCE_API=false + Ollama          │ Ollama (local)       │
   │ DEEPSEEK_API_KEY + not Opus kw         │ DeepSeek V3          │
   │ Opus keywords present                   │ Claude Opus          │
   │ Default                                 │ Claude Sonnet        │
   │ Claude 429/529 + DeepSeek avail         │ DeepSeek (fallback)  │
   │ Claude 429/529 + no DeepSeek           │ OpenAI gpt-4o        │
-  │ CLAW_TIER4_PROJECTS contains project   │ Tier 4 minimum       │
+  │ DEEK_TIER4_PROJECTS contains project   │ Tier 4 minimum       │
   └────────────────────────────────────────┴──────────────────────┘
 
-Note: CLAW_FORCE_API=true bypasses Ollama only — DeepSeek and Claude
+Note: DEEK_FORCE_API=true bypasses Ollama only — DeepSeek and Claude
 are both still available when this flag is set.
 """
 import os
@@ -111,10 +111,10 @@ def route_decision(
 
     Returns RoutingDecision with the selected provider and resolved tier.
     """
-    force_api = os.getenv('CLAW_FORCE_API', 'true').lower() == 'true'
+    force_api = (os.getenv('DEEK_FORCE_API') or os.getenv('CLAW_FORCE_API', 'true')).lower() == 'true'
 
-    # ── CLAW_TIER4_PROJECTS: certain projects always use Tier 4 minimum ───
-    tier4_projects_raw = os.getenv('CLAW_TIER4_PROJECTS', '')
+    # ── DEEK_TIER4_PROJECTS: certain projects always use Tier 4 minimum ───
+    tier4_projects_raw = os.getenv('DEEK_TIER4_PROJECTS') or os.getenv('CLAW_TIER4_PROJECTS', '')
     tier4_projects = {p.strip() for p in tier4_projects_raw.split(',') if p.strip()}
     if project and project in tier4_projects:
         return RoutingDecision(
@@ -208,12 +208,12 @@ def _resolve_tier(
     Walk up from the desired tier to the nearest available tier.
     Returns ModelChoice for the first available tier >= desired.
 
-    CLAW_MAX_TIER (env int, default 4) caps the tier ceiling — useful to force
+    DEEK_MAX_TIER (env int, default 4) caps the tier ceiling — useful to force
     all traffic through DeepSeek/OpenRouter and prevent Claude API spend.
-    Set CLAW_MAX_TIER=2 to cap at DeepSeek for all non-destructive tasks.
+    Set DEEK_MAX_TIER=2 to cap at DeepSeek for all non-destructive tasks.
     """
     try:
-        max_tier = TaskTier(int(os.getenv('CLAW_MAX_TIER', '4')))
+        max_tier = TaskTier(int(os.getenv('DEEK_MAX_TIER') or os.getenv('CLAW_MAX_TIER', '4')))
     except (ValueError, KeyError):
         max_tier = TaskTier.OPUS
 

@@ -1,7 +1,7 @@
 """
-Admin API routes — operational endpoints for Cairn instance management.
+Admin API routes — operational endpoints for Deek instance management.
 
-Mounted at /admin/* in the Cairn FastAPI app.
+Mounted at /admin/* in the Deek FastAPI app.
 
   POST /admin/wiki-sync   — git pull + embed any new/changed wiki articles
   GET  /admin/wiki-sync   — status of last sync (reads watermark file)
@@ -76,7 +76,7 @@ def _embed_wiki_files(changed_only: bool = True) -> dict:
     from core.context.indexer import CodeIndexer
 
     indexer = CodeIndexer(
-        project_id='claw',
+        project_id='deek',
         codebase_path=str(_CLAW_ROOT),
         db_url=db_url,
     )
@@ -120,7 +120,7 @@ def _embed_wiki_files(changed_only: bool = True) -> dict:
                 cur.execute(
                     "DELETE FROM claw_code_chunks WHERE project_id=%s"
                     "  AND file_path LIKE %s AND chunk_type=%s",
-                    ('claw', file_path + '%', 'wiki'),
+                    ('deek', file_path + '%', 'wiki'),
                 )
             conn.commit()
         except Exception as exc:
@@ -145,7 +145,7 @@ def _embed_wiki_files(changed_only: bool = True) -> dict:
                            chunk_name, content_hash, embedding, indexed_at)
                         VALUES (%s, %s, %s, %s, %s, %s, %s::vector, NOW())
                         """,
-                        ('claw', fp, section[:1500], 'wiki', md_file.stem, ch, vec),
+                        ('deek', fp, section[:1500], 'wiki', md_file.stem, ch, vec),
                     )
                 conn.commit()
                 embedded += 1
@@ -186,9 +186,9 @@ async def wiki_sync():
       - deploy_wiki.py (Windows) after pushing new articles
       - Hetzner cron (every 4h at :30) — preceded by git pull on the HOST
 
-    NOTE: git pull is intentionally NOT done here. The Cairn container
+    NOTE: git pull is intentionally NOT done here. The Deek container
     has wiki/modules volume-mounted from the host checkout at
-    /opt/nbne/cairn/wiki/modules. The cron and deploy_wiki.py handle
+    /opt/nbne/deek/wiki/modules. The cron and deploy_wiki.py handle
     git pull on the host before calling this endpoint.
     """
     import asyncio

@@ -1,7 +1,7 @@
 {
-  "name": "CLAW Studio",
+  "name": "DEEK Studio",
   "description": "Local AI video and media generation workspace",
-  "codebase_path": "D:/claw/projects/studio",
+  "codebase_path": "D:/deek/projects/studio",
   "project_type": "creative",
 
   "permissions": [
@@ -19,7 +19,7 @@
   },
 
   "video": {
-    "default_output_dir": "D:/claw/projects/studio/outputs/video",
+    "default_output_dir": "D:/deek/projects/studio/outputs/video",
     "default_frames": 49,
     "default_steps": 25,
     "default_fps": 8,

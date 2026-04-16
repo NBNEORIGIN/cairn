@@ -217,9 +217,11 @@ def test_sha256_helper_returns_short_hex():
 
 def test_missing_api_key_raises(monkeypatch):
     from scripts.backfill.sources.crm_reflection import CrmReflectionSource
+    monkeypatch.delenv('DEEK_API_KEY', raising=False)
     monkeypatch.delenv('CAIRN_API_KEY', raising=False)
+    monkeypatch.delenv('CLAW_API_KEY', raising=False)
     source = CrmReflectionSource(api_key='')
-    with pytest.raises(RuntimeError, match='CAIRN_API_KEY'):
+    with pytest.raises(RuntimeError, match='DEEK_API_KEY'):
         list(source.iter_records())
 
 

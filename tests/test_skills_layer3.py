@@ -369,13 +369,13 @@ class TestSkillManagerLegacy:
 
     def test_legacy_constructor(self):
         """Legacy SkillManager(project_id=...) still works."""
-        mgr = SkillManager(project_id='claw')
+        mgr = SkillManager(project_id='deek')
         skills = mgr.all_skills()
-        # Should load from real projects/claw/skills/
+        # Should load from real projects/deek/skills/
         assert isinstance(skills, list)
 
     def test_legacy_resolve_for_request(self):
-        mgr = SkillManager(project_id='claw')
+        mgr = SkillManager(project_id='deek')
         result = mgr.resolve_for_request(
             query='architecture question',
             manual_skill_ids=['architecture'],
@@ -384,12 +384,12 @@ class TestSkillManagerLegacy:
         assert isinstance(result, list)
 
     def test_legacy_build_context_blocks(self):
-        mgr = SkillManager(project_id='claw')
+        mgr = SkillManager(project_id='deek')
         skills = mgr.all_skills()
         blocks = mgr.build_context_blocks(skills[:1] if skills else [])
         assert isinstance(blocks, list)
 
     def test_legacy_primary_subproject_id(self):
-        mgr = SkillManager(project_id='claw')
+        mgr = SkillManager(project_id='deek')
         # Empty list returns None
         assert mgr.primary_subproject_id([]) is None

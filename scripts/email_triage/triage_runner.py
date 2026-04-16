@@ -8,7 +8,7 @@ cairn_intel.email_triage. Does NOT send any emails — that's the
 digest_sender's job, which runs separately.
 
 Safety rails:
-    - Kill switch: CAIRN_EMAIL_TRIAGE_ENABLED must be 'true'
+    - Kill switch: DEEK_EMAIL_TRIAGE_ENABLED must be 'true'
     - Loop prevention: skips emails from cairn@nbnesigns.com
     - Mailbox whitelist: only processes {toby, sales}
     - Idempotent: email_triage UNIQUE constraint drops repeats
@@ -51,7 +51,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name
 ALLOWED_MAILBOXES = ['cairn']
 # Note: cairn@ receives IONOS mail-forwarded copies of toby@ and
 # sales@ traffic, so the production whitelist is just ['cairn'].
-# Loop prevention still filters anything Cairn itself sends to
+# Loop prevention still filters anything Deek itself sends to
 # itself — see LOOP_PREVENTION_SENDER_PATTERNS below.
 LOOP_PREVENTION_SENDER_PATTERNS = [
     'cairn@nbnesigns.com',
@@ -67,7 +67,7 @@ LOOP_PREVENTION_SENDER_PATTERNS = [
 
 
 def is_triage_enabled() -> bool:
-    return os.getenv('CAIRN_EMAIL_TRIAGE_ENABLED', 'false').strip().lower() in {
+    return (os.getenv('DEEK_EMAIL_TRIAGE_ENABLED') or os.getenv('CAIRN_EMAIL_TRIAGE_ENABLED', 'false')).strip().lower() in {
         'true', '1', 'yes', 'on',
     }
 
@@ -141,7 +141,7 @@ def _daily_triage_count(db_url: str) -> int:
         conn.close()
 
 
-# Default daily budget — overridable via CAIRN_TRIAGE_DAILY_LIMIT env var.
+# Default daily budget — overridable via DEEK_TRIAGE_DAILY_LIMIT env var.
 DEFAULT_DAILY_LIMIT = 50
 
 
@@ -160,7 +160,7 @@ def run_triage(
     """
     if not is_triage_enabled():
         log.warning(
-            'triage_runner: CAIRN_EMAIL_TRIAGE_ENABLED is not set — '
+            'triage_runner: DEEK_EMAIL_TRIAGE_ENABLED is not set — '
             'aborting. Set the env var to "true" to enable.'
         )
         return 0
@@ -171,7 +171,7 @@ def run_triage(
         return 0
 
     # Ensure schema — if this is the first run, the email_triage table
-    # may not exist yet (cairn-api startup creates it, but for a direct
+    # may not exist yet (deek-api startup creates it, but for a direct
     # cron invocation we want the safety net).
     try:
         intel_ensure_schema(db_url=db_url)
@@ -179,7 +179,7 @@ def run_triage(
         log.warning('triage_runner: ensure_schema raised: %s', exc)
 
     # ── Daily budget cap ──────────────────────────────────────────────
-    daily_limit = int(os.getenv('CAIRN_TRIAGE_DAILY_LIMIT', str(DEFAULT_DAILY_LIMIT)))
+    daily_limit = int(os.getenv('DEEK_TRIAGE_DAILY_LIMIT') or os.getenv('CAIRN_TRIAGE_DAILY_LIMIT', str(DEFAULT_DAILY_LIMIT)))
     today_count = _daily_triage_count(db_url)
     if today_count >= daily_limit:
         log.info(

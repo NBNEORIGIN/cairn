@@ -43,5 +43,32 @@
     "articles_failed": 0,
     "duration_seconds": 0.2,
     "timestamp": "2026-04-08T17:13:17.166769+00:00"
+  },
+  {
+    "run_id": "2026-04-15T15-14-22.102539+00-00",
+    "scope": "patterns",
+    "articles_compiled": 0,
+    "articles_skipped": 0,
+    "articles_failed": 0,
+    "duration_seconds": 0.0,
+    "timestamp": "2026-04-15T15:14:22.102539+00:00"
+  },
+  {
+    "run_id": "2026-04-15T15-16-07.393277+00-00",
+    "scope": "decisions",
+    "articles_compiled": 0,
+    "articles_skipped": 0,
+    "articles_failed": 0,
+    "duration_seconds": 0.0,
+    "timestamp": "2026-04-15T15:16:07.393277+00:00"
+  },
+  {
+    "run_id": "2026-04-15T16-10-57.361215+00-00",
+    "scope": "modules",
+    "articles_compiled": 0,
+    "articles_skipped": 151,
+    "articles_failed": 0,
+    "duration_seconds": 0.0,
+    "timestamp": "2026-04-15T16:10:57.361215+00:00"
   }
 ]

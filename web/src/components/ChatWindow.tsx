@@ -937,7 +937,7 @@ export function ChatWindow() {
                 </svg>
               </div>
               <div className="leading-tight">
-                <div className="text-sm font-semibold tracking-tight text-slate-900">Cairn</div>
+                <div className="text-sm font-semibold tracking-tight text-slate-900">Deek</div>
                 <div className="text-2xs text-slate-500">Sovereign agent · NBNE</div>
               </div>
             </div>
@@ -1238,7 +1238,7 @@ export function ChatWindow() {
               value={input}
               onChange={handleTextareaChange}
               onKeyDown={handleKeyDown}
-              placeholder={projectId === 'general' ? 'Ask Cairn anything…' : (activeSubproject ? `Ask about ${activeSubproject.display_name}…` : `Ask about ${projectId}…`)}
+              placeholder={projectId === 'general' ? 'Ask Deek anything…' : (activeSubproject ? `Ask about ${activeSubproject.display_name}…` : `Ask about ${projectId}…`)}
               disabled={loading}
               rows={1}
               className="min-h-[36px] max-h-[120px] flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 disabled:opacity-50"

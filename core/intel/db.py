@@ -1,5 +1,5 @@
 """
-Database schema and connection helpers for the Cairn counterfactual
+Database schema and connection helpers for the Deek counterfactual
 intelligence module (``cairn_intel`` schema).
 
 All tables live in a dedicated Postgres schema so they never collide
@@ -22,7 +22,7 @@ import psycopg2
 def get_db_url() -> str:
     return os.getenv(
         'DATABASE_URL',
-        'postgresql://postgres:postgres123@localhost:5432/claw',
+        'postgresql://postgres:postgres123@localhost:5432/deek',
     )
 
 

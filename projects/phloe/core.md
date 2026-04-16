@@ -1,4 +1,4 @@
-# Phloe Platform — CLAW Agent Core Context
+# Phloe Platform — DEEK Agent Core Context
 # Version: 1.0
 # Update this file when significant architectural decisions are made.
 

@@ -127,9 +127,11 @@ def test_lesson_without_rule_has_no_verbatim():
 def test_missing_api_key_raises(monkeypatch):
     """When no api_key is supplied and env var is unset, fetch should refuse."""
     from scripts.backfill.sources.crm_lessons import CrmLessonsSource
+    monkeypatch.delenv('DEEK_API_KEY', raising=False)
     monkeypatch.delenv('CAIRN_API_KEY', raising=False)
+    monkeypatch.delenv('CLAW_API_KEY', raising=False)
     source = CrmLessonsSource(api_key='')
-    with pytest.raises(RuntimeError, match='CAIRN_API_KEY'):
+    with pytest.raises(RuntimeError, match='DEEK_API_KEY'):
         list(source.iter_records())
 
 

@@ -1,0 +1,34 @@
+skill_id: self-modification
+project_id: deek
+display_name: Deek Self-Modification
+description: WIGGUM autonomous development, Deek developing itself
+subproject_id: null
+triggers:
+  - fix this bug
+  - add this feature
+  - wiggum run
+  - cairn develop
+  - deek develop
+  - self modification
+  - improve cairn
+  - update the agent
+  - fix the classifier
+tools_allowed:
+  - read_file
+  - edit_file
+  - create_file
+  - run_tests
+  - git_add
+  - git_commit
+key_rules:
+  - Always read files before editing — never assume contents
+  - Run pytest after every change — never commit failing tests
+  - Approval gate is non-negotiable — never auto-execute DESTRUCTIVE
+  - WIGGUM assess pass uses read-only tools only
+escalate_to_opus_keywords:
+  - architecture change
+  - refactor agent
+  - change routing
+  - modify wiggum
+  - security
+context_budget_override: null

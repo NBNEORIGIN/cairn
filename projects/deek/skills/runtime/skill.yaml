@@ -1,0 +1,15 @@
+skill_id: runtime
+project_id: deek
+display_name: Runtime Hardening
+description: Timeouts, stop handling, tool loops, status behavior, and failure recovery for live DEEK requests.
+triggers:
+  - runtime hardening
+  - request timeout
+  - stop handling
+  - tool loop
+  - hanging request
+subproject_id:
+prompt_hint: Focus on long-running request paths and prefer fixes that fail fast while preserving a usable answer
+key_rules:
+  - Never leave the UI waiting indefinitely.
+  - Timeout paths must return useful user-facing text.

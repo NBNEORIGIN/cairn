@@ -3,16 +3,16 @@
  *
  * The social page (web/src/app/social/page.tsx) used to call
  * http://localhost:8765/social/* directly from the browser, which
- * breaks in Docker (the browser can't reach cairn-api:8765).
+ * breaks in Docker (the browser can't reach deek-api:8765).
  *
  * This proxy forwards GET and POST requests through the Next.js
- * server, which CAN reach cairn-api inside the Docker network.
+ * server, which CAN reach deek-api inside the Docker network.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 
-const CLAW_API = process.env.CLAW_API_URL || process.env.CAIRN_API_URL || 'http://localhost:8765'
-const CLAW_KEY = process.env.CLAW_API_KEY || process.env.CAIRN_API_KEY || 'claw-dev-key-change-in-production'
+const CLAW_API = process.env.CLAW_API_URL || process.env.DEEK_API_URL || 'http://localhost:8765'
+const CLAW_KEY = process.env.DEEK_API_KEY || process.env.DEEK_API_KEY || 'deek-dev-key-change-in-production'
 
 async function proxyToBackend(
   request: NextRequest,

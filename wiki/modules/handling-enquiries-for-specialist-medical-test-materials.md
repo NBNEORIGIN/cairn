@@ -73,7 +73,7 @@ Always restate the updated quantity in your quote to avoid confusion.
 
 Once specifications are confirmed:
 
-1. Log the enquiry in Cairn with all gathered details
+1. Log the enquiry in Deek with all gathered details
 2. Generate Quote 2 (without Ishihara) as requested
 3. Include:
    - 2× A1 5mm foamex banners

@@ -3,7 +3,7 @@ Chat tool — analyze_enquiry.
 
 Takes a free-text new enquiry (an email, a phone note, a quote
 request) and produces a structured strategy brief that synthesises
-every retrieval layer Cairn has:
+every retrieval layer Deek has:
 
   1. search_crm                — live CRM state for this client
                                   (or similar clients if new)
@@ -69,7 +69,7 @@ DEFAULT_SONNET_MODEL = 'claude-sonnet-4-6'
 RATE_CARD_FILES = (
     # In-container path (production on Hetzner)
     '/app/wiki/modules/nbne-rate-card.md',
-    # Dev-box path (D:/claw) — resolved relative to this file
+    # Dev-box path (D:/deek) — resolved relative to this file
     str(Path(__file__).parent.parent.parent / 'wiki' / 'modules' / 'nbne-rate-card.md'),
 )
 RATE_CARD_MAX_CHARS = 6000
@@ -447,7 +447,7 @@ def _retrieve_similar_safe(query: str, limit: int = 6) -> str:
 
 def _search_wiki_safe(query: str, limit: int = 5) -> str:
     try:
-        from .cairn_tools import _search_wiki
+        from .deek_tools import _search_wiki
         return _search_wiki(project_root='', query=query, limit=limit)
     except Exception as exc:
         return f'(search_wiki unavailable: {exc})'

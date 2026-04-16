@@ -1,2 +1,2 @@
-"""Evaluation helpers for CLAW prompt suites."""
+"""Evaluation helpers for DEEK prompt suites."""
 

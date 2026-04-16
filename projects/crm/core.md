@@ -2,14 +2,14 @@
 
 ## What this is
 B2B project management and business development platform for NBNE's commercial signage work.
-Live at crm.nbnesigns.co.uk. Being upgraded from standalone tool to Cairn-connected business
+Live at crm.nbnesigns.co.uk. Being upgraded from standalone tool to Deek-connected business
 development platform with semantic search, email integration, and cross-module intelligence.
 
 ## Current stack
 - Frontend + API: Next.js (migrating from Vercel to Hetzner)
 - Database: PostgreSQL + pgvector on nbne1 (192.168.1.228), DB: cairn_crm
   Connection: postgresql://cairn:cairn_nbne_2026@192.168.1.228:5432/cairn_crm
-- AI: Llama for insights (existing), migrating to Cairn hybrid search
+- AI: Llama for insights (existing), migrating to Deek hybrid search
 - Domain: crm.nbnesigns.co.uk
 - GitHub: https://github.com/NBNEORIGIN/crm
 - Email: cairn@nbnesigns.com (dedicated), sales@nbnesigns.co.uk (read-only), toby@nbnesigns.com (read-only)
@@ -21,22 +21,22 @@ development platform with semantic search, email integration, and cross-module i
 - Active projects include: Bamburgh Golf Club, Paton & Co Estate Agents, Glendale Show
 
 ## The boardroom scenario (primary use case)
-Toby is with a client. Asks Cairn: "What are our options for an internal illuminated sign?"
-Cairn searches across all CRM data semantically and returns past projects, materials, methods,
+Toby is with a client. Asks Deek: "What are our options for an internal illuminated sign?"
+Deek searches across all CRM data semantically and returns past projects, materials, methods,
 and guideline pricing in seconds. This requires hybrid BM25 + pgvector retrieval across
 projects, quotes, emails, materials, and knowledge base entries.
 
 ## Connected modules
 - Ledger (port 8016) — margins, revenue, cost data for pipeline prioritisation
 - Manufacture (port 8015) — capacity, make list, for "should we quote this?" decisions
-- Cairn API (port 8765) — memory, retrieval, business brain
+- Deek API (port 8765) — memory, retrieval, business brain
 
 ## Decision Log
 
-### 2026-04-04 — Project registered in Cairn
-**Context**: CRM v2 spec provided, upgrading from standalone to Cairn-connected
-**Decision**: Registered as Cairn project. Codebase on C: drive (confirm path with Toby).
-Full spec at D:\claw\projects\crm\CRM_V2_SPEC.md
+### 2026-04-04 — Project registered in Deek
+**Context**: CRM v2 spec provided, upgrading from standalone to Deek-connected
+**Decision**: Registered as Deek project. Codebase on C: drive (confirm path with Toby).
+Full spec at D:\deek\projects\crm\CRM_V2_SPEC.md
 **Rejected**: Moving off Vercel (too much migration risk for Phase 1)
 
 ### 2026-04-04 — Hosting and email decisions

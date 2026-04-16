@@ -16,16 +16,16 @@ from contextlib import asynccontextmanager
 
 load_dotenv()
 
-from core.agent import ClawAgent, GenerationStopped, GenerationTimedOut
+from core.agent import DeekAgent, GenerationStopped, GenerationTimedOut
 from core.channels.envelope import MessageEnvelope, Channel
 from core.skills.skill_loader import SkillLoader
 from core.skills.skill_classifier import SkillClassifier
 from api.middleware.auth import verify_api_key
 
 # ── Absolute paths — resolved from this file, never from CWD ────────────────
-_API_DIR      = Path(__file__).parent                    # D:\claw\api
-_CLAW_ROOT    = _API_DIR.parent                          # D:\claw
-_PROJECTS_ROOT = _CLAW_ROOT / 'projects'                 # D:\claw\projects
+_API_DIR      = Path(__file__).parent                    # D:\deek\api
+_CLAW_ROOT    = _API_DIR.parent                          # D:\deek
+_PROJECTS_ROOT = _CLAW_ROOT / 'projects'                 # D:\deek\projects
 
 # Module-level test result cache — populated when run_tests tool runs
 _test_cache: dict = {}
@@ -38,20 +38,20 @@ _status_summary_cache: dict[str, object] = {
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan handler — auto-loads every project that has a config.json."""
-    print(f'[CLAW startup] Scanning: {_PROJECTS_ROOT.absolute()}')
+    print(f'[DEEK startup] Scanning: {_PROJECTS_ROOT.absolute()}')
     active_watchers = []
     if _PROJECTS_ROOT.exists():
         candidates = [
             d for d in sorted(_PROJECTS_ROOT.iterdir())
             if d.is_dir() and not d.name.startswith('_')
         ]
-        print(f'[CLAW startup] Found: {[d.name for d in candidates]}')
+        print(f'[DEEK startup] Found: {[d.name for d in candidates]}')
         for project_dir in candidates:
             config_path = project_dir / 'config.json'
             if config_path.exists():
                 try:
                     config = json.loads(config_path.read_text())
-                    agent = ClawAgent(
+                    agent = DeekAgent(
                         project_id=project_dir.name,
                         config=config,
                     )
@@ -68,12 +68,12 @@ async def lifespan(app: FastAPI):
                                 )
                             except Exception as sp_err:
                                 print(
-                                    f'[CLAW startup] subproject '
+                                    f'[DEEK startup] subproject '
                                     f'{sp["name"]} failed: {sp_err}'
                                 )
                     codebase_path = config.get('codebase_path')
                     db_url = os.getenv('DATABASE_URL', '')
-                    watcher_enabled = os.getenv('CLAW_ENABLE_WATCHER', '').lower() in {
+                    watcher_enabled = (os.getenv('DEEK_ENABLE_WATCHER') or os.getenv('CLAW_ENABLE_WATCHER', '')).lower() in {
                         '1', 'true', 'yes', 'on',
                     }
                     if watcher_enabled and codebase_path and db_url:
@@ -97,14 +97,14 @@ async def lifespan(app: FastAPI):
                             active_watchers.append(watcher)
                         except Exception as watcher_err:
                             print(
-                                f'[CLAW startup] watcher disabled for '
+                                f'[DEEK startup] watcher disabled for '
                                 f'{project_dir.name}: {watcher_err}'
                             )
-                    print(f'[CLAW startup] Loaded: {project_dir.name}')
+                    print(f'[DEEK startup] Loaded: {project_dir.name}')
                 except Exception as e:
-                    print(f'[CLAW startup] Failed {project_dir.name}: {e}')
+                    print(f'[DEEK startup] Failed {project_dir.name}: {e}')
     else:
-        print(f'[CLAW startup] Projects dir not found: {_PROJECTS_ROOT.absolute()}')
+        print(f'[DEEK startup] Projects dir not found: {_PROJECTS_ROOT.absolute()}')
 
     # ── Skill system init ────────────────────────────────────────────────
     try:
@@ -124,9 +124,9 @@ async def lifespan(app: FastAPI):
             await classifier.initialise()
             app.state.skill_classifier = classifier
             app.state.skill_classifier_ready = True
-            print(f'[CLAW startup] Skill classifier ready — {len(all_skills)} skills')
+            print(f'[DEEK startup] Skill classifier ready — {len(all_skills)} skills')
         except Exception as cls_err:
-            print(f'[CLAW startup] Skill classifier unavailable (exact-match only): {cls_err}')
+            print(f'[DEEK startup] Skill classifier unavailable (exact-match only): {cls_err}')
             app.state.skill_classifier = None
 
         # Upgrade agents to use the shared loader + classifier
@@ -138,7 +138,7 @@ async def lifespan(app: FastAPI):
                 project_id=pid,
             )
     except Exception as skill_err:
-        print(f'[CLAW startup] Skill system failed: {skill_err}')
+        print(f'[DEEK startup] Skill system failed: {skill_err}')
         app.state.skill_loader = None
         app.state.skill_classifier = None
         app.state.skill_classifier_ready = False
@@ -153,44 +153,44 @@ async def lifespan(app: FastAPI):
         # Apply column-level migrations after the base schema. Safe to re-run
         # (each ALTER is try/except-swallowed in migrate_ami_schema).
         ami_migrate_schema()
-        print('[CLAW startup] Amazon Intel schema ready')
+        print('[DEEK startup] Amazon Intel schema ready')
     except Exception as ami_err:
-        print(f'[CLAW startup] Amazon Intel schema failed: {ami_err}')
+        print(f'[DEEK startup] Amazon Intel schema failed: {ami_err}')
 
     # ── Etsy Intelligence schema ───────────────────────────────────────
     try:
         from core.etsy_intel.db import ensure_schema as etsy_ensure_schema
         etsy_ensure_schema()
-        print('[CLAW startup] Etsy Intel schema ready')
+        print('[DEEK startup] Etsy Intel schema ready')
     except Exception as etsy_err:
-        print(f'[CLAW startup] Etsy Intel schema failed: {etsy_err}')
+        print(f'[DEEK startup] Etsy Intel schema failed: {etsy_err}')
 
     # ── Email Ingestion schema ─────────────────────────────────────────
     try:
         from core.email_ingest.db import ensure_schema as email_ensure_schema
         email_ensure_schema()
-        print('[CLAW startup] Email Ingest schema ready')
+        print('[DEEK startup] Email Ingest schema ready')
     except Exception as email_err:
-        print(f'[CLAW startup] Email Ingest schema failed: {email_err}')
+        print(f'[DEEK startup] Email Ingest schema failed: {email_err}')
 
     # ── Wiki Generation schema ─────────────────────────────────────────
     try:
         from core.wiki_gen.db import ensure_schema as wiki_gen_ensure_schema
         wiki_gen_ensure_schema()
-        print('[CLAW startup] Wiki Generation schema ready')
+        print('[DEEK startup] Wiki Generation schema ready')
     except Exception as wiki_gen_err:
-        print(f'[CLAW startup] Wiki Generation schema failed: {wiki_gen_err}')
+        print(f'[DEEK startup] Wiki Generation schema failed: {wiki_gen_err}')
 
     # ── Counterfactual Intelligence schema ─────────────────────────────
     try:
         from core.intel.db import ensure_schema as intel_ensure_schema
         intel_ensure_schema()
-        print('[CLAW startup] Counterfactual Intel schema ready')
+        print('[DEEK startup] Counterfactual Intel schema ready')
     except Exception as intel_err:
-        print(f'[CLAW startup] Counterfactual Intel schema failed: {intel_err}')
+        print(f'[DEEK startup] Counterfactual Intel schema failed: {intel_err}')
 
     # ── Auto-index empty projects ───────────────────────────────────────
-    skip_auto_index = os.getenv('CAIRN_SKIP_AUTO_INDEX', '').lower() in {
+    skip_auto_index = (os.getenv('DEEK_SKIP_AUTO_INDEX') or os.getenv('CAIRN_SKIP_AUTO_INDEX', '')).lower() in {
         '1', 'true', 'yes',
     }
     if not skip_auto_index:
@@ -200,7 +200,7 @@ async def lifespan(app: FastAPI):
                 await _auto_index_if_empty(pid, agent, db_url)
 
     # ── Scheduled reindex background task ───────────────────────────────
-    reindex_hours = int(os.getenv('CAIRN_REINDEX_INTERVAL_HOURS', '24'))
+    reindex_hours = int(os.getenv('DEEK_REINDEX_INTERVAL_HOURS') or os.getenv('CAIRN_REINDEX_INTERVAL_HOURS', '24'))
     _reindex_task = None
     if reindex_hours > 0 and _agents:
         _reindex_task = asyncio.create_task(
@@ -210,11 +210,11 @@ async def lifespan(app: FastAPI):
     # ── Module snapshot federation poll loop ───────────────────────────
     _snapshot_task = None
     try:
-        from api.routes.cairn_federation import snapshot_poll_loop
+        from api.routes.deek_federation import snapshot_poll_loop
         _snapshot_task = asyncio.create_task(snapshot_poll_loop())
-        print('[CLAW startup] Module snapshot poll loop started')
+        print('[DEEK startup] Module snapshot poll loop started')
     except Exception as fed_err:
-        print(f'[CLAW startup] Snapshot poll loop disabled: {fed_err}')
+        print(f'[DEEK startup] Snapshot poll loop disabled: {fed_err}')
 
     yield
 
@@ -232,7 +232,7 @@ async def lifespan(app: FastAPI):
 
 async def _auto_index_if_empty(
     project_id: str,
-    agent: ClawAgent,
+    agent: DeekAgent,
     db_url: str,
 ) -> None:
     """
@@ -244,19 +244,19 @@ async def _auto_index_if_empty(
     try:
         count = await _project_index_count(project_id)
         if count is None:
-            print(f'[Cairn] Project {project_id} — DB unavailable, skipping auto-index')
+            print(f'[Deek] Project {project_id} — DB unavailable, skipping auto-index')
             return
 
         if count > 0:
-            print(f'[Cairn] Project {project_id} already indexed — {count} files')
+            print(f'[Deek] Project {project_id} already indexed — {count} files')
             return
 
         codebase_path = agent.config.get('codebase_path', '')
         if not codebase_path or not Path(codebase_path).exists():
-            print(f'[Cairn] Project {project_id} — no codebase_path, skipping auto-index')
+            print(f'[Deek] Project {project_id} — no codebase_path, skipping auto-index')
             return
 
-        print(f'[Cairn] Project {project_id} has no indexed content — auto-indexing now...')
+        print(f'[Deek] Project {project_id} has no indexed content — auto-indexing now...')
 
         from core.context.indexer import CodeIndexer, IndexerError
 
@@ -272,15 +272,15 @@ async def _auto_index_if_empty(
         )
 
         print(
-            f'[Cairn] Auto-index complete: {project_id} — '
+            f'[Deek] Auto-index complete: {project_id} — '
             f'{result["chunks_created"]} chunks from {result["indexed"]} files'
         )
     except Exception as e:
-        print(f'[Cairn] Auto-index failed for {project_id}: {e}')
+        print(f'[Deek] Auto-index failed for {project_id}: {e}')
 
 
 async def _scheduled_reindex_loop(
-    agents: dict[str, ClawAgent],
+    agents: dict[str, DeekAgent],
     interval_hours: int = 24,
 ) -> None:
     """
@@ -296,7 +296,7 @@ async def _scheduled_reindex_loop(
                 if not codebase_path or not db_url:
                     continue
 
-                print(f'[Cairn] Scheduled reindex: {project_id}')
+                print(f'[Deek] Scheduled reindex: {project_id}')
 
                 from core.context.indexer import CodeIndexer
 
@@ -312,11 +312,11 @@ async def _scheduled_reindex_loop(
                 )
 
                 print(
-                    f'[Cairn] Scheduled reindex complete: {project_id} — '
+                    f'[Deek] Scheduled reindex complete: {project_id} — '
                     f'{result["chunks_created"]} chunks'
                 )
             except Exception as e:
-                print(f'[Cairn] Scheduled reindex failed {project_id}: {e}')
+                print(f'[Deek] Scheduled reindex failed {project_id}: {e}')
 
         # ── Wiki freshness check ────────────────────────────────────
         await _check_wiki_freshness()
@@ -357,7 +357,7 @@ async def _check_wiki_freshness() -> None:
         with conn.cursor() as cur:
             cur.execute(
                 """SELECT indexed_at FROM claw_code_chunks
-                   WHERE project_id = 'claw' AND file_path = %s AND chunk_type = 'wiki'""",
+                   WHERE project_id = 'deek' AND file_path = %s AND chunk_type = 'wiki'""",
                 (rel_path,),
             )
             row = cur.fetchone()
@@ -394,7 +394,7 @@ async def _check_wiki_freshness() -> None:
         with conn.cursor() as cur:
             cur.execute(
                 """DELETE FROM claw_code_chunks
-                   WHERE project_id = 'claw' AND file_path = %s AND chunk_type = 'wiki'""",
+                   WHERE project_id = 'deek' AND file_path = %s AND chunk_type = 'wiki'""",
                 (rel_path,),
             )
             cur.execute(
@@ -402,14 +402,14 @@ async def _check_wiki_freshness() -> None:
                    (project_id, file_path, chunk_content, chunk_type, chunk_name,
                     content_hash, embedding, indexed_at)
                    VALUES (%s, %s, %s, 'wiki', %s, %s, %s::vector, NOW())""",
-                ('claw', rel_path, content, chunk_name, content_hash, embedding),
+                ('deek', rel_path, content, chunk_name, content_hash, embedding),
             )
         conn.commit()
         stale += 1
 
     conn.close()
     if stale > 0:
-        print(f'[Cairn] Wiki freshness: re-embedded {stale} stale articles')
+        print(f'[Deek] Wiki freshness: re-embedded {stale} stale articles')
 
 
 # In-memory index run registry — tracks manual and auto index operations
@@ -417,7 +417,7 @@ _index_runs: dict[str, dict] = {}
 
 
 app = FastAPI(
-    title="Cairn — Sovereign AI Agent",
+    title="Deek — Sovereign AI Agent",
     version="0.1.0",
     description="Sovereign AI coding agent with permanent per-project context",
     lifespan=lifespan,
@@ -435,14 +435,14 @@ app.add_middleware(
 async def global_exception_handler(request: Request, exc: Exception):
     """Ensure all unhandled exceptions return JSON so the web chat can display them."""
     tb = traceback.format_exc()
-    print(f"[CLAW ERROR] {request.url.path}\n{tb}")
+    print(f"[DEEK ERROR] {request.url.path}\n{tb}")
     return JSONResponse(
         status_code=500,
         content={"error": f"{type(exc).__name__}: {exc}", "detail": tb[-1000:]},
     )
 
 # Agent registry — one instance per project, loaded on first request
-_agents: dict[str, ClawAgent] = {}
+_agents: dict[str, DeekAgent] = {}
 
 
 def _default_retrieval_mode() -> str:
@@ -467,7 +467,7 @@ def _bm25_available() -> bool:
         return False
 
 
-def get_agent(project_id: str) -> ClawAgent:
+def get_agent(project_id: str) -> DeekAgent:
     # Normalise empty / missing project IDs to the catch-all general agent
     if not project_id or project_id == 'general':
         project_id = 'general'
@@ -480,10 +480,10 @@ def get_agent(project_id: str) -> ClawAgent:
                 # (memory, wiki, CRM, analyzer, amazon intel, etc.)
                 config = {
                     'name': 'General',
-                    'description': 'Standalone Cairn agent — no project-specific codebase',
+                    'description': 'Standalone Deek agent — no project-specific codebase',
                     'codebase': {},
                 }
-                agent = ClawAgent(project_id='general', config=config)
+                agent = DeekAgent(project_id='general', config=config)
                 _agents['general'] = agent
                 return agent
             raise HTTPException(
@@ -495,7 +495,7 @@ def get_agent(project_id: str) -> ClawAgent:
                 ),
             )
         config = json.loads(config_path.read_text())
-        agent = ClawAgent(project_id=project_id, config=config)
+        agent = DeekAgent(project_id=project_id, config=config)
         # Seed subprojects from config when creating agent on demand
         if 'subprojects' in config:
             for sp in config['subprojects']:
@@ -558,7 +558,7 @@ class IndexRequest(BaseModel):
 class WiggumRequest(BaseModel):
     goal: str
     success_criteria: list[str]
-    project: str = 'claw'
+    project: str = 'deek'
     session_id: Optional[str] = None
     max_iterations: int = 20
     auto_approve_review: bool = True   # Auto-execute file edits; human reviews final diff
@@ -569,7 +569,7 @@ class CompleteRequest(BaseModel):
     file_path: str
     prefix: str
     suffix: str = ''
-    project: str = 'claw'
+    project: str = 'deek'
     language: str = 'python'
 
 
@@ -1277,7 +1277,7 @@ async def get_cost_summary(
 ):
     """API cost breakdown for a project."""
     from core.memory.store import MemoryStore
-    data_dir = os.getenv('CLAW_DATA_DIR', './data')
+    data_dir = os.getenv('DEEK_DATA_DIR') or os.getenv('CLAW_DATA_DIR', './data')
     store = MemoryStore(project_id, data_dir)
     return {
         'project_id': project_id,
@@ -1302,17 +1302,17 @@ async def get_today_cost(
     else:
         since_dt = datetime.combine(_date.today(), datetime.min.time()).isoformat()
 
-    data_dir = os.getenv('CLAW_DATA_DIR', './data')
+    data_dir = os.getenv('DEEK_DATA_DIR') or os.getenv('CLAW_DATA_DIR', './data')
 
     # If no agents loaded yet, scan projects dir directly
-    agents_to_query: dict[str, ClawAgent] = dict(_agents)
+    agents_to_query: dict[str, DeekAgent] = dict(_agents)
     if not agents_to_query and _PROJECTS_ROOT.exists():
         for project_dir in sorted(_PROJECTS_ROOT.iterdir()):
             config_path = project_dir / 'config.json'
             if project_dir.is_dir() and not project_dir.name.startswith('_') and config_path.exists():
                 try:
                     config = json.loads(config_path.read_text())
-                    agents_to_query[project_dir.name] = ClawAgent(
+                    agents_to_query[project_dir.name] = DeekAgent(
                         project_id=project_dir.name,
                         config=config,
                     )
@@ -1359,9 +1359,9 @@ async def get_today_cost(
     }
 
 
-# ─── Cairn Protocol Endpoints ─────────────────────────────────────────────
+# ─── Deek Protocol Endpoints ─────────────────────────────────────────────
 # These four endpoints expose retrieval, memory write-back, and cost logging
-# as standalone HTTP calls — required by the MCP server and cairn.ps1 wrapper.
+# as standalone HTTP calls — required by the MCP server and deek.ps1 wrapper.
 
 
 @app.get("/retrieve")
@@ -1374,7 +1374,7 @@ async def retrieve_codebase_context(
 ):
     """
     Hybrid BM25 + pgvector retrieval of code chunks.
-    The primary memory-retrieval endpoint for the Cairn Protocol (Step 1).
+    The primary memory-retrieval endpoint for the Deek Protocol (Step 1).
     """
     agent = get_agent(project)
 
@@ -1436,10 +1436,10 @@ async def retrieve_chat_history(
 ):
     """
     Search past development decisions and chat history from memory.
-    The second retrieval endpoint for the Cairn Protocol (Step 1).
+    The second retrieval endpoint for the Deek Protocol (Step 1).
     """
     from core.memory.store import MemoryStore
-    data_dir = os.getenv('CLAW_DATA_DIR', './data')
+    data_dir = os.getenv('DEEK_DATA_DIR') or os.getenv('CLAW_DATA_DIR', './data')
     store = MemoryStore(project, data_dir)
 
     try:
@@ -1481,10 +1481,10 @@ async def write_memory(
 ):
     """
     Write a memory entry after completing a task.
-    The write-back endpoint for the Cairn Protocol (Step 4).
+    The write-back endpoint for the Deek Protocol (Step 4).
     """
     from core.memory.store import MemoryStore
-    data_dir = os.getenv('CLAW_DATA_DIR', './data')
+    data_dir = os.getenv('DEEK_DATA_DIR') or os.getenv('CLAW_DATA_DIR', './data')
     store = MemoryStore(body.project, data_dir)
 
     session_id = body.session_id or f'cairn_{uuid.uuid4().hex[:12]}'
@@ -1622,7 +1622,7 @@ async def list_memory_entries(
 ):
     """List memory entries with pagination and optional search."""
     from core.memory.store import MemoryStore
-    data_dir = os.getenv('CLAW_DATA_DIR', './data')
+    data_dir = os.getenv('DEEK_DATA_DIR') or os.getenv('CLAW_DATA_DIR', './data')
     store = MemoryStore(project, data_dir)
     try:
         entries, total = store.list_decisions(limit=limit, offset=offset, query_filter=q or '')
@@ -1639,7 +1639,7 @@ async def get_memory_entry(
 ):
     """Get a single memory entry by ID."""
     from core.memory.store import MemoryStore
-    data_dir = os.getenv('CLAW_DATA_DIR', './data')
+    data_dir = os.getenv('DEEK_DATA_DIR') or os.getenv('CLAW_DATA_DIR', './data')
     store = MemoryStore(project, data_dir)
     try:
         entry = store.get_decision(entry_id)
@@ -1659,7 +1659,7 @@ async def update_memory_entry(
 ):
     """Update an existing memory entry. Only provided fields are changed."""
     from core.memory.store import MemoryStore
-    data_dir = os.getenv('CLAW_DATA_DIR', './data')
+    data_dir = os.getenv('DEEK_DATA_DIR') or os.getenv('CLAW_DATA_DIR', './data')
     store = MemoryStore(project, data_dir)
     try:
         updated = store.update_decision(
@@ -1686,7 +1686,7 @@ async def delete_memory_entry(
 ):
     """Delete a memory entry."""
     from core.memory.store import MemoryStore
-    data_dir = os.getenv('CLAW_DATA_DIR', './data')
+    data_dir = os.getenv('DEEK_DATA_DIR') or os.getenv('CLAW_DATA_DIR', './data')
     store = MemoryStore(project, data_dir)
     try:
         deleted = store.delete_decision(entry_id)
@@ -1704,11 +1704,11 @@ async def log_cost(
 ):
     """
     Log the cost of every model used in a prompt.
-    The cost-logging endpoint for the Cairn Protocol (Step 4b).
+    The cost-logging endpoint for the Deek Protocol (Step 4b).
     Writes to both SQLite (via add_message) and CSV.
     """
     from core.memory.store import MemoryStore
-    data_dir = os.getenv('CLAW_DATA_DIR', './data')
+    data_dir = os.getenv('DEEK_DATA_DIR') or os.getenv('CLAW_DATA_DIR', './data')
     store = MemoryStore(body.project, data_dir)
 
     now = datetime.utcnow().isoformat() + 'Z'
@@ -1976,7 +1976,7 @@ async def start_wiggum(
     """
     Start a WIGGUM outer loop in the background.
 
-    The orchestrator drives CLAW toward `goal` by iterating:
+    The orchestrator drives DEEK toward `goal` by iterating:
       assess state → plan next task → execute task → repeat
 
     Returns immediately with a run_id. Poll GET /wiggum/{run_id} for status.
@@ -1984,13 +1984,13 @@ async def start_wiggum(
     Example:
         POST /wiggum
         {
-          "goal": "Add a test suite to CLAW",
+          "goal": "Add a test suite to DEEK",
           "success_criteria": [
             "tests/ directory exists with at least 10 tests",
             "pytest passes with 0 failures",
             "tests cover /health, /chat, and tool dispatch"
           ],
-          "project": "claw"
+          "project": "deek"
         }
     """
     from core.wiggum import WiggumOrchestrator
@@ -2002,7 +2002,7 @@ async def start_wiggum(
     config_path = Path(f'projects/{req.project}/config.json')
     if not config_path.exists():
         raise HTTPException(status_code=404, detail=f"Project '{req.project}' not found")
-    wiggum_agent = ClawAgent(
+    wiggum_agent = DeekAgent(
         project_id=req.project,
         config=json.loads(config_path.read_text()),
     )
@@ -2063,7 +2063,7 @@ async def start_wiggum(
 @app.get("/wiggum/self-test")
 async def wiggum_self_test(_: bool = Depends(verify_api_key)):
     """
-    Lightweight self-assessment of CLAW's core components.
+    Lightweight self-assessment of DEEK's core components.
     Returns a JSON object with an `assessment` field summarising health.
     """
     checks = {}
@@ -2080,7 +2080,7 @@ async def wiggum_self_test(_: bool = Depends(verify_api_key)):
     # 2. Memory store (SQLite)
     try:
         from core.memory.store import MemoryStore
-        data_dir = os.getenv('CLAW_DATA_DIR', './data')
+        data_dir = os.getenv('DEEK_DATA_DIR') or os.getenv('CLAW_DATA_DIR', './data')
         store = MemoryStore('self-test', data_dir)
         store.close()
         checks['memory_store'] = {'status': 'ok', 'backend': 'sqlite'}
@@ -2090,13 +2090,13 @@ async def wiggum_self_test(_: bool = Depends(verify_api_key)):
     # 3. Context engine
     try:
         from core.context.engine import ContextEngine
-        config_path = Path('projects/claw/config.json')
+        config_path = Path('projects/deek/config.json')
         if config_path.exists():
             cfg = json.loads(config_path.read_text())
-            engine = ContextEngine(project_id='claw', config=cfg)
+            engine = ContextEngine(project_id='deek', config=cfg)
             checks['context_engine'] = {'status': 'ok'}
         else:
-            checks['context_engine'] = {'status': 'skip', 'detail': 'claw config not found'}
+            checks['context_engine'] = {'status': 'skip', 'detail': 'deek config not found'}
     except Exception as e:
         checks['context_engine'] = {'status': 'error', 'detail': str(e)}
 
@@ -2183,7 +2183,7 @@ async def analyze_image(
 # ─────────────────────────────────────────────────────────────────────────────
 
 _SELF_TEST_PROMPT = """\
-You are running a structured self-test of the CLAW system. \
+You are running a structured self-test of the DEEK system. \
 Use your tools to answer each of the following checks. \
 Do NOT modify any files or run any commands that write to disk or network.
 
@@ -2208,7 +2208,7 @@ core/memory/store.py.
 
 After completing all checks, produce a structured report:
 
-## CLAW Self-Test Report
+## DEEK Self-Test Report
 ### Files: PASS / FAIL (list any missing)
 ### Structure: PASS / FAIL
 ### Subprojects: PASS / FAIL
@@ -2220,11 +2220,11 @@ After completing all checks, produce a structured report:
 
 @app.get("/agent-self-test")
 async def agent_self_test(
-    project: str = 'claw',
+    project: str = 'deek',
     _: bool = Depends(verify_api_key),
 ):
     """
-    Full-pipeline self-test: sends a read-only assessment prompt to the CLAW
+    Full-pipeline self-test: sends a read-only assessment prompt to the DEEK
     agent and returns the response. Exercises the complete tool loop.
 
     Safe to run at any time — read_only=True prevents any file writes.
@@ -2443,7 +2443,7 @@ async def batch_approve_wiggum(
             # Execute the queued tool call
             tool_name = entry.get('tool_name', '')
             tool_input = entry.get('tool_input', {})
-            project_id = run.get('project', 'claw')
+            project_id = run.get('project', 'deek')
             try:
                 agent = get_agent(project_id)
                 tool_call = {'name': tool_name, 'input': tool_input}
@@ -2498,7 +2498,7 @@ def _read_test_cache() -> dict:
 
 
 def _read_eval_cache() -> dict:
-    """Read last CLAW eval result from cache file, or return nulls."""
+    """Read last DEEK eval result from cache file, or return nulls."""
     cache_path = _CLAW_ROOT / 'data' / 'eval_cache.json'
     if cache_path.exists():
         try:
@@ -2719,19 +2719,20 @@ app.include_router(wiki_gen_router)
 from api.routes.admin import router as admin_router
 app.include_router(admin_router)
 
-# Register Cairn Social routes (drafting + proof-reading assistant for Jo)
+# Register Deek Social routes (drafting + proof-reading assistant for Jo)
 from api.routes.social import router as social_router
 app.include_router(social_router)
 
-# Register Cairn module federation routes (/api/cairn/*)
-from api.routes.cairn_federation import router as cairn_federation_router
-app.include_router(cairn_federation_router)
+# Register Deek module federation routes — dual-mount for rename transition
+from api.routes.deek_federation import router as federation_router
+app.include_router(federation_router, prefix="/api/deek")
+app.include_router(federation_router, prefix="/api/cairn")  # legacy alias
 
 # Register Counterparty Risk proxy routes (Phase 0)
 from api.routes.counterparty_risk import router as counterparty_risk_router
 app.include_router(counterparty_risk_router)
 
-# Register cross-module delegation routes (cairn_delegate MCP tool backend)
+# Register cross-module delegation routes (deek_delegate MCP tool backend)
 from api.routes.delegation import router as delegation_router
 app.include_router(delegation_router)
 
@@ -2741,11 +2742,11 @@ try:
     from core.social.db import ensure_schema as _ensure_social_schema
     _ensure_social_schema()
 except Exception as _social_schema_exc:  # pragma: no cover
-    print(f'[Cairn] social schema bootstrap skipped: {_social_schema_exc}')
+    print(f'[Deek] social schema bootstrap skipped: {_social_schema_exc}')
 
 # Best-effort: ensure cairn_delegation_log table exists on startup.
 try:
     from core.delegation.log import ensure_table as _ensure_delegation_table
     _ensure_delegation_table()
 except Exception as _delegation_schema_exc:  # pragma: no cover
-    print(f'[Cairn] delegation log bootstrap skipped: {_delegation_schema_exc}')
+    print(f'[Deek] delegation log bootstrap skipped: {_delegation_schema_exc}')

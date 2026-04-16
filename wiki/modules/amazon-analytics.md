@@ -38,12 +38,12 @@ Backfill: manual via POST /ami/analytics/backfill?region=EU&days=90
 - GET /ami/analytics/data-quality — data freshness and integrity check
 
 ## UI
-/analytics/revenue in Cairn web interface. Summary tiles, daily bar chart,
+/analytics/revenue in Deek web interface. Summary tiles, daily bar chart,
 top products, velocity alerts feed, Data Quality badge with modal.
 
-## Cairn Chat Integration
+## Deek Chat Integration
 /ami/cairn/context now includes a `revenue` section from ami_orders.
-Cairn can answer:
+Deek can answer:
 - "What did we take today?" → today figure
 - "What's our best seller this month?" → top_5_products_30d
 - "Are there any listings in trouble?" → active_alerts
@@ -53,7 +53,7 @@ Cairn can answer:
 - Reads from: ami_sku_mapping (SKU→ASIN→M-number resolution)
 - Reads from: SP-API (orders + traffic reports via scheduler)
 - Writes to: ami_orders, ami_daily_traffic, ami_velocity
-- Feeds: /ami/cairn/context (Cairn chat), /analytics/revenue (UI)
+- Feeds: /ami/cairn/context (Deek chat), /analytics/revenue (UI)
 
 ## Sprint Roadmap
 - Sprint 1 (done): Revenue Truth Engine — orders + traffic + velocity + UI

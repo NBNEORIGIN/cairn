@@ -106,7 +106,7 @@ class AmazonSource:
             conn = psycopg2.connect(self.db_url, connect_timeout=5)
         except Exception as exc:
             raise RuntimeError(
-                f'amazon source: could not connect to Cairn DB at {self.db_url}: {exc}'
+                f'amazon source: could not connect to Deek DB at {self.db_url}: {exc}'
             )
         try:
             monthly = self._fetch_monthly(conn)

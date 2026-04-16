@@ -1,0 +1,15 @@
+skill_id: web-ui
+project_id: deek
+display_name: Web UI
+description: DEEK Next.js chat interface, streaming UX, activity log, approvals, and session history.
+triggers:
+  - web ui
+  - chat window
+  - session sidebar
+  - activity log
+  - next.js ui
+subproject_id:
+prompt_hint: Name the UI component and proxy route involved, and keep browser-side behavior separate from FastAPI behavior
+key_rules:
+  - Preserve image paste, stop, history, approvals, and model selection.
+  - Prefer light desktop-style UI patterns already used in the app.

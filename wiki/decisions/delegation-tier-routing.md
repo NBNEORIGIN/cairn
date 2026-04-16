@@ -1,45 +1,45 @@
-# Decision Record — cairn_delegate Tier Routing
+# Decision Record — deek_delegate Tier Routing
 
 **Status:** Ratified, deployed, dogfooded (D-103, 2026-04-15).
 
-**Scope:** The cross-module delegation tool `cairn_delegate`, its routing
+**Scope:** The cross-module delegation tool `deek_delegate`, its routing
 rule, its surface shape, its sovereignty posture, and follow-on operational
 decisions.
 
-**Audience:** Future sessions deciding whether `cairn_delegate` should be
+**Audience:** Future sessions deciding whether `deek_delegate` should be
 extended, reshaped, or replaced.
 
 ---
 
 ## Design decisions (D-A through D-F)
 
-### D-A — New package under `core/delegation/`, not `claw/delegation/`
+### D-A — New package under `core/delegation/`, not `deek/delegation/`
 
-**Decided:** business logic lives at `D:\claw\core\delegation\*`.
+**Decided:** business logic lives at `D:\deek\core\delegation\*`.
 
-**Rejected:** top-level `D:\claw\delegation\` per the brief's original
-wording. Cairn's convention is that `D:\claw\core\<domain>\*` holds
+**Rejected:** top-level `D:\deek\delegation\` per the brief's original
+wording. Deek's convention is that `D:\deek\core\<domain>\*` holds
 business logic and the repo root holds entry-points and config. Placing
 delegation logic at the root would invent a new convention for a concern
 that is not structurally new.
 
 **Reasoning:** consistency with `core/models/`, `core/memory/`,
 `core/social/`, `core/wiki/`. Documented in
-`docs/cairn/LOCAL_CONVENTIONS.md`.
+`docs/deek/LOCAL_CONVENTIONS.md`.
 
 ### D-B — HTTPS REST only, no MCP wrapper at launch
 
-**Decided:** `cairn_delegate` is exposed as
-`POST https://cairn.nbnesigns.co.uk/api/delegation/call` with
-`X-API-Key: $CLAW_API_KEY`. No MCP tool declaration in
-`mcp/cairn_mcp_server.py`.
+**Decided:** `deek_delegate` is exposed as
+`POST https://deek.nbnesigns.co.uk/api/delegation/call` with
+`X-API-Key: $DEEK_API_KEY`. No MCP tool declaration in
+`mcp/deek_mcp_server.py`.
 
 **Rejected:** adding a `types.Tool` entry + dispatch branch for
-`cairn_delegate` at launch. The MCP server is already live with 7 tools;
+`deek_delegate` at launch. The MCP server is already live with 7 tools;
 one more is a trivial change. But every module session (Beacon, Phloe,
-Render, CRM) calls Cairn over HTTPS anyway — those sessions have no MCP
-channel to Cairn. The MCP wrapper would only benefit CC sessions working
-directly on `D:\claw`, which is the minority case.
+Render, CRM) calls Deek over HTTPS anyway — those sessions have no MCP
+channel to Deek. The MCP wrapper would only benefit CC sessions working
+directly on `D:\deek`, which is the minority case.
 
 **Reasoning:** minimum-surface. The REST endpoint serves every caller.
 Adding MCP is a one-tool-entry change if demand emerges. Closed for
@@ -54,7 +54,7 @@ current scope.
 - `tier_override` ∈ `{"grok_fast", "haiku"}` wins unconditionally.
 
 **Rejected:** automatic escalation on failure. If Grok fails a generate
-call, Cairn does NOT retry on Haiku. The caller (usually Sonnet) decides
+call, Deek does NOT retry on Haiku. The caller (usually Sonnet) decides
 whether to accept with tweaks (Outcome B), rewrite itself (Outcome C), or
 retry at a different tier explicitly. Silent escalation would hide the
 failure from the cost log and mask spec ambiguity.
@@ -93,23 +93,23 @@ this explicitly.
 Cloudflare-gated against automated WebFetch; current quotation is
 WebSearch-sourced (2026-04-15). Toby to confirm against the live page.
 
-### D-E — Project key for memory write-backs: `"claw"` not `"cairn"`
+### D-E — Project key for memory write-backs: `"deek"` not `"cairn"`
 
 **Decided:** all `update_memory` / retrieval calls related to this work
-use `project="claw"`.
+use `project="deek"`.
 
-**Rejected:** registering a new `"cairn"` project. The Cairn API already
+**Rejected:** registering a new `"cairn"` project. The Deek API already
 reports a phantom `"cairn"` entry in `/projects` (no config, not ready).
 Splitting the codebase memory across two project keys would halve
 retrieval quality for no benefit.
 
-**Reasoning:** `claw` is the codebase, Cairn is the ecosystem brand.
-Documented in `docs/cairn/LOCAL_CONVENTIONS.md`.
+**Reasoning:** `deek` is the codebase, Deek is the ecosystem brand.
+Documented in `docs/deek/LOCAL_CONVENTIONS.md`.
 
 ### D-F — Cost log table separate from existing `cost_log`
 
 **Decided:** create new `cairn_delegation_log` table with call-level grain
-(one row per `cairn_delegate` invocation).
+(one row per `deek_delegate` invocation).
 
 **Rejected:** reusing the existing `cost_log` table / CSV. That log is
 prompt-level — one row per prompt with a list of per-model costs.
@@ -130,7 +130,7 @@ table writes alongside.
 
 ### D-101 — Code layout: `core/delegation/`
 
-**Decided:** files placed under `D:\claw\core\delegation\`:
+**Decided:** files placed under `D:\deek\core\delegation\`:
 
 - `openrouter_client.py` — thin httpx wrapper for chat-completions.
 - `router.py` — `task_type` → model routing (NOT `core/models/router.py`).
@@ -142,19 +142,19 @@ table writes alongside.
 agent client with tool-calling, history, image support — overkill for a
 one-shot delegation. Thin httpx wrapper per the brief's §0 step 4.
 
-**Rejected:** extending `core/models/router.py`. That router governs Cairn's
+**Rejected:** extending `core/models/router.py`. That router governs Deek's
 internal agent orchestration (Ollama / DeepSeek / Claude / OpenRouter
-fallback). `cairn_delegate` is a different concern: external CC sessions
-delegating IN to Cairn, not Cairn's own model selection.
+fallback). `deek_delegate` is a different concern: external CC sessions
+delegating IN to Deek, not Deek's own model selection.
 
 **Route handler:** `/api/delegation/call` handler in `api/main.py`.
-Matched existing FastAPI convention — Cairn keeps route handlers inline
+Matched existing FastAPI convention — Deek keeps route handlers inline
 unless the module is large enough to warrant `api/routers/*.py` split.
 
 ### D-102 — Public nginx exposure of `/api/delegation/` only
 
 **Decided:** Hetzner nginx block on
-`cairn.nbnesigns.co.uk` proxies `/api/delegation/` to `localhost:8765`.
+`deek.nbnesigns.co.uk` proxies `/api/delegation/` to `localhost:8765`.
 Change mirrored in repo at
 `deploy/nginx/cairn-business.conf.snippet` for reviewability and
 reprovisioning recovery.
@@ -162,14 +162,14 @@ reprovisioning recovery.
 **Rejected (Option 2):** also expose `/ami/*`. No current cross-module
 need; speculative.
 
-**Rejected (Option 3):** separate `api.cairn.nbnesigns.co.uk` subdomain.
+**Rejected (Option 3):** separate `api.deek.nbnesigns.co.uk` subdomain.
 Speculative refactor, no scope justification.
 
 **Rejected:** exposing `/api/cairn/context` publicly. No external caller
 has asked for aggregates; minimum-surface principle holds. Re-evaluate
 when a real caller appears.
 
-**Verification:** `POST https://cairn.nbnesigns.co.uk/api/delegation/call`
+**Verification:** `POST https://deek.nbnesigns.co.uk/api/delegation/call`
 returns 401 without `X-API-Key`, 422 with valid key + empty body.
 
 ### D-103 — Routing recommendation after first dogfooding
@@ -210,8 +210,8 @@ rewrites. Not multi-file refactors. Not cross-module design.
 
 ## Phase 2 candidates (not in current scope)
 
-- **MCP wrapper for `cairn_delegate`.** One-tool-entry change in
-  `mcp/cairn_mcp_server.py` if CC sessions working directly on `D:\claw`
+- **MCP wrapper for `deek_delegate`.** One-tool-entry change in
+  `mcp/deek_mcp_server.py` if CC sessions working directly on `D:\deek`
   need it.
 - **Public `/api/cairn/context` route.** Add a second nginx location
   block on `cairn-business.conf` when a real external caller needs
@@ -230,10 +230,10 @@ rewrites. Not multi-file refactors. Not cross-module design.
 
 - `wiki/patterns/delegation.md` — the pattern article every future
   session should read before calling the tool.
-- `projects/claw/core.md` — D-103 in full, the empirical record.
-- `docs/cairn/HANDOVER_2026-04-15_CAIRN_DELEGATE.md` — pre-build
+- `projects/deek/core.md` — D-103 in full, the empirical record.
+- `docs/deek/HANDOVER_2026-04-15_DEEK_DELEGATE.md` — pre-build
   recon and amendments that shaped the decisions above.
-- `docs/cairn/LOCAL_CONVENTIONS.md` — `CLAW_API_KEY`, project naming,
+- `docs/deek/LOCAL_CONVENTIONS.md` — `DEEK_API_KEY`, project naming,
   code layout.
 - `CLAUDE.md` STEP 2b Rule 1b — the enforcement rule that points at
   this pattern.

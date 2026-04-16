@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 
 const CLAW_API = process.env.CLAW_API_URL || 'http://localhost:8765'
-const CLAW_KEY = process.env.CLAW_API_KEY || ''
+const CLAW_KEY = process.env.DEEK_API_KEY || ''
 let lastGoodStatus: Record<string, unknown> | null = null
 
 export async function GET() {

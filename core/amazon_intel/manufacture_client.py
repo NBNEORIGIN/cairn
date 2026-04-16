@@ -10,7 +10,7 @@ from typing import Optional
 
 
 MANUFACTURE_API_URL = os.getenv('MANUFACTURE_API_URL', 'https://manufacture.nbnesigns.co.uk')
-MANUFACTURE_API_KEY = os.getenv('CAIRN_API_KEY', '') or os.getenv('MANUFACTURE_API_KEY', '')
+MANUFACTURE_API_KEY = os.getenv('DEEK_API_KEY') or os.getenv('CAIRN_API_KEY') or os.getenv('CLAW_API_KEY', '') or os.getenv('MANUFACTURE_API_KEY', '')
 
 
 def _auth_headers() -> dict:

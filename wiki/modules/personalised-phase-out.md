@@ -1,6 +1,6 @@
 # NBNE Personalised Product Phase-Out Strategy
 
-Compiled April 2026. For Cairn memory and ongoing strategic reference.
+Compiled April 2026. For Deek memory and ongoing strategic reference.
 
 ## The Problem
 
@@ -48,7 +48,7 @@ Success metrics tracked: success rate per published product (target over 10%, cu
 
 Personalised products estimated at approximately 13k/month revenue (revised from initial estimates after live data analysis). At 7-8% success rate and 400/month per mature product: need approximately 33-34 successfully matured generic products to replace. Revenue gap during transition manageable if generic publishing rate is maintained.
 
-## Cairn Tracking Requirements
+## Deek Tracking Requirements
 
 1. M-number status per product: personalised / pre-designed generic / fully generic
 2. Price ladder progress: current price vs target price per SKU, next price change date

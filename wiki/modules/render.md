@@ -12,7 +12,7 @@ products." This is the most critical piece of software NBNE has developed.
 
 ## Tech Stack
 - Backend: Flask 3.0 / Python, Gunicorn (1 worker)
-- Database: render_* tables in Cairn PostgreSQL (`deploy-cairn-db-1`, database `cairn`)
+- Database: render_* tables in Deek PostgreSQL (`deploy-deek-db-1`, database `cairn`)
 - Connection string (from container): `postgresql://cairn:cairn_nbne_2026@cairn-db:5432/cairn`
 - Image generation: Playwright (headless Chromium), Pillow
 - AI content: Claude Sonnet (listings), DALL-E 3 (lifestyle images), GPT-4o (chat)
@@ -20,7 +20,7 @@ products." This is the most critical piece of software NBNE has developed.
 - GitHub: NBNEORIGIN/render
 - Local path: D:\render
 
-## Database Tables (render_ prefix, all in cairn DB on deploy-cairn-db-1)
+## Database Tables (render_ prefix, all in cairn DB on deploy-deek-db-1)
 | Table | Purpose |
 |-------|---------|
 | render_products | M-number catalogue, QA status, AI content |
@@ -43,7 +43,7 @@ products." This is the most critical piece of software NBNE has developed.
 - **Receives data from:** [[modules/amazon-intelligence]] (improvement queue for content-weak listings)
 - **Context endpoints:**
   - `GET /api/cairn/context` — product pipeline state, publish counts, recent activity (Flask)
-  - `GET /render/cairn/context` — catalogue summary: listing/variant counts, Amazon status breakdown, EAN pool remaining, recent publishes (Cairn FastAPI — PR #5)
+  - `GET /render/cairn/context` — catalogue summary: listing/variant counts, Amazon status breakdown, EAN pool remaining, recent publishes (Deek FastAPI — PR #5)
 
 ## Publishing Channels
 
@@ -61,7 +61,7 @@ products." This is the most critical piece of software NBNE has developed.
 ### Amazon (SP-API — Listings Items API v2021-08-01)
 - **Live as of 2026-04-08** — replaces XLSX flatfile manual upload
 - Seller ID EU: ANO0V0M1RQZY9, Marketplace: A1F83G8C2ARO7P (UK)
-- Self-contained LWA token refresh in `amazon_api.py` (no Cairn token dependency)
+- Self-contained LWA token refresh in `amazon_api.py` (no Deek token dependency)
 - Publish sequence: PUT parent SKU → PUT each child (0.2s apart, 5 req/s limit)
 - Preflight check blocks on: missing EAN, missing credentials; warns on: live variants, missing images
 - Routes:

@@ -1,7 +1,7 @@
 """
 Database schema and query helpers for Amazon Listing Intelligence.
 
-All tables use the `ami_` prefix to namespace within Cairn's PostgreSQL.
+All tables use the `ami_` prefix to namespace within Deek's PostgreSQL.
 Uses psycopg2 directly (matching core/context/indexer.py pattern).
 """
 import os
@@ -10,7 +10,7 @@ from contextlib import contextmanager
 
 
 def get_db_url() -> str:
-    return os.getenv('DATABASE_URL', 'postgresql://postgres:postgres123@localhost:5432/claw')
+    return os.getenv('DATABASE_URL', 'postgresql://postgres:postgres123@localhost:5432/deek')
 
 
 @contextmanager
@@ -23,7 +23,7 @@ def get_conn():
 
 
 def ensure_schema():
-    """Create all ami_* tables if they don't exist. Called at Cairn startup."""
+    """Create all ami_* tables if they don't exist. Called at Deek startup."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(_SQL_SCHEMA)

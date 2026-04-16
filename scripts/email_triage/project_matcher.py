@@ -50,7 +50,7 @@ def match_project(
     as the CRM search query. Otherwise the subject line is used.
     """
     base = (base_url or os.getenv('CRM_BASE_URL') or CRM_DEFAULT_BASE_URL).rstrip('/')
-    token = api_key or os.getenv('CAIRN_API_KEY', '').strip()
+    token = api_key or (os.getenv('DEEK_API_KEY') or os.getenv('CAIRN_API_KEY') or os.getenv('CLAW_API_KEY', '')).strip()
     if not token:
         return {'project_id': '', 'match_score': 0.0}
 

@@ -29,7 +29,7 @@ load_dotenv()
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog='python -m scripts.backfill.report',
-        description='Post-run report for a Cairn intel backfill run',
+        description='Post-run report for a Deek intel backfill run',
     )
     parser.add_argument('run_id', help='backfill_run_id to report on')
     args = parser.parse_args(argv)

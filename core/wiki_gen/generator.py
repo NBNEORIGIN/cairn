@@ -5,7 +5,7 @@ Core wiki generation helpers.
     call_claude()        — Anthropic API call, returns (text, tokens)
     subject_to_title()   — strip email prefixes, normalise
     title_to_filename()  — safe slug filename
-    classify_module()    — tag article to Cairn module
+    classify_module()    — tag article to Deek module
     quality_check()      — two-tier gate: local heuristics + optional Claude
     write_wiki_article() — write to disk + chunk + embed into claw_code_chunks
 """
@@ -46,7 +46,7 @@ def _get_indexer():
     if _indexer is None:
         from core.context.indexer import CodeIndexer
         _indexer = CodeIndexer(
-            project_id='claw',
+            project_id='deek',
             codebase_path=str(_CLAW_ROOT),
             db_url=get_db_url(),
         )
@@ -54,7 +54,7 @@ def _get_indexer():
 
 
 def get_embedding(text: str) -> list[float]:
-    """Embed text using CodeIndexer — same provider chain as the rest of Cairn."""
+    """Embed text using CodeIndexer — same provider chain as the rest of Deek."""
     return _get_indexer().embed(text)
 
 
@@ -120,7 +120,7 @@ _MODULE_KEYWORDS: dict[str, list[str]] = {
 
 
 def classify_module(title: str, content: str) -> str:
-    """Tag article to the appropriate Cairn module. Checks title first, then content."""
+    """Tag article to the appropriate Deek module. Checks title first, then content."""
     for module, keywords in _MODULE_KEYWORDS.items():
         if any(w in title.lower() for w in keywords):
             return module
@@ -391,11 +391,11 @@ def write_wiki_article(
                     SELECT %s, %s, %s, %s, %s, %s, %s, %s
                     WHERE NOT EXISTS (
                         SELECT 1 FROM claw_code_chunks
-                        WHERE content_hash = %s AND project_id = 'claw'
+                        WHERE content_hash = %s AND project_id = 'deek'
                     )
                     """,
                     (
-                        'claw',
+                        'deek',
                         chunk_file_path,
                         chunk,
                         'wiki',

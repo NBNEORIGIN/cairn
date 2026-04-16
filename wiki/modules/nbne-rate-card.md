@@ -5,8 +5,8 @@
 chat tool reads this file directly and injects it as fixed context on
 every enquiry analysis so quoted rates are always current.
 
-**Edit this file** to add or change rates. Commit to `NBNEORIGIN/cairn`
-main — the Hetzner cairn-api cron pulls the repo every few hours and
+**Edit this file** to add or change rates. Commit to `NBNEORIGIN/deek`
+main — the Hetzner deek-api cron pulls the repo every few hours and
 rebuilds, so changes propagate automatically.
 
 ---

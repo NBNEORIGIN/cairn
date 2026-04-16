@@ -1,8 +1,8 @@
-# CLAW Studio — Core Context
+# DEEK Studio — Core Context
 # Version: 1.0
 
 ## What this is
-CLAW Studio is a local AI media generation workspace.
+DEEK Studio is a local AI media generation workspace.
 It uses CogVideoX-2b running on the RTX 3050 GPU to generate
 video clips from text prompts — no API, no cost per generation.
 
@@ -17,7 +17,7 @@ video clips from text prompts — no API, no cost per generation.
 
 ## Output
 All generated videos are saved to:
-  D:/claw/projects/studio/outputs/video/<timestamp>_<slug>.mp4
+  D:/deek/projects/studio/outputs/video/<timestamp>_<slug>.mp4
 
 ## Generation parameters
 | Parameter       | Default | Range   | Effect                          |
@@ -48,7 +48,7 @@ All generated videos are saved to:
 
 ## Image generation (FLUX.1-schnell)
 First run downloads ~24 GB of weights (cached after that).
-Output saved to: D:/claw/projects/studio/outputs/images/
+Output saved to: D:/deek/projects/studio/outputs/images/
 
 | Steps | Time (RTX 3050) | Quality       |
 |-------|-----------------|---------------|

@@ -1,11 +1,11 @@
 """Smoke test for the Commit 1 OpenRouter wrapper.
 
-Run from the claw root with the venv Python:
+Run from the deek root with the venv Python:
 
-    D:\\claw\\.venv\\Scripts\\python.exe D:\\claw\\scripts\\delegation_smoke.py
+    D:\\deek\\.venv\\Scripts\\python.exe D:\\deek\\scripts\\delegation_smoke.py
 
 Hits both models with a tiny prompt and prints token counts + cost. Loads
-OPENROUTER_API_KEY from D:\\claw\\.env if not already in the environment.
+OPENROUTER_API_KEY from D:\\deek\\.env if not already in the environment.
 Key value is NEVER echoed.
 """
 from __future__ import annotations
@@ -36,7 +36,7 @@ def main() -> int:
     sys.path.insert(0, str(claw_root))
 
     if not os.getenv("OPENROUTER_API_KEY"):
-        print("FAIL: OPENROUTER_API_KEY not set (checked env + D:\\claw\\.env)")
+        print("FAIL: OPENROUTER_API_KEY not set (checked env + D:\\deek\\.env)")
         return 2
 
     from core.delegation import cost as delegation_cost

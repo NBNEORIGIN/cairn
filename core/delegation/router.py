@@ -1,6 +1,6 @@
-"""task_type → model routing for cairn_delegate.
+"""task_type → model routing for deek_delegate.
 
-NOT to be confused with ``core/models/router.py`` — that file governs Cairn's
+NOT to be confused with ``core/models/router.py`` — that file governs Deek's
 internal agent loop (local Ollama / DeepSeek / Claude / OpenRouter fallback).
 This router is called only by the cross-module delegation surface.
 

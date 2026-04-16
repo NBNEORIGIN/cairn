@@ -1,4 +1,4 @@
-# Beacon — Cairn Agent Core Context
+# Beacon — Deek Agent Core Context
 # Version: 1.0
 # Updated: 2026-04-15
 
@@ -10,7 +10,7 @@ state on a schedule, and uploads offline click conversions attributed from
 Phloe / CRM / Manufacture events.
 
 Phase 1 is operational wiring: live API integration against the NBNE MCC,
-scheduled jobs, and a Cairn context endpoint. Attribution logic is built
+scheduled jobs, and a Deek context endpoint. Attribution logic is built
 on top later.
 
 ## Repository
@@ -50,7 +50,7 @@ on top later.
 backend/
   ads/            Google Ads integration — client, models, OAuth, management cmds
   attribution/    Conversion attribution logic (Phase 2+)
-  cairn_app/      /api/cairn/context endpoint for Cairn business brain
+  cairn_app/      /api/cairn/context endpoint for Deek business brain
   config/         Django settings, urls, celery config
   core/           crypto, money, shared utilities
   tenants/        BeaconTenant model, Phloe client, tenant sync
@@ -81,10 +81,10 @@ Phase 1 jobs:
 - `beacon_smoke_campaigns` for customer 2028631064 — every hour
   (heartbeat + cache refresh)
 
-Every scheduled run writes one row to `beacon_job_run`. Cairn context
+Every scheduled run writes one row to `beacon_job_run`. Deek context
 endpoint surfaces `last_success` / `last_failure` per job.
 
-## Cairn context contract
+## Deek context contract
 
 `GET /api/cairn/context` returns:
 - tenants — count + status
@@ -159,7 +159,7 @@ endpoint surfaces `last_success` / `last_failure` per job.
   Finding for Phase 2 backlog (not fixed in this session per brief):
   `cairn_app.views.context_endpoint` is unreachable from HTTP because
   global `DEFAULT_AUTHENTICATION_CLASSES=[JWTAuthentication]` rejects
-  the custom `Bearer <CAIRN_API_KEY>` header before `_auth_ok` runs
+  the custom `Bearer <DEEK_API_KEY>` header before `_auth_ok` runs
   (401 `token_not_valid`). View needs `authentication_classes = []`
   (or an explicit `CairnKeyAuthentication` class) alongside
   `@permission_classes([AllowAny])`. Context itself builds correctly

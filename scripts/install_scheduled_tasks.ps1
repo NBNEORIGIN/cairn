@@ -1,13 +1,13 @@
-# Cairn Windows Scheduled Task installer
+# Deek Windows Scheduled Task installer
 # Registers tasks that run independently of the FastAPI process.
 # No admin required for current-user tasks.
 #
 # Tasks installed:
-#   Cairn-AMI-Sync       -- SP-API sync every 6 hours
-#   CairnEmailInbox      -- cairn@ inbox poll every 15 minutes
+#   Deek-AMI-Sync       -- SP-API sync every 6 hours
+#   DeekEmailInbox      -- cairn@ inbox poll every 15 minutes
 
 param(
-    [string]$ClawDir = "D:\claw"
+    [string]$ClawDir = "D:\deek"
 )
 
 $PythonExe = Join-Path $ClawDir ".venv\Scripts\python.exe"
@@ -23,12 +23,12 @@ if (-not (Test-Path $SyncScript)) {
     exit 1
 }
 
-Write-Host "Installing Cairn AMI sync scheduled task..."
+Write-Host "Installing Deek AMI sync scheduled task..."
 
 # Remove existing task if present
-$existing = Get-ScheduledTask -TaskName "Cairn-AMI-Sync" -ErrorAction SilentlyContinue
+$existing = Get-ScheduledTask -TaskName "Deek-AMI-Sync" -ErrorAction SilentlyContinue
 if ($existing) {
-    Unregister-ScheduledTask -TaskName "Cairn-AMI-Sync" -Confirm:$false
+    Unregister-ScheduledTask -TaskName "Deek-AMI-Sync" -Confirm:$false
     Write-Host "  Removed existing task"
 }
 
@@ -57,18 +57,18 @@ $principal = New-ScheduledTaskPrincipal `
     -RunLevel Limited
 
 Register-ScheduledTask `
-    -TaskName "Cairn-AMI-Sync" `
-    -TaskPath "\Cairn\" `
+    -TaskName "Deek-AMI-Sync" `
+    -TaskPath "\Deek\" `
     -Action $action `
     -Trigger $t1,$t2,$t3,$t4 `
     -Settings $settings `
     -Principal $principal `
-    -Description "Cairn SP-API sync: orders, traffic, inventory, velocity. 4x daily." `
+    -Description "Deek SP-API sync: orders, traffic, inventory, velocity. 4x daily." `
     | Out-Null
 
-$registered = Get-ScheduledTask -TaskName "Cairn-AMI-Sync" -ErrorAction SilentlyContinue
+$registered = Get-ScheduledTask -TaskName "Deek-AMI-Sync" -ErrorAction SilentlyContinue
 if ($registered) {
-    Write-Host "  [OK] Cairn-AMI-Sync registered" -ForegroundColor Green
+    Write-Host "  [OK] Deek-AMI-Sync registered" -ForegroundColor Green
     Write-Host "  Triggers: 00:00, 06:00, 12:00, 18:00 daily"
     Write-Host "  Script: $SyncScript"
     Write-Host ""
@@ -81,18 +81,18 @@ if ($registered) {
     exit 1
 }
 
-# ── CairnEmailInbox — cairn@ inbox poll every 15 minutes ──────────────────
+# ── DeekEmailInbox — cairn@ inbox poll every 15 minutes ──────────────────
 
-$InboxScript = Join-Path $ClawDir "scripts\process_cairn_inbox.py"
+$InboxScript = Join-Path $ClawDir "scripts\process_deek_inbox.py"
 
 if (-not (Test-Path $InboxScript)) {
-    Write-Warning "Inbox script not found at $InboxScript — skipping CairnEmailInbox"
+    Write-Warning "Inbox script not found at $InboxScript — skipping DeekEmailInbox"
 } else {
-    Write-Host "Installing Cairn email inbox scheduled task..."
+    Write-Host "Installing Deek email inbox scheduled task..."
 
-    $existingInbox = Get-ScheduledTask -TaskName "CairnEmailInbox" -ErrorAction SilentlyContinue
+    $existingInbox = Get-ScheduledTask -TaskName "DeekEmailInbox" -ErrorAction SilentlyContinue
     if ($existingInbox) {
-        Unregister-ScheduledTask -TaskName "CairnEmailInbox" -Confirm:$false
+        Unregister-ScheduledTask -TaskName "DeekEmailInbox" -Confirm:$false
         Write-Host "  Removed existing task"
     }
 
@@ -116,8 +116,8 @@ if (-not (Test-Path $InboxScript)) {
         -MultipleInstances IgnoreNew
 
     Register-ScheduledTask `
-        -TaskName "CairnEmailInbox" `
-        -TaskPath "\Cairn\" `
+        -TaskName "DeekEmailInbox" `
+        -TaskPath "\Deek\" `
         -Action $inboxAction `
         -Trigger $inboxTrigger `
         -Settings $inboxSettings `
@@ -125,17 +125,17 @@ if (-not (Test-Path $InboxScript)) {
         -Description "Cairn: poll cairn@nbnesigns.com for new messages, ingest and embed. Every 15 minutes." `
         | Out-Null
 
-    $registeredInbox = Get-ScheduledTask -TaskName "CairnEmailInbox" -ErrorAction SilentlyContinue
+    $registeredInbox = Get-ScheduledTask -TaskName "DeekEmailInbox" -ErrorAction SilentlyContinue
     if ($registeredInbox) {
-        Write-Host "  [OK] CairnEmailInbox registered" -ForegroundColor Green
+        Write-Host "  [OK] DeekEmailInbox registered" -ForegroundColor Green
         Write-Host "  Trigger: every 15 minutes"
         Write-Host "  Script: $InboxScript"
-        Write-Host "  Logs: $ClawDir\logs\email_ingest\cairn_inbox.log"
+        Write-Host "  Logs: $ClawDir\logs\email_ingest\deek_inbox.log"
         Write-Host ""
         Write-Host "NOTE: Requires IMAP_PASSWORD_CAIRN set in $ClawDir\.env" -ForegroundColor Yellow
         Write-Host "NOTE: Set up IONOS forwarding from sales@ and toby@ to cairn@ before this runs." -ForegroundColor Yellow
     } else {
-        Write-Warning "CairnEmailInbox registration failed — check PowerShell permissions"
+        Write-Warning "DeekEmailInbox registration failed — check PowerShell permissions"
     }
 }
 
@@ -147,7 +147,7 @@ $WikiScript = Join-Path $ClawDir "scripts\process_wiki_candidates.py"
 if (-not (Test-Path $WikiScript)) {
     Write-Warning "Wiki script not found at $WikiScript — skipping CairnWikiCandidates"
 } else {
-    Write-Host "Installing Cairn wiki candidates scheduled task..."
+    Write-Host "Installing Deek wiki candidates scheduled task..."
 
     $existingWiki = Get-ScheduledTask -TaskName "CairnWikiCandidates" -ErrorAction SilentlyContinue
     if ($existingWiki) {
@@ -175,12 +175,12 @@ if (-not (Test-Path $WikiScript)) {
 
     Register-ScheduledTask `
         -TaskName "CairnWikiCandidates" `
-        -TaskPath "\Cairn\" `
+        -TaskPath "\Deek\" `
         -Action $wikiAction `
         -Trigger $wikiTrigger `
         -Settings $wikiSettings `
         -Principal $principal `
-        -Description "Cairn: generate wiki articles from cairn@ direct notes. Every 20 minutes." `
+        -Description "Deek: generate wiki articles from cairn@ direct notes. Every 20 minutes." `
         | Out-Null
 
     $registeredWiki = Get-ScheduledTask -TaskName "CairnWikiCandidates" -ErrorAction SilentlyContinue
@@ -195,5 +195,5 @@ if (-not (Test-Path $WikiScript)) {
 }
 
 Write-Host ""
-Write-Host "NOTE: claw-api NSSM service requires Administrator." -ForegroundColor Yellow
+Write-Host "NOTE: deek-api NSSM service requires Administrator." -ForegroundColor Yellow
 Write-Host "Run install_services.ps1 as Admin to make the API survive reboots."

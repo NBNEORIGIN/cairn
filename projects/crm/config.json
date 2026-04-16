@@ -1,6 +1,6 @@
 {
   "name": "NBNE CRM",
-  "description": "B2B project management and business development platform — Cairn-connected with semantic search, email integration, pipeline analytics",
+  "description": "B2B project management and business development platform — Deek-connected with semantic search, email integration, pipeline analytics",
   "codebase_path": "D:/crm",
   "project_type": "coding",
   "force_model": "api",
@@ -30,11 +30,11 @@
     "force_model": "api",
     "opus_keywords": [
       "architecture", "semantic search", "embedding pipeline",
-      "email integration", "GDPR", "cross-module", "Cairn context"
+      "email integration", "GDPR", "cross-module", "Deek context"
     ]
   },
 
-  "related_projects": ["claw", "manufacturing", "phloe"],
+  "related_projects": ["deek", "manufacturing", "phloe"],
 
   "indexing": {
     "auto_reindex": false,

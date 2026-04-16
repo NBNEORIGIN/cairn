@@ -32,7 +32,7 @@ When a job reaches completion or agreed milestone, you'll need to raise the fina
 
 - Confirm the original total quoted for the job
 - Calculate 25% deposit and 75% balance
-- Verify deposit has been received and marked as paid in Cairn
+- Verify deposit has been received and marked as paid in Deek
 - Double-check calculations before proceeding
 
 ### 2. Request Confirmation
@@ -54,10 +54,10 @@ Common payment terms at NBNE:
 
 Always confirm which terms to apply before raising the invoice.
 
-### 4. Raise the Invoice in Cairn
+### 4. Raise the Invoice in Deek
 
 Once confirmation received:
-- Create new invoice in Cairn
+- Create new invoice in Deek
 - Reference the original job/quote number
 - Mark as "Balance Payment" or "Final Payment"
 - Apply agreed payment terms
@@ -66,7 +66,7 @@ Once confirmation received:
 
 ## Warnings and Common Pitfalls
 
-> **WARNING**: Always verify the deposit has actually been received and cleared before raising the balance invoice. Check bank reconciliation in Cairn.
+> **WARNING**: Always verify the deposit has actually been received and cleared before raising the balance invoice. Check bank reconciliation in Deek.
 
 > **COMMON MISTAKE**: Invoicing the full amount instead of just the 75% balance. This results in double-charging the customer and creates reconciliation issues.
 
@@ -94,7 +94,7 @@ When requesting confirmation for final invoices:
 
 ## Related Topics
 
-- **Creating Invoices in Cairn**: Full guide to invoice generation
+- **Creating Invoices in Deek**: Full guide to invoice generation
 - **Payment Terms and Credit Control**: Understanding NBNE's payment terms policy
 - **Deposit Processing**: How to handle and record customer deposits
 - **VAT Calculations**: Ensuring correct VAT treatment on invoices

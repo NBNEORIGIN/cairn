@@ -31,7 +31,7 @@ This is a standard quote follow-up email from Metal Supermarkets Gateshead (Aaro
 ## Recommended Actions
 
 ### 1. Locate the Original Quote
-- Search Cairn for sales order reference **MSUK-SO1514713**
+- Search Deek for sales order reference **MSUK-SO1514713**
 - Check email archives for the original quote from Metal Supermarkets
 - Review quote details, pricing, and specifications
 - Verify the quote is still within validity period
@@ -54,7 +54,7 @@ This is a standard quote follow-up email from Metal Supermarkets Gateshead (Aaro
 **If declining or postponing:**
 - Respond professionally to maintain supplier relationship
 - Provide brief explanation (budget constraints, project delay, alternative supplier selected)
-- Keep communication records in Cairn for future reference
+- Keep communication records in Deek for future reference
 
 **If quote needs revision:**
 - List specific changes required (quantities, materials, services)
@@ -75,7 +75,7 @@ This is a standard quote follow-up email from Metal Supermarkets Gateshead (Aaro
 
 ## Documentation Requirements
 
-1. **Save this email** to the appropriate project folder in Cairn under MSUK-SO1514713
+1. **Save this email** to the appropriate project folder in Deek under MSUK-SO1514713
 2. **Log supplier contact** in the procurement tracking system
 3. **Record decision** (proceed/decline/revise) with date and rationale
 4. **File purchase order** if proceeding, linking to original quote reference
@@ -89,7 +89,7 @@ This is a standard quote follow-up email from Metal Supermarkets Gateshead (Aaro
 - [ ] Contact Toby Fletcher if necessary
 - [ ] Respond to Aaron Bailey within 5 business days
 - [ ] Process PO if proceeding with order
-- [ ] Update Cairn with outcome and documentation
+- [ ] Update Deek with outcome and documentation
 
 ## Related Topics
 

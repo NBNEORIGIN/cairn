@@ -117,7 +117,7 @@ def _looks_like_file_reference(raw_path: str) -> bool:
     if ext.lower() not in _CODE_EXTENSIONS:
         # Bare config/doc/data filenames like "config.json" or "README.md"
         # are too ambiguous to treat as hallucinated paths. We only validate
-        # them when they are path-shaped ("projects/claw/config.json").
+        # them when they are path-shaped ("projects/deek/config.json").
         return False
 
     stem = os.path.splitext(os.path.basename(raw_path))[0]

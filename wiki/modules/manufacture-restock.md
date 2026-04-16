@@ -14,8 +14,8 @@ create production orders directly in the Manufacture pipeline.
 ## Tech Stack
 - Backend: Django 5.x at `manufacture/backend/restock/`
 - Algorithm: 90d demand − on_hand (`newsvendor.py` — name retained to avoid DB/API changes)
-- SP-API: Direct LWA calls — `spapi_client.py` calls Amazon directly. Cairn HTTP unreachable from Manufacture container.
-- SKU resolution: Local Manufacture `SKU` table first, Cairn `/ami/sku-mapping/lookup` fallback
+- SP-API: Direct LWA calls — `spapi_client.py` calls Amazon directly. Deek HTTP unreachable from Manufacture container.
+- SKU resolution: Local Manufacture `SKU` table first, Deek `/ami/sku-mapping/lookup` fallback
 - UI: Next.js at `frontend/src/app/restock/page.tsx`
 - Daily cron: `sync_restock_all` management command, 6am UTC
 
@@ -91,7 +91,7 @@ Personalised products panel:
 ## Connections
 - **Calls**: Amazon SP-API directly using LWA credentials
 - **Reads from**: Manufacture `SKU` + `Product` tables (SKU→M-number, margin when available)
-- **Falls back to**: Cairn `/ami/sku-mapping/lookup` (for SKUs not in local Manufacture DB)
+- **Falls back to**: Deek `/ami/sku-mapping/lookup` (for SKUs not in local Manufacture DB)
 - **Writes to**: Manufacture `ProductionOrder` + `ProductionStage` tables
 - **Exposes**: `/api/restock/*` for UI
 
@@ -192,8 +192,8 @@ Bidirectional: check = D2C only (FBA excluded); uncheck = restore to FBA.
 Works at M-number level — all SKUs for an M-number are excluded together.
 Personalised rows rendered at opacity-50 to indicate exclusion visually.
 
-### 2026-04-07 — Direct SP-API (Cairn HTTP not reachable)
-Cairn container is on deploy_default network, Manufacture backend on same network, but HTTP responses timeout cross-network despite TCP connectivity. Root cause unknown (possibly iptables). Rewrote spapi_client.py to call Amazon SP-API directly using LWA credentials stored in Manufacture .env.
+### 2026-04-07 — Direct SP-API (Deek HTTP not reachable)
+Deek container is on deploy_default network, Manufacture backend on same network, but HTTP responses timeout cross-network despite TCP connectivity. Root cause unknown (possibly iptables). Rewrote spapi_client.py to call Amazon SP-API directly using LWA credentials stored in Manufacture .env.
 
 ### 2026-04-07 — Actual CSV format is TSV not CSV
 GET_FBA_INVENTORY_PLANNING_DATA returns tab-separated data with lowercase-hyphenated headers. Marketplace column contains 'UK' not 'GB'. Alert column contains velocity alerts (Low traffic, Low conversion), not restock alerts (out_of_stock, reorder_now). Restock alert derived from days_of_supply < 30 + recommended_qty > 0.
@@ -201,9 +201,9 @@ GET_FBA_INVENTORY_PLANNING_DATA returns tab-separated data with lowercase-hyphen
 ### 2026-04-07 — D2C exclusion list
 Personalised items (made-to-order) should never be FBA restocked. RestockExclusion model lets staff permanently exclude M-numbers. Pre-seeded: M0634, M0683, M0682.
 
-### 2026-04-07 — Local SKU table first, Cairn fallback
+### 2026-04-07 — Local SKU table first, Deek fallback
 Manufacture's own `SKU` model already has the SKU→M-number mapping (seeded from spreadsheet).
-Local lookup is faster and avoids HTTP dependency. Cairn `/ami/sku-mapping/lookup` is used
+Local lookup is faster and avoids HTTP dependency. Deek `/ami/sku-mapping/lookup` is used
 only for SKUs not found locally.
 
 ### 2026-04-07 — Newsvendor without scipy

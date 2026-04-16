@@ -1,5 +1,5 @@
 """
-Cairn Email Bulk Ingest — one-off runner for sales@ and toby@ mailboxes.
+Deek Email Bulk Ingest — one-off runner for sales@ and toby@ mailboxes.
 
 Fetches all messages from INBOX and Sent, applies PII/relevance filters,
 and stores sanitised content in cairn_email_raw.
@@ -8,9 +8,9 @@ Does NOT embed during ingest — run /email/embed (API) or the embedder
 directly after inspecting the raw store.
 
 Usage:
-    D:\claw\.venv\Scripts\python.exe D:\claw\scripts\email_bulk_ingest.py
-    D:\claw\.venv\Scripts\python.exe D:\claw\scripts\email_bulk_ingest.py --mailbox sales
-    D:\claw\.venv\Scripts\python.exe D:\claw\scripts\email_bulk_ingest.py --mailbox toby --sleep 1.0
+    D:\deek\.venv\Scripts\python.exe D:\deek\scripts\email_bulk_ingest.py
+    D:\deek\.venv\Scripts\python.exe D:\deek\scripts\email_bulk_ingest.py --mailbox sales
+    D:\deek\.venv\Scripts\python.exe D:\deek\scripts\email_bulk_ingest.py --mailbox toby --sleep 1.0
 
 Options:
     --mailbox   Comma-separated list: sales,toby,cairn (default: sales,toby,cairn)
@@ -51,7 +51,7 @@ logger = logging.getLogger('email_bulk_ingest')
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Cairn email bulk ingest')
+    parser = argparse.ArgumentParser(description='Deek email bulk ingest')
     parser.add_argument(
         '--mailbox',
         default='sales,toby,cairn',

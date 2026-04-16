@@ -1,19 +1,19 @@
 # Bug Fixes Deployed - Projects + General Chat + Navigation (2026-04-12)
 
-**Summary:** Three critical bugs have been fixed in Cairn's production environment. The project dropdown now correctly loads all 14 projects, chat functionality works immediately without requiring project selection (via a new "General" mode), and Amazon/Etsy/Social tools are now accessible through a new navigation bar and quick-action buttons. A proxy route fix also resolved Docker networking issues affecting the Social page.
+**Summary:** Three critical bugs have been fixed in Deek's production environment. The project dropdown now correctly loads all 14 projects, chat functionality works immediately without requiring project selection (via a new "General" mode), and Amazon/Etsy/Social tools are now accessible through a new navigation bar and quick-action buttons. A proxy route fix also resolved Docker networking issues affecting the Social page.
 
 ## Fixed Issues
 
 ### 1. Project Dropdown Now Loads Correctly
 
-**Root Cause:** Environment variable mismatch between `docker-compose.yml` (which set `CAIRN_API_URL`) and route handlers (which read `CLAW_API_URL`). The web container silently fell back to `http://localhost:8765`, unreachable from inside Docker. Additionally, Next.js inlines `process.env.*` at build time, requiring environment variables during the Docker build stage.
+**Root Cause:** Environment variable mismatch between `docker-compose.yml` (which set `DEEK_API_URL`) and route handlers (which read `CLAW_API_URL`). The web container silently fell back to `http://localhost:8765`, unreachable from inside Docker. Additionally, Next.js inlines `process.env.*` at build time, requiring environment variables during the Docker build stage.
 
-**Resolution:** Both `CLAW_API_URL` and `CAIRN_API_URL` are now set in `docker-compose.yml` and the Dockerfile builder stage.
+**Resolution:** Both `CLAW_API_URL` and `DEEK_API_URL` are now set in `docker-compose.yml` and the Dockerfile builder stage.
 
 **Result:** The project dropdown displays all 14 projects:
 - amazon-intelligence
 - ark
-- claw
+- deek
 - crm
 - etsy-intelligence
 - general
@@ -72,11 +72,11 @@ Three improvements were deployed:
 
 To verify the fixes are working correctly:
 
-1. Visit [https://cairn.nbnesigns.co.uk](https://cairn.nbnesigns.co.uk)
+1. Visit [https://deek.nbnesigns.co.uk](https://deek.nbnesigns.co.uk)
 2. Confirm the navigation bar (Chat / Social / Status) appears at the top
 3. Check the project dropdown shows "General" plus all 14 projects
 4. Type a test message and send—you should receive a response in General mode
-5. Select a specific project (e.g. "claw")—project-specific skills should appear
+5. Select a specific project (e.g. "deek")—project-specific skills should appear
 6. Click "Social" in the navigation bar—the drafting interface should load
 7. Return to Chat and test the quick-action buttons
 
@@ -94,6 +94,6 @@ To verify the fixes are working correctly:
 ## Related Topics
 
 - **Docker Environment Configuration** - Understanding environment variable handling in Next.js containers
-- **Cairn Agent Architecture** - How General mode differs from project-specific agents
+- **Deek Agent Architecture** - How General mode differs from project-specific agents
 - **Social Media Tools** - Using the Social page for content drafting
 - **Quick Actions Reference** - Complete list of available prompt templates

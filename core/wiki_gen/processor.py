@@ -18,7 +18,7 @@ from core.wiki_gen.generator import (
 
 logger = logging.getLogger(__name__)
 
-_DIRECT_NOTE_PROMPT = """You are writing a wiki article for NBNE's internal Cairn knowledge base.
+_DIRECT_NOTE_PROMPT = """You are writing a wiki article for NBNE's internal Deek knowledge base.
 The article should be structured, practical, and written from the perspective of an
 experienced NBNE operator.
 

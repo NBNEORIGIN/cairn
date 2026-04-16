@@ -74,7 +74,7 @@ These emails typically reach NBNE mailboxes due to:
 
 If uncertain whether an email is legitimate operational communication versus marketing:
 
-1. Check **Cairn procurement records** for active SGS Engineering relationships
+1. Check **Deek procurement records** for active SGS Engineering relationships
 2. Verify with **your supervisor** if SGS is an approved supplier
 3. Contact **sender directly** using independently verified contact information (not reply address)
 4. Review **previous email history** for transactional patterns versus purely promotional content
@@ -83,7 +83,7 @@ If uncertain whether an email is legitimate operational communication versus mar
 
 When these emails persist despite remediation:
 
-- Log incidents in **Cairn ticketing system** under category: Email/Spam
+- Log incidents in **Deek ticketing system** under category: Email/Spam
 - Include full email headers for IT analysis
 - Note frequency and any pattern changes
 - Track whether multiple team members receive identical messages

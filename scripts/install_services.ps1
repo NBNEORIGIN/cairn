@@ -1,9 +1,9 @@
-# CLAW Windows Service Installer
+# DEEK Windows Service Installer
 # Run this ONCE as Administrator to install everything.
-# After this, CLAW starts automatically with Windows.
+# After this, DEEK starts automatically with Windows.
 
 param(
-    [string]$ClawDir   = "D:\claw",
+    [string]$ClawDir   = "D:\deek",
     [string]$PythonExe = "",          # leave blank to auto-detect
     [string]$NodeExe   = "",          # leave blank to auto-detect
     [string]$NpmCmd    = ""           # leave blank to auto-detect
@@ -90,7 +90,7 @@ function Install-NssmService {
     & $NSSM install $Name $Exe $Args
     & $NSSM set $Name AppDirectory      $WorkDir
     & $NSSM set $Name DisplayName       $DisplayName
-    & $NSSM set $Name Description       "CLAW Coding Agent — $DisplayName"
+    & $NSSM set $Name Description       "DEEK Coding Agent — $DisplayName"
     & $NSSM set $Name Start             SERVICE_AUTO_START
 
     # Logging
@@ -114,25 +114,25 @@ function Install-NssmService {
     OK "Installed service: $Name"
 }
 
-# ── 1. CLAW API service ───────────────────────────────────────────────────────
+# ── 1. DEEK API service ───────────────────────────────────────────────────────
 
-Banner "Installing claw-api service"
+Banner "Installing deek-api service"
 
 $UvicornArgs = "-m uvicorn api.main:app --host 0.0.0.0 --port 8765 --workers 1"
 $ApiEnv = "PYTHONIOENCODING=utf-8 PYTHONUTF8=1"
 
 Install-NssmService `
-    -Name        "claw-api" `
+    -Name        "deek-api" `
     -Exe         $PythonExe `
     -Args        $UvicornArgs `
     -WorkDir     $ClawDir `
     -LogDir      (Join-Path $ClawDir "logs\api") `
-    -DisplayName "CLAW API (FastAPI)" `
+    -DisplayName "DEEK API (FastAPI)" `
     -EnvExtra    $ApiEnv
 
-# ── 2. CLAW Web service ───────────────────────────────────────────────────────
+# ── 2. DEEK Web service ───────────────────────────────────────────────────────
 
-Banner "Installing claw-web service"
+Banner "Installing deek-web service"
 
 # Use start_web.cmd wrapper — it runs 'next build' then 'next start' so the
 # service is self-healing after power cuts (no stale .next dir issues).
@@ -141,34 +141,34 @@ $CmdExe      = "$env:SystemRoot\System32\cmd.exe"
 $WebArgs     = "/c `"$StartWebCmd`""
 
 Install-NssmService `
-    -Name        "claw-web" `
+    -Name        "deek-web" `
     -Exe         $CmdExe `
     -Args        $WebArgs `
     -WorkDir     (Join-Path $ClawDir "web") `
     -LogDir      (Join-Path $ClawDir "logs\web") `
-    -DisplayName "CLAW Web Chat (Next.js)"
+    -DisplayName "DEEK Web Chat (Next.js)"
 
 # ── 3. Start both services ────────────────────────────────────────────────────
 
 Banner "Starting services"
 
-Start-Service claw-api -ErrorAction SilentlyContinue
+Start-Service deek-api -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 4
-$apiStatus = (Get-Service claw-api).Status
-if ($apiStatus -eq "Running") { OK "claw-api  : $apiStatus" }
+$apiStatus = (Get-Service deek-api).Status
+if ($apiStatus -eq "Running") { OK "deek-api  : $apiStatus" }
 else {
-    ERR "claw-api  : $apiStatus — check D:\claw\logs\api\stderr.log"
-    Get-Content "D:\claw\logs\api\stderr.log" -Tail 8 -ErrorAction SilentlyContinue |
+    ERR "deek-api  : $apiStatus — check D:\deek\logs\api\stderr.log"
+    Get-Content "D:\deek\logs\api\stderr.log" -Tail 8 -ErrorAction SilentlyContinue |
         ForEach-Object { Write-Host "    $_" -ForegroundColor Yellow }
 }
 
-Start-Service claw-web -ErrorAction SilentlyContinue
+Start-Service deek-web -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 4
-$webStatus = (Get-Service claw-web).Status
-if ($webStatus -eq "Running") { OK "claw-web  : $webStatus" }
+$webStatus = (Get-Service deek-web).Status
+if ($webStatus -eq "Running") { OK "deek-web  : $webStatus" }
 else {
-    ERR "claw-web  : $webStatus — check D:\claw\logs\web\stderr.log"
-    Get-Content "D:\claw\logs\web\stderr.log" -Tail 8 -ErrorAction SilentlyContinue |
+    ERR "deek-web  : $webStatus — check D:\deek\logs\web\stderr.log"
+    Get-Content "D:\deek\logs\web\stderr.log" -Tail 8 -ErrorAction SilentlyContinue |
         ForEach-Object { Write-Host "    $_" -ForegroundColor Yellow }
 }
 
@@ -176,11 +176,11 @@ else {
 
 Banner "Registering tray app at user login"
 
-$TrayScript = Join-Path $ClawDir "tray\claw_tray.py"
+$TrayScript = Join-Path $ClawDir "tray\deek_tray.py"
 $RunKey     = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 $TrayCmd    = "`"$PythonExe`" `"$TrayScript`""
 
-Set-ItemProperty -Path $RunKey -Name "CLAW-Tray" -Value $TrayCmd
+Set-ItemProperty -Path $RunKey -Name "DEEK-Tray" -Value $TrayCmd
 OK "Tray registered in HKCU Run key"
 
 # Launch tray now without waiting
@@ -192,8 +192,8 @@ Banner "All done"
 Write-Host @"
 
   Services installed and running:
-    claw-api   http://localhost:8765      (FastAPI + agent)
-    claw-web   http://localhost:3000      (Next.js chat UI)
+    deek-api   http://localhost:8765      (FastAPI + agent)
+    deek-web   http://localhost:3000      (Next.js chat UI)
 
   Both will start automatically at boot.
 
@@ -203,9 +203,9 @@ Write-Host @"
     Red    = API offline
 
   Useful commands:
-    Restart API :  Restart-Service claw-api
-    Restart Web :  Restart-Service claw-web
-    View API log:  Get-Content D:\claw\logs\api\stdout.log -Tail 50 -Wait
-    View Web log:  Get-Content D:\claw\logs\web\stdout.log -Tail 50 -Wait
+    Restart API :  Restart-Service deek-api
+    Restart Web :  Restart-Service deek-web
+    View API log:  Get-Content D:\deek\logs\api\stdout.log -Tail 50 -Wait
+    View Web log:  Get-Content D:\deek\logs\web\stdout.log -Tail 50 -Wait
 
 "@

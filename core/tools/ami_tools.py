@@ -1,5 +1,5 @@
 """
-Amazon Intelligence query tool for the Cairn agent.
+Amazon Intelligence query tool for the Deek agent.
 
 Allows the chat agent to run read-only SQL queries against the ami_* tables
 in response to natural language questions about Amazon listing performance,

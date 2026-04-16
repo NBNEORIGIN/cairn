@@ -42,4 +42,4 @@ OAuth credentials are stored in `.env` only — never in wiki or source files. T
 
 ## Links
 
-- [[wiki/modules/cairn]] — Cairn manages Beacon as a registered module
+- [[wiki/modules/cairn]] — Deek manages Beacon as a registered module

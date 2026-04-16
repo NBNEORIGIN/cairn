@@ -1,4 +1,4 @@
-# [Project Name] — CLAW Agent Core Context
+# [Project Name] — DEEK Agent Core Context
 # Version: 1.0
 # KEEP THIS FILE UNDER 2000 TOKENS.
 # Update when significant architectural decisions are made.

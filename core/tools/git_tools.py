@@ -1,5 +1,5 @@
 """
-Git operations for CLAW agent.
+Git operations for DEEK agent.
 Read operations (status, log, diff) are SAFE — auto-approved.
 Write operations (add, commit, branch, stash) are REVIEW — require approval.
 Push is DESTRUCTIVE — explicit confirmation required.

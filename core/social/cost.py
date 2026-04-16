@@ -1,10 +1,10 @@
 """
-Cairn Social cost logging — wires Claude API call usage into Cairn's existing
-/costs/log pipeline (per CLAUDE.md Step 4b + CAIRN_SOCIAL_V2_HANDOFF.md
+Deek Social cost logging — wires Claude API call usage into Deek's existing
+/costs/log pipeline (per CLAUDE.md Step 4b + DEEK_SOCIAL_V2_HANDOFF.md
 correction A).
 
 Best-effort: writes directly to MemoryStore.add_message and the cost_log.csv
-file using the same schema /costs/log uses, so cost data flows into Cairn's
+file using the same schema /costs/log uses, so cost data flows into Deek's
 existing per-session spend tracking without going back through the HTTP
 endpoint.
 """
@@ -18,7 +18,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-CAIRN_PROJECT = 'claw'
+DEEK_PROJECT = 'deek'
 
 
 def log_social_cost(
@@ -30,19 +30,19 @@ def log_social_cost(
     tokens_out: int,
     cost_gbp: float,
 ) -> None:
-    """Log a single Claude API call to Cairn's cost tracking.
+    """Log a single Claude API call to Deek's cost tracking.
 
     This mirrors the /costs/log endpoint behaviour (api/main.py:1543) but
     in-process so we don't HTTP-call ourselves. Always best-effort — never
     raises.
     """
     now_iso = datetime.utcnow().isoformat() + 'Z'
-    data_dir = os.getenv('CLAW_DATA_DIR', './data')
+    data_dir = os.getenv('DEEK_DATA_DIR') or os.getenv('CLAW_DATA_DIR', './data')
 
     # 1. SQLite via MemoryStore (same column piggyback /costs/log uses)
     try:
         from core.memory.store import MemoryStore
-        store = MemoryStore(CAIRN_PROJECT, data_dir)
+        store = MemoryStore(DEEK_PROJECT, data_dir)
         try:
             store.add_message(
                 session_id=session_id,
@@ -56,7 +56,7 @@ def log_social_cost(
         finally:
             store.close()
     except Exception as exc:
-        logger.warning('Cairn Social cost log (sqlite) failed: %s', exc)
+        logger.warning('Deek Social cost log (sqlite) failed: %s', exc)
 
     # 2. CSV append (best-effort, survives DB failures)
     try:
@@ -71,8 +71,8 @@ def log_social_cost(
             # Sanitise commas in the prompt_summary so the CSV stays valid
             safe_summary = prompt_summary.replace(',', ';').replace('\n', ' ')
             f.write(
-                f'{now_iso},{session_id},{CAIRN_PROJECT},{safe_summary},'
+                f'{now_iso},{session_id},{DEEK_PROJECT},{safe_summary},'
                 f'{model},{tokens_in},{tokens_out},{cost_gbp},{cost_gbp}\n'
             )
     except Exception as exc:
-        logger.warning('Cairn Social cost log (csv) failed: %s', exc)
+        logger.warning('Deek Social cost log (csv) failed: %s', exc)

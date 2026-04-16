@@ -1,11 +1,11 @@
 """
-Cairn Social memory write-back.
+Deek Social memory write-back.
 
 When Jo marks a draft variant as published, this module writes the post into
-Cairn's memory layer so it becomes searchable via the "Ask" interface and
+Deek's memory layer so it becomes searchable via the "Ask" interface and
 becomes available as a few-shot example for future drafts.
 
-Per CAIRN_SOCIAL_V2_HANDOFF.md Blocker 2, write-back uses TWO surfaces:
+Per DEEK_SOCIAL_V2_HANDOFF.md Blocker 2, write-back uses TWO surfaces:
 
   1. claw_code_chunks (chunk_type='social_post') — semantic-search store,
      embedded via the same pipeline the wiki layer uses
@@ -31,7 +31,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-CAIRN_PROJECT = 'claw'
+DEEK_PROJECT = 'deek'
 CHUNK_TYPE = 'social_post'
 
 
@@ -87,14 +87,14 @@ def write_published_post_to_chunks(
     """
     db_url = os.getenv('DATABASE_URL', '')
     if not db_url:
-        logger.warning('Cairn Social: DATABASE_URL not set, skipping chunk write-back')
+        logger.warning('Deek Social: DATABASE_URL not set, skipping chunk write-back')
         return None
 
     try:
         import psycopg2
         from pgvector.psycopg2 import register_vector
     except Exception as exc:
-        logger.warning('Cairn Social: pgvector unavailable: %s', exc)
+        logger.warning('Deek Social: pgvector unavailable: %s', exc)
         return None
 
     # The embedding pipeline lives in core.wiki.embeddings — same one the
@@ -102,7 +102,7 @@ def write_published_post_to_chunks(
     from core.wiki.embeddings import get_embed_fn
     embed_fn = get_embed_fn()
     if embed_fn is None:
-        logger.warning('Cairn Social: no embedding provider available')
+        logger.warning('Deek Social: no embedding provider available')
         return None
 
     chunk_content, chunk_name = _build_chunk_content(
@@ -122,7 +122,7 @@ def write_published_post_to_chunks(
     try:
         embedding = embed_fn(chunk_content[:6000])
     except Exception as exc:
-        logger.warning('Cairn Social: embedding failed: %s', exc)
+        logger.warning('Deek Social: embedding failed: %s', exc)
         return None
 
     try:
@@ -135,7 +135,7 @@ def write_published_post_to_chunks(
                 DELETE FROM claw_code_chunks
                  WHERE project_id = %s AND file_path = %s AND chunk_type = %s
                 """,
-                (CAIRN_PROJECT, file_path, CHUNK_TYPE),
+                (DEEK_PROJECT, file_path, CHUNK_TYPE),
             )
             cur.execute(
                 """
@@ -145,7 +145,7 @@ def write_published_post_to_chunks(
                 VALUES (%s, %s, %s, %s, %s, %s, %s::vector, NOW())
                 """,
                 (
-                    CAIRN_PROJECT,
+                    DEEK_PROJECT,
                     file_path,
                     chunk_content,
                     CHUNK_TYPE,
@@ -181,12 +181,12 @@ def write_published_post_to_decisions(
     try:
         from core.memory.store import MemoryStore
     except Exception as exc:
-        logger.warning('Cairn Social: MemoryStore unavailable: %s', exc)
+        logger.warning('Deek Social: MemoryStore unavailable: %s', exc)
         return None
 
-    data_dir = os.getenv('CLAW_DATA_DIR', './data')
+    data_dir = os.getenv('DEEK_DATA_DIR') or os.getenv('CLAW_DATA_DIR', './data')
     session_id = f'social_publish_{datetime.utcnow().strftime("%Y%m%d_%H%M%S")}_{uuid.uuid4().hex[:6]}'
-    store = MemoryStore(CAIRN_PROJECT, data_dir)
+    store = MemoryStore(DEEK_PROJECT, data_dir)
     try:
         store.record_decision(
             session_id=session_id,
@@ -199,13 +199,13 @@ def write_published_post_to_decisions(
             ),
             reasoning=f"source_mode={source_mode}",
             files_affected=[f'social/{platform}/{variant_id}.md'],
-            project=CAIRN_PROJECT,
+            project=DEEK_PROJECT,
             query=f"social post {platform} {pillar or ''} {post_text[:120]}",
             rejected='',
             model_used='cairn-social',
         )
     except Exception as exc:
-        logger.warning('Cairn Social: record_decision failed: %s', exc)
+        logger.warning('Deek Social: record_decision failed: %s', exc)
         store.close()
         return None
     finally:

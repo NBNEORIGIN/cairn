@@ -1,10 +1,10 @@
-# CLAW first-time setup — Windows PowerShell
-# Run from the claw\ directory: .\scripts\setup.ps1
+# DEEK first-time setup — Windows PowerShell
+# Run from the deek\ directory: .\scripts\setup.ps1
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-Write-Host "`nSetting up CLAW..." -ForegroundColor Cyan
+Write-Host "`nSetting up DEEK..." -ForegroundColor Cyan
 
 # ── Prerequisite checks ──────────────────────────────────────────────────────
 
@@ -43,13 +43,13 @@ Write-Host "`nSetting up PostgreSQL database..."
 $pgBin = "C:\Program Files\PostgreSQL\17\bin"
 if (Test-Path "$pgBin\psql.exe") {
     $env:PGPASSWORD = "postgres123"
-    & "$pgBin\psql.exe" -U postgres -c "CREATE DATABASE claw;" 2>$null
+    & "$pgBin\psql.exe" -U postgres -c "CREATE DATABASE deek;" 2>$null
     Write-Host "NOTE: pgvector extension must be installed separately."
     Write-Host "Download from: https://github.com/pgvector/pgvector/releases"
     Write-Host "For PostgreSQL 17 on Windows, download the zip and copy files to:"
     Write-Host "  C:\Program Files\PostgreSQL\17\lib\ (pgvector.dll)"
     Write-Host "  C:\Program Files\PostgreSQL\17\share\extension\ (vector.*)"
-    Write-Host "Then run: psql -U postgres -d claw -c `"CREATE EXTENSION vector;`""
+    Write-Host "Then run: psql -U postgres -d deek -c `"CREATE EXTENSION vector;`""
 }
 
 # ── Environment file ──────────────────────────────────────────────────────────
@@ -73,7 +73,7 @@ npm install --silent
 npm run compile
 Pop-Location
 Write-Host "Extension compiled. To install:"
-Write-Host "  cd vscode-extension && npx vsce package && code --install-extension claw-0.1.0.vsix"
+Write-Host "  cd vscode-extension && npx vsce package && code --install-extension deek-0.1.0.vsix"
 
 # ── Web interface ─────────────────────────────────────────────────────────────
 
@@ -85,7 +85,7 @@ Pop-Location
 # ── Done ──────────────────────────────────────────────────────────────────────
 
 Write-Host "`n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Green
-Write-Host "CLAW setup complete." -ForegroundColor Green
+Write-Host "DEEK setup complete." -ForegroundColor Green
 Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Green
 Write-Host ""
 Write-Host "Next steps:"

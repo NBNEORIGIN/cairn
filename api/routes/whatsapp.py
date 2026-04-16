@@ -15,7 +15,7 @@ DEFAULT_PROJECT = 'phloe'
 async def whatsapp_proxy(request: Request):
     """
     Receives messages from OpenClaw/WhatsApp.
-    Routes to the appropriate CLAW project based on sender number.
+    Routes to the appropriate DEEK project based on sender number.
     Returns a response in OpenClaw's expected format.
     """
     from api.main import get_agent

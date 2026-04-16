@@ -1,10 +1,10 @@
 {
-  "_comment": "Cairn module federation registry. Each entry is a business module Cairn polls for a live snapshot. Snapshot endpoint must return markdown (text/plain or text/markdown) or JSON {module, snapshot_md, generated_at}. Auth: set auth_header_env to an env var name; its value is passed as Bearer token. Per CAIRN_MODULES.md the shared secret is named CAIRN_API_KEY — set the SAME value in Cairn .env and each module's env (e.g. Manufacture's settings.CAIRN_API_KEY). Set enabled=false to pause without removing.",
+  "_comment": "Deek module federation registry. Each entry is a business module Deek polls for a live snapshot. Snapshot endpoint must return markdown (text/plain or text/markdown) or JSON {module, snapshot_md, generated_at}. Auth: set auth_header_env to an env var name; its value is passed as Bearer token. Per DEEK_MODULES.md the shared secret is named DEEK_API_KEY — set the SAME value in Deek .env and each module's env (e.g. Manufacture's settings.DEEK_API_KEY). Set enabled=false to pause without removing.",
   "modules": [
     {
       "name": "manufacture",
       "snapshot_url": "https://manufacture.nbnesigns.co.uk/api/cairn/snapshot",
-      "auth_header_env": "CAIRN_API_KEY",
+      "auth_header_env": "DEEK_API_KEY",
       "interval_minutes": 15,
       "enabled": true,
       "notes": "Open orders, stock by marketplace, in-flight production, last-N FBA shipments. See D:/manufacture/backend/core/cairn_views.py"
@@ -12,7 +12,7 @@
     {
       "name": "crm",
       "snapshot_url": "https://crm.nbnesigns.co.uk/api/cairn/context",
-      "auth_header_env": "CAIRN_API_KEY",
+      "auth_header_env": "DEEK_API_KEY",
       "interval_minutes": 15,
       "enabled": true,
       "notes": "Pipeline value, projects by stage, follow-ups, stale leads, recent activity. The /api/cairn/context endpoint returns JSON with a snapshot_md field built from the CRM Prisma layer — see NBNEORIGIN/crm app/api/cairn/context/route.ts. Authed via dual-mode: NextAuth session for in-app panels or Bearer token for this federation call."
@@ -20,15 +20,15 @@
     {
       "name": "render",
       "snapshot_url": "http://app-app-1:5000/api/cairn/context",
-      "auth_header_env": "CAIRN_API_KEY",
+      "auth_header_env": "DEEK_API_KEY",
       "interval_minutes": 15,
       "enabled": true,
-      "notes": "Product publishing catalogue — product counts, QA queue, publish metrics by channel, recent activity. See D:/render/app.py cairn_context()."
+      "notes": "Product publishing catalogue — product counts, QA queue, publish metrics by channel, recent activity. See D:/render/app.py deek_context()."
     },
     {
       "name": "phloe",
       "snapshot_url": "http://nbne-backend-1:8000/api/cairn/context/",
-      "auth_header_env": "CAIRN_API_KEY",
+      "auth_header_env": "DEEK_API_KEY",
       "interval_minutes": 15,
       "enabled": true,
       "notes": "WaaS booking platform — tenant metrics, booking volume, revenue, active paradigms. Aggregates across all Phloe tenants."

@@ -5,7 +5,7 @@ Endpoint: /listings/2021-08-01/items/{sellerId}/{sku}
 Method: JSON Patch (RFC 6902) for partial updates.
 
 This is the highest-value capability in the SP-API integration:
-it allows Cairn to push content improvements back to Amazon
+it allows Deek to push content improvements back to Amazon
 (prices, titles, bullet points) based on health score recommendations.
 
 Patch operations:

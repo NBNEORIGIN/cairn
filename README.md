@@ -1,13 +1,13 @@
-## Starting CLAW
+## Starting DEEK
 
-Double-click `start-claw.bat` — opens API and Web UI automatically.
+Double-click `start-deek.bat` — opens API and Web UI automatically.
 
 | Script | Purpose |
 |--------|---------|
-| `start-claw.bat` | Start API + Web UI, open browser |
-| `stop-claw.bat` | Stop all CLAW processes cleanly |
-| `restart-claw.bat` | Stop then start |
-| `status-claw.bat` | Check what's running |
+| `start-deek.bat` | Start API + Web UI, open browser |
+| `stop-deek.bat` | Stop all DEEK processes cleanly |
+| `restart-deek.bat` | Stop then start |
+| `status-deek.bat` | Check what's running |
 
 **Ports**
 - API: http://localhost:8765
@@ -16,7 +16,7 @@ Double-click `start-claw.bat` — opens API and Web UI automatically.
 
 ---
 
-# CLAW — Coding and Language Agent Workbench
+# DEEK — Coding and Language Agent Workbench
 
 Sovereign AI coding agent. Self-hosted replacement for Windsurf/Cursor
 with permanent per-project context, hybrid local/API model routing,
@@ -24,7 +24,7 @@ and three simultaneous interfaces.
 
 ```
 VS Code extension  ──┐
-Web chat           ──┤──▶ CLAW API (FastAPI) ──▶ Qwen 7B (local)
+Web chat           ──┤──▶ DEEK API (FastAPI) ──▶ Qwen 7B (local)
 WhatsApp           ──┘                       └──▶ Claude Sonnet (API)
 ```
 
@@ -59,13 +59,13 @@ Copy-Item "$src\include\server\extension\vector\*" "$pg\include\server\extension
 
 # Enable the extension
 $env:PGPASSWORD = "postgres123"
-& "$pg\bin\psql.exe" -U postgres -d claw -c "CREATE EXTENSION IF NOT EXISTS vector;"
+& "$pg\bin\psql.exe" -U postgres -d deek -c "CREATE EXTENSION IF NOT EXISTS vector;"
 ```
 
 ### 3. Python setup
 
 ```powershell
-cd D:\claw
+cd D:\deek
 python -m venv .venv
 .\.venv\Scripts\pip install -e ".[dev]"
 copy .env.example .env   # then edit .env
@@ -104,17 +104,17 @@ Open: `http://localhost:3000`
 ```powershell
 cd vscode-extension
 npx vsce package
-code --install-extension claw-0.1.0.vsix
+code --install-extension deek-0.1.0.vsix
 ```
 
-Press `Ctrl+Shift+A` in VS Code to open the CLAW panel.
+Press `Ctrl+Shift+A` in VS Code to open the DEEK panel.
 
 ---
 
 ## Architecture
 
 ```
-claw/
+deek/
 ├── core/              Python agent core
 │   ├── agent.py       Orchestrator — all channels flow through here
 │   ├── channels/      Message envelope (normalises all input)
@@ -152,7 +152,7 @@ claw/
 ## WhatsApp (OpenClaw)
 
 Install OpenClaw on the sovereign server, point it to:
-`http://<claw-server>:8765/whatsapp-proxy`
+`http://<deek-server>:8765/whatsapp-proxy`
 
 Map phone numbers to projects in `api/routes/whatsapp.py`:
 ```python

@@ -140,7 +140,7 @@ class FileWatcher:
             self._observer.start()
             self._active = True
             logger.info(
-                '[Cairn] FileWatcher started: %s watching %s',
+                '[Deek] FileWatcher started: %s watching %s',
                 getattr(self, '_project_id', '?'),
                 self.path,
             )

@@ -1,10 +1,10 @@
 """
-Cairn Email Ingestion API routes.
+Deek Email Ingestion API routes.
 
 Endpoints:
     POST /email/embed              — start background embedding job
     GET  /email/embed/status       — embedding progress
-    GET  /email/cairn/context      — full email store stats (Cairn context endpoint)
+    GET  /email/cairn/context      — full email store stats (Deek context endpoint)
     POST /email/process-inbox      — check cairn@ for new messages, ingest + embed
 """
 import asyncio
@@ -90,13 +90,13 @@ async def embed_status():
 
 
 # ---------------------------------------------------------------------------
-# Cairn context endpoint
+# Deek context endpoint
 # ---------------------------------------------------------------------------
 
 @router.get('/cairn/context')
-async def email_cairn_context():
+async def email_deek_context():
     """
-    Cairn context endpoint for the email store.
+    Deek context endpoint for the email store.
     Returns aggregate stats, mailbox breakdown, wiki candidates, and recent direct notes.
     """
     with get_conn() as conn:
@@ -189,10 +189,10 @@ _process_inbox_running = False
 def _run_process_inbox() -> None:
     global _process_inbox_running
     try:
-        from core.email_ingest.processor import process_cairn_inbox
-        process_cairn_inbox(embed_immediately=True)
+        from core.email_ingest.processor import process_deek_inbox
+        process_deek_inbox(embed_immediately=True)
     except Exception as exc:
-        logger.error('process_cairn_inbox failed: %s', exc, exc_info=True)
+        logger.error('process_deek_inbox failed: %s', exc, exc_info=True)
     finally:
         _process_inbox_running = False
 

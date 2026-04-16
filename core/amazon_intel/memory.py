@@ -1,5 +1,5 @@
 """
-Push Amazon listing intelligence data into Cairn memory for
+Push Amazon listing intelligence data into Deek memory for
 conversational retrieval.
 
 Writes to:
@@ -14,13 +14,13 @@ from core.amazon_intel.db import get_conn
 
 def index_snapshots_to_memory():
     """
-    Write listing snapshot summaries into Cairn's SQLite memory
+    Write listing snapshot summaries into Deek's SQLite memory
     for the amazon-intelligence project. Only indexes listings
     with performance data (no point indexing 3,000 "no data" entries).
     """
     from core.memory.store import MemoryStore
 
-    data_dir = os.getenv('CLAW_DATA_DIR', './data')
+    data_dir = os.getenv('DEEK_DATA_DIR') or os.getenv('CLAW_DATA_DIR', './data')
     store = MemoryStore('amazon-intelligence', data_dir)
     session_id = f'ami_index_{datetime.now().strftime("%Y%m%d_%H%M")}'
 

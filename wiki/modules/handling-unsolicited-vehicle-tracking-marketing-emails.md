@@ -63,7 +63,7 @@ If the email is unsolicited:
 If you have actual concerns about vehicle tracking or fleet management:
 
 1. Contact your Fleet Operations supervisor
-2. Submit suggestions through the proper internal channels (Cairn suggestion portal or team meetings)
+2. Submit suggestions through the proper internal channels (Deek suggestion portal or team meetings)
 3. Discuss with your line manager during regular check-ins
 
 ## Common Pitfalls

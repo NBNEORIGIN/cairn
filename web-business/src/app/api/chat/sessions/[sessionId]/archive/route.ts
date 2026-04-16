@@ -19,6 +19,6 @@ export async function POST(
     })
     return NextResponse.json(await res.json(), { status: res.status })
   } catch {
-    return NextResponse.json({ error: 'Cairn API unavailable' }, { status: 503 })
+    return NextResponse.json({ error: 'Deek API unavailable' }, { status: 503 })
   }
 }

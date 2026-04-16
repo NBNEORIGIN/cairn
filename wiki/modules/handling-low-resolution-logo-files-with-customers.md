@@ -9,7 +9,7 @@ Before contacting the customer, confirm that the logo quality will be problemati
 1. **Check the source file specifications** - Look at pixel dimensions and DPI. For large-format printing, you generally need 150-300 DPI at final output size.
 2. **Test the artwork at scale** - Zoom to 100% or place the logo at the actual print dimensions in your design software.
 3. **Capture visual evidence** - Take a screenshot showing the pixelation or blurring (as demonstrated in the example). This helps customers understand the issue.
-4. **Review previous orders** - Check Cairn for any past jobs from this customer that might have better quality files on record.
+4. **Review previous orders** - Check Deek for any past jobs from this customer that might have better quality files on record.
 
 ## Presenting Options to the Customer
 
@@ -56,7 +56,7 @@ Always give them the option to continue with the current file:
 - Attach visual evidence showing the quality issue
 - Use plain language - avoid jargon like "rasterized" or "bitmap"
 - Give them time to respond, especially if they need to consult others
-- Document their decision in Cairn notes
+- Document their decision in Deek notes
 
 **Don't:**
 - Proceed without explicit approval of quality concerns
@@ -64,7 +64,7 @@ Always give them the option to continue with the current file:
 - Rush them into a decision
 - Forget to update pricing if vectorisation is chosen
 
-## Recording in Cairn
+## Recording in Deek
 
 Once the customer responds:
 
@@ -86,6 +86,6 @@ Once the customer responds:
 
 - **Artwork Specifications and Requirements** - Technical standards for different sign types
 - **Vectorisation Process and Pricing** - Internal guide to quoting and completing vectorisation work
-- **Customer File Management in Cairn** - How to store and retrieve customer artwork
+- **Customer File Management in Deek** - How to store and retrieve customer artwork
 - **Quality Sign-Off Procedures** - Getting customer approval before production
 - **Managing Customer Expectations** - General communication guidelines

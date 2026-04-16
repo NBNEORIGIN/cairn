@@ -48,7 +48,7 @@ When a client provides a logo or graphic file that isn't suitable for large-form
 - **Set expectations in the quote phase** - Include artwork requirements in initial communications to prevent delays later
 - **Maintain a calm, helpful tone** - Present this as a normal part of the process, not a problem the client has created
 - **Document everything** - If a client approves proceeding with low-quality artwork, save that email confirmation
-- **Update Cairn notes** - Log artwork status and any client decisions for continuity when other operators take over
+- **Update Deek notes** - Log artwork status and any client decisions for continuity when other operators take over
 - **Build buffer time** - Allow extra days in the timeline for artwork back-and-forth when you first receive files
 
 ## Handover Notes
@@ -56,7 +56,7 @@ When a client provides a logo or graphic file that isn't suitable for large-form
 When taking over a job from another operator (as in the example above):
 
 - Review all artwork files immediately
-- Check Cairn for any previous artwork discussions
+- Check Deek for any previous artwork discussions
 - Introduce yourself to the client when raising quality concerns
 - Reference the previous operator by name to maintain continuity
 
@@ -64,6 +64,6 @@ When taking over a job from another operator (as in the example above):
 
 - **Vector vs Raster Files: A Quick Reference Guide**
 - **Artwork Requirements Checklist for Quotes**
-- **Using Cairn to Track Client Communications**
+- **Using Deek to Track Client Communications**
 - **When to Quote for Artwork Redraw Services**
 - **File Formats: What to Accept and What to Request**

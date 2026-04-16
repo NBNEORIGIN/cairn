@@ -6,7 +6,7 @@ classify_all() and scores each SKU by a composite "opportunity score"
 combining three signals:
 
   1. waste_gbp        — £ of ad spend currently above the recommended ACOS.
-                        Concrete over-spend that Quartile can claw back.
+                        Concrete over-spend that Quartile can deek back.
   2. scale_gbp        — £ of ad-driven revenue Quartile is *leaving on the
                         table* for INCREASE candidates where margin supports
                         more spend.

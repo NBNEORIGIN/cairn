@@ -24,15 +24,15 @@ const jetbrains = JetBrains_Mono({
 // ── Metadata ───────────────────────────────────────────────────────────
 
 export const metadata: Metadata = {
-  title: 'Cairn — Sovereign AI Agent',
+  title: 'Deek — Sovereign AI Agent',
   description:
     'Counterfactual memory, email triage, principal-developer-grade code assistance for NBNE.',
-  applicationName: 'Cairn',
+  applicationName: 'Deek',
   manifest: '/manifest.webmanifest',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
-    title: 'Cairn',
+    title: 'Deek',
   },
   icons: {
     icon: [
@@ -81,7 +81,7 @@ export default function RootLayout({
             if ('serviceWorker' in navigator) {
               window.addEventListener('load', function() {
                 navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function(err) {
-                  console.warn('Cairn SW registration failed:', err);
+                  console.warn('Deek SW registration failed:', err);
                 });
               });
             }

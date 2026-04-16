@@ -1,5 +1,5 @@
 """
-Weekly report generation and Cairn context endpoint.
+Weekly report generation and Deek context endpoint.
 
 Produces a structured report sorted by health score (worst first),
 with sections for critical listings, quick wins, margin alerts,
@@ -286,9 +286,9 @@ def get_latest_report(marketplace: str = None) -> dict | None:
             }
 
 
-def build_cairn_context() -> dict:
+def build_deek_context() -> dict:
     """
-    Build the Cairn context endpoint response per CAIRN_MODULES.md spec.
+    Build the Deek context endpoint response per DEEK_MODULES.md spec.
     Called by GET /ami/cairn/context.
     """
     stats = _compute_report_stats()
@@ -352,7 +352,7 @@ def build_cairn_context() -> dict:
 
 def get_revenue_context() -> dict:
     """
-    Pull clean revenue figures from ami_orders for Cairn chat context.
+    Pull clean revenue figures from ami_orders for Deek chat context.
     This replaces any revenue figures previously derived from ami_listing_snapshots.
     Source: ami_orders (atomic order lines, UNIQUE on amazon_order_id+order_item_id).
     No double-counting risk regardless of sync frequency.

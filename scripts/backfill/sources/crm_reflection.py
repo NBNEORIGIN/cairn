@@ -39,8 +39,8 @@ every 15 minutes.
 
 Fully independent of the dev box — the source calls the CRM via
 HTTPS and writes to ``cairn_intel.decisions`` via the normal
-pipeline. When run inside the Hetzner ``deploy-cairn-api-1``
-container, it talks to the Hetzner cairn-db directly.
+pipeline. When run inside the Hetzner ``deploy-deek-api-1``
+container, it talks to the Hetzner deek-db directly.
 """
 from __future__ import annotations
 
@@ -148,7 +148,7 @@ class CrmReflectionSource:
         self.base_url = (
             base_url or os.getenv('CRM_BASE_URL') or CRM_DEFAULT_BASE_URL
         ).rstrip('/')
-        self.api_key = api_key or os.getenv('CAIRN_API_KEY', '')
+        self.api_key = api_key or os.getenv('DEEK_API_KEY') or os.getenv('CAIRN_API_KEY') or os.getenv('CLAW_API_KEY', '')
         self.anthropic_key = (
             anthropic_api_key or os.getenv('ANTHROPIC_API_KEY', '')
         )
@@ -175,7 +175,7 @@ class CrmReflectionSource:
 
         if not self.api_key:
             raise RuntimeError(
-                'crm_reflection: CAIRN_API_KEY is not set — cannot '
+                'crm_reflection: DEEK_API_KEY is not set — cannot '
                 'authenticate against the CRM /api/cairn/search endpoint'
             )
         if not self.anthropic_key:

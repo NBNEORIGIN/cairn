@@ -71,7 +71,7 @@ This email references:
 - **Wrong time:** Check time zone settings for both client and business
 
 ### Customization Requests
-If clients request different reminder timing (e.g., 48 hours instead of 24 hours), check if Cairn supports:
+If clients request different reminder timing (e.g., 48 hours instead of 24 hours), check if Deek supports:
 - Multiple reminder schedules
 - Per-service reminder settings
 - Per-client reminder preferences
@@ -92,4 +92,4 @@ Operators may want to customize:
 - **Email Template Management** - How to edit automated email content
 - **Client Communication Preferences** - Managing opt-ins and notification settings
 - **No-Show Management** - Handling clients who don't attend after receiving reminders
-- **Time Zone Handling** - How Cairn manages appointments across different time zones
+- **Time Zone Handling** - How Deek manages appointments across different time zones

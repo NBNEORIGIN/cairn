@@ -1,8 +1,8 @@
 """Thin httpx wrapper around OpenRouter chat completions.
 
 One-shot calls only. No history, no tool use, no caching, no retry. For
-cross-module delegation via ``cairn_delegate`` — do NOT reuse this for
-Cairn's own agent loop (see ``core/models/openai_client.py`` for that).
+cross-module delegation via ``deek_delegate`` — do NOT reuse this for
+Deek's own agent loop (see ``core/models/openai_client.py`` for that).
 
 Per D-B: context (if provided) is sent as its own prior user message,
 NOT as a system prompt. OpenRouter passes system prompts through to the
@@ -63,8 +63,8 @@ def call(
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
         # Per OpenRouter docs; required for some attribution features.
-        "HTTP-Referer": "https://github.com/NBNEORIGIN/claw",
-        "X-Title": "Cairn cairn_delegate",
+        "HTTP-Referer": "https://github.com/NBNEORIGIN/deek",
+        "X-Title": "Deek deek_delegate",
     }
     payload = {
         "model": model,

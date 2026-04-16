@@ -4,19 +4,19 @@
 Amazon listing health pipeline for NBNE. Ingests data from Seller Central via SP-API
 (automated, 4x daily) or manual upload, cross-references with Manufacture margin data,
 and produces health-scored listing snapshots with diagnosis codes. Live data flows
-automatically into Cairn chat via the context endpoint — no manual steps required.
+automatically into Deek chat via the context endpoint — no manual steps required.
 
-**Phase 1 (complete):** Manual uploads + health scoring + Cairn context endpoint
+**Phase 1 (complete):** Manual uploads + health scoring + Deek context endpoint
 **Phase 2 (complete):** SP-API automated sync + auto snapshot rebuild after every sync
 
 ## Who Uses It
-- **Toby Fletcher** — listing health review, improvement prioritisation, Amazon performance questions via Cairn chat
-- **Cairn Business Brain** — polls `/ami/cairn/context` on every chat message for live Amazon data
+- **Toby Fletcher** — listing health review, improvement prioritisation, Amazon performance questions via Deek chat
+- **Deek Business Brain** — polls `/ami/cairn/context` on every chat message for live Amazon data
 
 ## Tech Stack
-- Backend: Python (embedded in Cairn FastAPI at `core/amazon_intel/`)
+- Backend: Python (embedded in Deek FastAPI at `core/amazon_intel/`)
 - SP-API: `core/amazon_intel/spapi/` — client, inventory, analytics, advertising, listings write, scheduler
-- Database: 8 `ami_*` tables in Cairn's PostgreSQL on Hetzner
+- Database: 8 `ami_*` tables in Deek's PostgreSQL on Hetzner
 - API routes: `/ami/*` (mounted in `api/routes/amazon_intel.py`)
 - Cron: `/etc/cron.d/cairn-spapi` on Hetzner — midnight, 6am, noon, 6pm UTC
 
@@ -37,7 +37,7 @@ cron (4x daily) → POST /ami/spapi/sync
   ├─ inventory: GET_MERCHANT_LISTINGS_ALL_DATA → ami_sku_mapping + ami_flatfile_data
   ├─ analytics: GET_SALES_AND_TRAFFIC_REPORT (30-day rolling) → ami_business_report_data
   ├─ advertising: Ads API SP search term report (when profile ID configured)
-  └─ snapshots: auto-rebuild → ami_listing_snapshots → /ami/cairn/context → Cairn chat
+  └─ snapshots: auto-rebuild → ami_listing_snapshots → /ami/cairn/context → Deek chat
 ```
 
 ## Key Concepts

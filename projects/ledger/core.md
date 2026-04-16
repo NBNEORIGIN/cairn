@@ -157,7 +157,7 @@ Revenue (11 channels)
 ## Hard Rules
 - Never store money as floats — always NUMERIC/Decimal
 - Never auto-delete imported data
-- Cairn context endpoint must always return valid JSON even if data is empty
+- Deek context endpoint must always return valid JSON even if data is empty
 - All CSV imports are idempotent (dedup by channel + order_id + content hash)
 - Xero imports MUST exclude Amazon contacts and deduct VAT
 - DHL: never import both estimate AND line-by-line actuals

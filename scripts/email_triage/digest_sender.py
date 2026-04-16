@@ -16,7 +16,7 @@ of who the original sender was — we never reply to the client
 directly.
 
 Safety rails:
-    - Kill switch: CAIRN_EMAIL_TRIAGE_ENABLED must be 'true'
+    - Kill switch: DEEK_EMAIL_TRIAGE_ENABLED must be 'true'
     - Hard cap per run (--max-per-run, default 20) so a backlog
       of triage rows can't blast the inbox in one go
     - send_error recorded on the triage row on SMTP failure
@@ -58,7 +58,7 @@ DEFAULT_DIGEST_FROM = 'cairn@nbnesigns.com'
 
 
 def is_triage_enabled() -> bool:
-    return os.getenv('CAIRN_EMAIL_TRIAGE_ENABLED', 'false').strip().lower() in {
+    return (os.getenv('DEEK_EMAIL_TRIAGE_ENABLED') or os.getenv('CAIRN_EMAIL_TRIAGE_ENABLED', 'false')).strip().lower() in {
         'true', '1', 'yes', 'on',
     }
 
@@ -111,7 +111,7 @@ def format_digest_body(row: dict) -> tuple[str, str]:
     """Return (subject, body) for a triage row.
 
     Subject pattern:
-        [Cairn] {classification} — {original_subject}
+        [Deek] {classification} — {original_subject}
     Body is a structured summary followed by the original enquiry.
     """
     classification = row.get('classification', 'unclassified')
@@ -121,7 +121,7 @@ def format_digest_body(row: dict) -> tuple[str, str]:
     received_iso = received.strftime('%Y-%m-%d %H:%M UTC') if received else '?'
     mailbox = row.get('email_mailbox', '?')
 
-    subject = f'[Cairn] {classification} — {original_subject}'[:200]
+    subject = f'[Deek] {classification} — {original_subject}'[:200]
 
     header = [
         f'Classification: {classification}',
@@ -181,9 +181,9 @@ def format_digest_body(row: dict) -> tuple[str, str]:
     body_parts.append('')
     body_parts.append('---')
     body_parts.append(
-        'You are receiving this because Cairn triaged a new incoming '
+        'You are receiving this because Deek triaged a new incoming '
         'email. Reply to toby@nbnesigns.com as normal — this digest '
-        'is one-way, your reply will not come back to Cairn.'
+        'is one-way, your reply will not come back to Deek.'
     )
 
     return subject, '\n'.join(body_parts)
@@ -212,7 +212,7 @@ def push_recommendation_to_crm(row: dict) -> str | None:
     Returns the recommendation ID from the CRM response, or None on
     failure (which is non-fatal — the digest email still goes out).
     """
-    token = os.getenv('CAIRN_API_KEY', '').strip()
+    token = (os.getenv('DEEK_API_KEY') or os.getenv('CAIRN_API_KEY') or os.getenv('CLAW_API_KEY', '')).strip()
     if not token:
         return None
     base_url = os.getenv('CRM_BASE_URL', 'https://crm.nbnesigns.co.uk').rstrip('/')
@@ -225,7 +225,7 @@ def push_recommendation_to_crm(row: dict) -> str | None:
     if classification == 'new_enquiry':
         message = (
             f'New enquiry from {client_guess or sender}: "{subject[:100]}". '
-            f'Analyzer brief available in Cairn email_triage row #{row.get("id")}.'
+            f'Analyzer brief available in Deek email_triage row #{row.get("id")}.'
         )
         priority = 'medium'
     elif classification == 'existing_project_reply':
@@ -278,7 +278,7 @@ def run_digest(
 ) -> int:
     if not is_triage_enabled():
         log.warning(
-            'digest_sender: CAIRN_EMAIL_TRIAGE_ENABLED is not set — '
+            'digest_sender: DEEK_EMAIL_TRIAGE_ENABLED is not set — '
             'aborting. Set the env var to "true" to enable.'
         )
         return 0
@@ -294,7 +294,7 @@ def run_digest(
         return 0
 
     cfg = smtp_config()
-    digest_to = os.getenv('CAIRN_TRIAGE_DIGEST_TO', DEFAULT_DIGEST_TO)
+    digest_to = os.getenv('DEEK_TRIAGE_DIGEST_TO') or os.getenv('CAIRN_TRIAGE_DIGEST_TO', DEFAULT_DIGEST_TO)
 
     log.info(
         'digest_sender: %d drafts to process, smtp=%s, to=%s, commit=%s',

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 const CLAW_API_URL = process.env.CLAW_API_URL || 'http://localhost:8765'
-const CLAW_API_KEY = process.env.CLAW_API_KEY || ''
+const DEEK_API_KEY = process.env.DEEK_API_KEY || ''
 
 export async function POST(req: NextRequest) {
   try {
@@ -11,7 +11,7 @@ export async function POST(req: NextRequest) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-API-Key': CLAW_API_KEY,
+        'X-API-Key': DEEK_API_KEY,
       },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(5000),
@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(data, { status: res.status })
   } catch (err) {
     return NextResponse.json(
-      { error: `Cannot reach CLAW API: ${err}` },
+      { error: `Cannot reach DEEK API: ${err}` },
       { status: 502 }
     )
   }

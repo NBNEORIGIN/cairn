@@ -24,7 +24,7 @@ export async function GET(
     if (!res.ok) return NextResponse.json({ error: 'Not found' }, { status: 404 })
     return NextResponse.json(await res.json())
   } catch {
-    return NextResponse.json({ error: 'Cairn API unavailable' }, { status: 503 })
+    return NextResponse.json({ error: 'Deek API unavailable' }, { status: 503 })
   }
 }
 
@@ -46,7 +46,7 @@ export async function PATCH(
     })
     return NextResponse.json(await res.json(), { status: res.status })
   } catch {
-    return NextResponse.json({ error: 'Cairn API unavailable' }, { status: 503 })
+    return NextResponse.json({ error: 'Deek API unavailable' }, { status: 503 })
   }
 }
 
@@ -63,6 +63,6 @@ export async function DELETE(
     const res = await cairnFetch(`/projects/nbne/sessions/${sessionId}`, { method: 'DELETE' })
     return NextResponse.json(await res.json(), { status: res.status })
   } catch {
-    return NextResponse.json({ error: 'Cairn API unavailable' }, { status: 503 })
+    return NextResponse.json({ error: 'Deek API unavailable' }, { status: 503 })
   }
 }

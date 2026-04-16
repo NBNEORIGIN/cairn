@@ -4,7 +4,7 @@ Source 7 — principles.
 Extracts standalone business principles / heuristics / rules from
 two sources:
 
-- **Phase A** — wiki articles on disk (``D:/claw/wiki/**/*.md``).
+- **Phase A** — wiki articles on disk (``D:/deek/wiki/**/*.md``).
   The LAN ``claw_code_chunks`` table is the federation layer that
   indexes wiki content into pgvector, but we read the raw files here
   because (a) we don't need the embedding, only the text, and (b)

@@ -1,7 +1,7 @@
 """
 Amazon Listing Intelligence API routes.
 
-Mounted at /ami/* in the Cairn FastAPI app.
+Mounted at /ami/* in the Deek FastAPI app.
 """
 from fastapi import APIRouter, BackgroundTasks, UploadFile, File, HTTPException, Query, Depends
 from typing import Optional
@@ -125,7 +125,7 @@ async def ingest_new_products(
     from pathlib import Path
     path = Path(csv_path)
     if not path.exists():
-        # Try relative to claw root
+        # Try relative to deek root
         path = Path(__file__).parent.parent.parent / csv_path
     if not path.exists():
         return {'error': f'File not found: {csv_path}', 'status': 'error'}
@@ -217,18 +217,18 @@ async def underperformers(
 
 @router.post("/index-to-memory")
 async def index_to_memory():
-    """Push listing snapshots and report summary into Cairn memory."""
+    """Push listing snapshots and report summary into Deek memory."""
     from core.amazon_intel.memory import index_snapshots_to_memory
     return index_snapshots_to_memory()
 
 
-# ── Cairn Context ────────────────────────────────────────────────────────────
+# ── Deek Context ────────────────────────────────────────────────────────────
 
 @router.get("/cairn/context")
-async def cairn_context():
-    """Module context endpoint per CAIRN_MODULES.md spec."""
-    from core.amazon_intel.reports import build_cairn_context
-    return build_cairn_context()
+async def deek_context():
+    """Module context endpoint per DEEK_MODULES.md spec."""
+    from core.amazon_intel.reports import build_deek_context
+    return build_deek_context()
 
 
 # ── SP-API Automated Sync ─────────────────────────────────────────────────────
@@ -452,7 +452,7 @@ async def margin_opportunities(
 @router.post("/spapi/advertising/profiles/seed")
 async def spapi_advertising_profiles_seed(
     json_path: Optional[str] = Query(None,
-        description="Path to amazon_ads_profiles.json. Defaults to AMAZON_ADS_PROFILES_JSON env var, then D:/claw/amazon_ads_profiles.json"),
+        description="Path to amazon_ads_profiles.json. Defaults to AMAZON_ADS_PROFILES_JSON env var, then D:/deek/amazon_ads_profiles.json"),
 ):
     """
     Upsert rows into ami_advertising_profiles from amazon_ads_profiles.json
@@ -463,13 +463,13 @@ async def spapi_advertising_profiles_seed(
     path = (
         json_path
         or _os.getenv('AMAZON_ADS_PROFILES_JSON')
-        or _os.path.join(_os.getenv('CAIRN_ROOT', '/opt/nbne/cairn/deploy'),
+        or _os.path.join(_os.getenv('DEEK_ROOT') or _os.getenv('CAIRN_ROOT', '/opt/nbne/deek/deploy'),
                          'amazon_ads_profiles.json')
     )
     if not _os.path.exists(path):
         # Fallback to Windows dev path
-        if _os.path.exists(r'D:\claw\amazon_ads_profiles.json'):
-            path = r'D:\claw\amazon_ads_profiles.json'
+        if _os.path.exists(r'D:\deek\amazon_ads_profiles.json'):
+            path = r'D:\deek\amazon_ads_profiles.json'
         else:
             return {'error': 'amazon_ads_profiles.json not found',
                     'tried': path, 'hint': 'pass json_path explicitly'}

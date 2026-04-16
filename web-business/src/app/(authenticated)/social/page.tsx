@@ -19,7 +19,7 @@ interface Variant {
   is_published: boolean
   published_at: string | null
   published_url: string | null
-  cairn_memory_id: string | null
+  deek_memory_id: string | null
 }
 
 interface DraftResponse {
@@ -147,7 +147,7 @@ export default function SocialPage() {
       setResponse(data)
       storeVariants(data.variants)
     } catch {
-      setGenError('Network error talking to Cairn.')
+      setGenError('Network error talking to Deek.')
     } finally {
       setGenerating(false)
     }

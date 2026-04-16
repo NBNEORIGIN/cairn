@@ -2,7 +2,7 @@
 
 ## Summary
 
-This is a promotional email from Uber offering a 40% discount on the recipient's next two trips. The email consists almost entirely of CSS styling code and media queries for responsive design, with minimal actual content visible in the source. This type of heavily-styled HTML email is common in marketing campaigns and requires careful handling in Cairn to properly extract the actual offer details and recipient information.
+This is a promotional email from Uber offering a 40% discount on the recipient's next two trips. The email consists almost entirely of CSS styling code and media queries for responsive design, with minimal actual content visible in the source. This type of heavily-styled HTML email is common in marketing campaigns and requires careful handling in Deek to properly extract the actual offer details and recipient information.
 
 ## Email Structure Analysis
 
@@ -22,11 +22,11 @@ The styling reveals several content types the email likely contains:
 - **Merchant grids** (.gr_3_merchant, .gr_4_merchant): Possibly multiple offer displays
 - **Deal layouts** (.p13n_deal_l_d_16, .p13n_deal_l_d_24): Promotional content containers
 
-## Processing in Cairn
+## Processing in Deek
 
 ### Step 1: Content Extraction
 
-When processing this email type in Cairn:
+When processing this email type in Deek:
 
 1. Strip all CSS blocks (everything between `<style>` tags or in @media queries)
 2. Locate the actual HTML body content (typically follows the CSS)
@@ -45,7 +45,7 @@ When processing this email type in Cairn:
 
 ### Step 3: Classification Tags
 
-Apply these Cairn tags:
+Apply these Deek tags:
 - Category: `promotional`
 - Sender: `uber`
 - Type: `discount_offer`

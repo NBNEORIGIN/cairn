@@ -1,5 +1,5 @@
 """
-Report generation and Cairn context endpoint for Etsy Intelligence.
+Report generation and Deek context endpoint for Etsy Intelligence.
 
 Mirrors the AMI pattern: weekly health report + context endpoint
 for the business brain dashboard.
@@ -8,9 +8,9 @@ from datetime import date, datetime
 from core.etsy_intel.db import get_conn
 
 
-def build_cairn_context() -> dict:
+def build_deek_context() -> dict:
     """
-    Build the Cairn context endpoint response.
+    Build the Deek context endpoint response.
     Called by GET /etsy/cairn/context.
     """
     shops = _get_shop_summaries()

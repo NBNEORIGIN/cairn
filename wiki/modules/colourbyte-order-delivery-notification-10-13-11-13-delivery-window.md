@@ -21,7 +21,7 @@ This article covers the standard DPD delivery notification email for Colourbyte 
 
 ### 1. Verify Delivery Expectations
 
-- Cross-reference the tracking number against any open Colourbyte purchase orders in Cairn
+- Cross-reference the tracking number against any open Colourbyte purchase orders in Deek
 - Confirm the delivery address matches the intended NBNE location
 - Check if the time window conflicts with site access restrictions or planned outages
 
@@ -42,7 +42,7 @@ This article covers the standard DPD delivery notification email for Colourbyte 
 
 ### 4. Post-Delivery Actions
 
-- Log receipt in Cairn asset management system
+- Log receipt in Deek asset management system
 - File the tracking number with the associated purchase order
 - Update any relevant work orders or project tickets
 
@@ -82,7 +82,7 @@ The email promotes the DPD app and preference management. For NBNE sites with re
 
 ## Related Topics
 
-- **[Cairn Asset Management] - Receiving and Logging Equipment Deliveries**
+- **[Deek Asset Management] - Receiving and Logging Equipment Deliveries**
 - **[Vendor Management] - Colourbyte Supplier Profile and Standard Lead Times**
 - **[Site Access Procedures] - Coordinating Third-Party Deliveries**
 - **[DPD Tracking Integration] - Automated Parcel Status Updates**

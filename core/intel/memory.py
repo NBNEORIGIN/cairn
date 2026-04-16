@@ -8,7 +8,7 @@ Used by:
     - The ``retrieve_similar_decisions`` chat tool via ``retrieve_similar``.
 
 Embeddings are produced by ``core.wiki.embeddings.get_embed_fn`` — the
-same cascading Ollama → OpenAI → DeepSeek provider the rest of Cairn
+same cascading Ollama → OpenAI → DeepSeek provider the rest of Deek
 uses. The class accepts an injected ``embed_fn`` so tests can pass a
 deterministic fake without patching providers.
 """
@@ -31,7 +31,7 @@ class CounterfactualMemory:
 
     Thread-safety: each public method opens and closes its own
     connection, so the instance is safe to share across request
-    handlers in the cairn-api process.
+    handlers in the deek-api process.
     """
 
     def __init__(
@@ -412,7 +412,7 @@ class CounterfactualMemory:
                         cur=cur,
                         vec=vec,
                         top_k=max(1, int(related_wiki_top_k)),
-                        project_ids=wiki_project_ids or ['claw'],
+                        project_ids=wiki_project_ids or ['deek'],
                     )
 
         results: list[dict] = []

@@ -1,6 +1,6 @@
 {
   "name": "NBNE Business Brain",
-  "description": "NBNE business operations — process knowledge, manufacturing, ledger, marketing. Staff-facing Q&A via cairn.nbnesigns.co.uk",
+  "description": "NBNE business operations — process knowledge, manufacturing, ledger, marketing. Staff-facing Q&A via deek.nbnesigns.co.uk",
   "project_type": "business",
   "force_model": "api",
 
@@ -37,5 +37,5 @@
     "include_extensions": [".md", ".txt"]
   },
 
-  "wiki_source_projects": ["claw"]
+  "wiki_source_projects": ["deek"]
 }

@@ -1,5 +1,5 @@
 """
-Cairn Social drafter — assembles prompts and calls Claude.
+Deek Social drafter — assembles prompts and calls Claude.
 
 Two entry points:
   draft_from_brief(brief, platforms, ...)   — Jo's short prompt → drafts in her voice
@@ -8,7 +8,7 @@ Two entry points:
 A third helper:
   refine_variant(variant, instruction, ...) — chat-style refinement of one variant
 
-All Claude calls go through claude-sonnet-4-6 (per CAIRN_SOCIAL_V2_HANDOFF.md
+All Claude calls go through claude-sonnet-4-6 (per DEEK_SOCIAL_V2_HANDOFF.md
 correction B). Cost is logged via /costs/log by the route layer — this module
 just returns usage data alongside the response.
 """
@@ -30,8 +30,8 @@ from .voice_guide import (
     VOICE_GUIDE,
 )
 
-# Per CAIRN_SOCIAL_V2_HANDOFF.md correction B:
-DEFAULT_MODEL = os.getenv('CAIRN_SOCIAL_MODEL', 'claude-sonnet-4-6')
+# Per DEEK_SOCIAL_V2_HANDOFF.md correction B:
+DEFAULT_MODEL = os.getenv('DEEK_SOCIAL_MODEL') or os.getenv('CAIRN_SOCIAL_MODEL', 'claude-sonnet-4-6')
 
 # Approximate sonnet rates in GBP per 1M tokens (per CLAUDE.md cost table)
 PRICE_INPUT_GBP_PER_M = 0.24
@@ -55,7 +55,7 @@ def _client():
     if not api_key:
         raise RuntimeError(
             "Neither OPENROUTER_API_KEY nor ANTHROPIC_API_KEY is set — "
-            "Cairn Social cannot draft posts"
+            "Deek Social cannot draft posts"
         )
     return anthropic.Anthropic(api_key=api_key), False
 
@@ -112,7 +112,7 @@ def build_system_prompt(
 
     if mode == 'brief':
         task_intro = (
-            "You are Cairn Social, a drafting tool for NBNE (a sign-making "
+            "You are Deek Social, a drafting tool for NBNE (a sign-making "
             "business in Alnwick, Northumberland, run by Jo Fletcher and her "
             "team). Jo will give you a short brief about something she wants "
             "to post. Your job is to draft posts in Jo's voice for each "
@@ -122,7 +122,7 @@ def build_system_prompt(
         )
     else:  # proofread
         task_intro = (
-            "You are Cairn Social, acting as a proof-reader and editor for "
+            "You are Deek Social, acting as a proof-reader and editor for "
             "Jo Fletcher at NBNE (a sign-making business in Alnwick, "
             "Northumberland). Jo will give you a finished post she has "
             "already written. Your job is to produce a polished version of "
@@ -177,7 +177,7 @@ def _parse_json_response(text: str) -> dict[str, Any]:
         return json.loads(cleaned)
     except json.JSONDecodeError as exc:
         raise RuntimeError(
-            f"Cairn Social: model did not return valid JSON. Raw response: {text[:500]}"
+            f"Deek Social: model did not return valid JSON. Raw response: {text[:500]}"
         ) from exc
 
 
@@ -336,7 +336,7 @@ def refine_variant(
         raise ValueError("Refinement instruction is empty")
 
     system_prompt = (
-        "You are Cairn Social, refining a single social media post draft for "
+        "You are Deek Social, refining a single social media post draft for "
         "Jo at NBNE. Apply Jo's instruction to the previous draft. Return "
         "only the refined post text — no JSON, no commentary, no markdown "
         "fences. Preserve Jo's voice exactly per the voice guide below.\n\n"

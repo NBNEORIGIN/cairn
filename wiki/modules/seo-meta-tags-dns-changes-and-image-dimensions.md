@@ -1,6 +1,6 @@
 # SEO Meta Tags, DNS Changes, and Image Dimensions
 
-This article addresses three common client queries that often arrive together during website setup: the correct format for SEO meta tag content, the steps required after DNS A record changes are completed, and the standard image dimensions for Cairn sites. These questions typically come from marketing teams preparing content for launch.
+This article addresses three common client queries that often arrive together during website setup: the correct format for SEO meta tag content, the steps required after DNS A record changes are completed, and the standard image dimensions for Deek sites. These questions typically come from marketing teams preparing content for launch.
 
 ## SEO Meta Tag Text Format
 
@@ -50,8 +50,8 @@ When a client reports their A record has been updated and the domain now resolve
    - Add the new domain as a ServerAlias in the relevant VirtualHost configuration
    - Include both www and non-www variants if required
 
-3. **Update Cairn site settings**
-   - Log into Cairn admin
+3. **Update Deek site settings**
+   - Log into Deek admin
    - Navigate to Site Settings → Domain Configuration
    - Add the new domain to the permitted domains list
    - Set as primary domain if appropriate
@@ -74,7 +74,7 @@ When a client reports their A record has been updated and the domain now resolve
 - **Hardcoded URLs**: Check for absolute URLs in content that reference old domain
 - **Session cookies**: May need to clear for admin access on new domain
 
-## Image Dimensions for Cairn Sites
+## Image Dimensions for Deek Sites
 
 Standard image dimensions vary by template and placement. Provide clients with these specifications:
 
@@ -102,18 +102,18 @@ Standard image dimensions vary by template and placement. Provide clients with t
 
 ### General Guidelines
 
-- Always provide images larger than display size - Cairn will resize down
+- Always provide images larger than display size - Deek will resize down
 - Use 72 DPI for web (not print resolution)
 - Compress images before upload using tools like TinyPNG or ImageOptim
 - Modern formats (WebP, AVIF) preferred if browser support allows
 
-> **Tip:** Create a template dimensions document customised for each client's specific template. Different Cairn themes may have different optimal sizes.
+> **Tip:** Create a template dimensions document customised for each client's specific template. Different Deek themes may have different optimal sizes.
 
 ## Related Topics
 
 - **DNS Configuration Guide** - Comprehensive DNS setup instructions
 - **SSL Certificate Management** - Let's Encrypt configuration and renewal
-- **Cairn Site Settings** - Complete admin interface guide
+- **Deek Site Settings** - Complete admin interface guide
 - **Image Optimisation Best Practices** - Compression and format selection
 - **VirtualHost Configuration** - Apache/nginx setup for multiple domains
-- **SEO Best Practices for Cairn Sites** - Complete on-page SEO guide
+- **SEO Best Practices for Deek Sites** - Complete on-page SEO guide

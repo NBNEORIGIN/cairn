@@ -1,7 +1,7 @@
 """
 Amazon Intelligence — Analytics API routes.
 
-Mounted at /ami/analytics/* in the Cairn FastAPI app.
+Mounted at /ami/analytics/* in the Deek FastAPI app.
 Source of truth: ami_orders (revenue), ami_daily_traffic (sessions/traffic),
 ami_velocity (computed velocity + alerts).
 

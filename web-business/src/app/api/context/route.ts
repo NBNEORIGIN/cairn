@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server'
-import { CAIRN_API_URL, CAIRN_API_KEY } from '@/lib/api'
+import { DEEK_API_URL, DEEK_API_KEY } from '@/lib/api'
 
 /**
- * Module registry — auto-discovered from Cairn project configs + known endpoints.
+ * Module registry — auto-discovered from Deek project configs + known endpoints.
  * Each module has a name (display), key (data key), and a url to poll.
  *
  * To add a new module: add an entry here. The dashboard renders whatever responds.
@@ -14,13 +14,13 @@ interface ModuleSpec {
   url: string
 }
 
-// Build module list: Cairn API internal endpoints + external module endpoints
+// Build module list: Deek API internal endpoints + external module endpoints
 function getModules(): ModuleSpec[] {
-  const cairn = CAIRN_API_URL
+  const cairn = DEEK_API_URL
   return [
-    // Amazon Intelligence — built into Cairn API
+    // Amazon Intelligence — built into Deek API
     { key: 'amazon', name: 'Amazon Intelligence', url: `${cairn}/ami/cairn/context` },
-    // Etsy Intelligence — built into Cairn API
+    // Etsy Intelligence — built into Deek API
     { key: 'etsy', name: 'Etsy Sales', url: `${cairn}/etsy/cairn/context` },
     // Manufacturing — standalone module (when deployed)
     { key: 'manufacture', name: 'Manufacturing', url: 'http://host.docker.internal:8015/api/cairn/context' },
@@ -51,8 +51,8 @@ async function fetchModule(spec: ModuleSpec): Promise<ModuleResult> {
       signal: controller.signal,
       cache: 'no-store',
       headers: {
-        'X-API-Key': CAIRN_API_KEY,
-        'Authorization': `Bearer ${CAIRN_API_KEY}`,
+        'X-API-Key': DEEK_API_KEY,
+        'Authorization': `Bearer ${DEEK_API_KEY}`,
       },
     })
     clearTimeout(timer)

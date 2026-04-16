@@ -1,1 +1,1 @@
-"""Wiki compilation and indexing layer for Cairn."""
+"""Wiki compilation and indexing layer for Deek."""

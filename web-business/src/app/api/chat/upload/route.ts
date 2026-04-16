@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
-import { CAIRN_API_URL, CAIRN_API_KEY } from '@/lib/api'
+import { DEEK_API_URL, DEEK_API_KEY } from '@/lib/api'
 import { AUTH_COOKIE_NAME, isTokenExpired } from '@/lib/auth'
 
 /**
@@ -8,8 +8,8 @@ import { AUTH_COOKIE_NAME, isTokenExpired } from '@/lib/auth'
  * - .csv (business report) → AMI business report parser
  * - .xlsm (flatfile) → AMI flatfile parser
  * - .xlsx (advertising) → AMI advertising parser
- * - .txt/.md → Cairn memory (document)
- * - .pdf/.docx → Cairn memory (document, text extraction placeholder)
+ * - .txt/.md → Deek memory (document)
+ * - .pdf/.docx → Deek memory (document, text extraction placeholder)
  */
 
 interface UploadResult {
@@ -82,9 +82,9 @@ async function handleAmiUpload(
   upstream.append('file', file, filename)
 
   try {
-    const res = await fetch(`${CAIRN_API_URL}${route.endpoint}`, {
+    const res = await fetch(`${DEEK_API_URL}${route.endpoint}`, {
       method: 'POST',
-      headers: { 'X-API-Key': CAIRN_API_KEY },
+      headers: { 'X-API-Key': DEEK_API_KEY },
       body: upstream,
     })
 
@@ -112,7 +112,7 @@ async function handleAmiUpload(
     return NextResponse.json({
       success: false,
       type: route.source_type,
-      summary: `${route.label} upload failed — Cairn API unreachable`,
+      summary: `${route.label} upload failed — Deek API unreachable`,
     })
   }
 }
@@ -130,10 +130,10 @@ async function handleMemoryUpload(
   const preview = text.slice(0, 500)
 
   try {
-    const res = await fetch(`${CAIRN_API_URL}/memory/write`, {
+    const res = await fetch(`${DEEK_API_URL}/memory/write`, {
       method: 'POST',
       headers: {
-        'X-API-Key': CAIRN_API_KEY,
+        'X-API-Key': DEEK_API_KEY,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -164,7 +164,7 @@ async function handleMemoryUpload(
     return NextResponse.json({
       success: false,
       type: 'document',
-      summary: `Failed to save ${filename} — Cairn API unreachable`,
+      summary: `Failed to save ${filename} — Deek API unreachable`,
     })
   }
 }

@@ -9,12 +9,12 @@ live hybrid-search HTTP call into the CRM's own ``/api/cairn/search``
 endpoint and formats the results for the chat loop.
 
 Auth:
-    Server-to-server via a Bearer token matching ``CAIRN_API_KEY`` —
+    Server-to-server via a Bearer token matching ``DEEK_API_KEY`` —
     same token on both sides, enforced by the CRM's middleware.ts.
     See NBNEORIGIN/crm commit 3d052cd.
 
 Config:
-    CAIRN_API_KEY    — shared bearer (required; empty disables the tool)
+    DEEK_API_KEY    — shared bearer (required; empty disables the tool)
     CRM_BASE_URL     — default https://crm.nbnesigns.co.uk
 
 Source types the tool can filter by (mirrors
@@ -28,7 +28,7 @@ Source types the tool can filter by (mirrors
     email     — Indexed email subjects + bodies
 
 Matches the shape of the existing ``search_wiki`` / ``search_emails``
-tools in cairn_tools.py so the chat loop handles it identically.
+tools in deek_tools.py so the chat loop handles it identically.
 """
 from __future__ import annotations
 
@@ -64,12 +64,12 @@ def _search_crm(
         limit = 5
     limit = max(1, min(limit, 20))
 
-    token = os.getenv('CAIRN_API_KEY', '').strip()
+    token = (os.getenv('DEEK_API_KEY') or os.getenv('CAIRN_API_KEY') or os.getenv('CLAW_API_KEY', '')).strip()
     if not token:
         return (
-            'CRM search unavailable: CAIRN_API_KEY is not set. '
+            'CRM search unavailable: DEEK_API_KEY is not set. '
             'This tool calls the CRM server-to-server with a shared '
-            'token — set CAIRN_API_KEY in the cairn-api env to enable.'
+            'token — set DEEK_API_KEY in the deek-api env to enable.'
         )
 
     base_url = os.getenv('CRM_BASE_URL', CRM_DEFAULT_BASE_URL).rstrip('/')
@@ -99,9 +99,9 @@ def _search_crm(
 
     if response.status_code == 401:
         return (
-            'CRM search unauthorized: the Bearer token in CAIRN_API_KEY '
+            'CRM search unauthorized: the Bearer token in DEEK_API_KEY '
             'was rejected by the CRM middleware. Check that the token '
-            'on this side matches the CAIRN_API_KEY in the CRM container.'
+            'on this side matches the DEEK_API_KEY in the CRM container.'
         )
     if response.status_code == 429:
         return 'CRM search rate-limited (429) — retry in a moment.'

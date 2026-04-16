@@ -1,25 +1,25 @@
 """
-Backfill crm_embeddings in the cairn-db/crm database.
+Backfill crm_embeddings in the deek-db/crm database.
 
 Ports the text extraction logic from D:/crm/lib/cairn-indexer.ts into
-Python and drives it from Cairn's infrastructure, so we don't need
+Python and drives it from Deek's infrastructure, so we don't need
 a TypeScript runtime on the Hetzner host. Called after the
-pg_dump + pg_restore cutover from nbne_crm → cairn-db/crm wiped the
+pg_dump + pg_restore cutover from nbne_crm → deek-db/crm wiped the
 embeddings table.
 
-Usage (inside the Hetzner cairn-api container):
+Usage (inside the Hetzner deek-api container):
 
-    docker exec deploy-cairn-api-1 \\
-        env CRM_DATABASE_URL="postgresql://cairn:PASSWORD@cairn-db:5432/crm" \\
+    docker exec deploy-deek-api-1 \\
+        env CRM_DATABASE_URL="postgresql://cairn:PASSWORD@deek-db:5432/crm" \\
             OPENAI_API_KEY="sk-..." \\
         python /app/scripts/crm_embeddings_backfill.py
 
-Or from the dev box against any cairn-db/crm reachable by psycopg2:
+Or from the dev box against any deek-db/crm reachable by psycopg2:
 
     python scripts/crm_embeddings_backfill.py
 
 Environment variables:
-    CRM_DATABASE_URL   Required. Points at cairn-db/crm.
+    CRM_DATABASE_URL   Required. Points at deek-db/crm.
     OPENAI_API_KEY     Required. Passed to openai client.
     CRM_BACKFILL_BATCH Optional. Embeddings per OpenAI request. Default 50.
     CRM_BACKFILL_LIMIT Optional. Max rows per source_type. Default None
@@ -279,7 +279,7 @@ def process_source(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description='Backfill crm_embeddings for the Cairn CRM hybrid search layer',
+        description='Backfill crm_embeddings for the Deek CRM hybrid search layer',
     )
     parser.add_argument(
         '--source',

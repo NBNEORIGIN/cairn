@@ -5,7 +5,7 @@ Generates embeddings for listing text fields (title, bullets, description, combi
 using the shared embedding provider (nomic-embed-text via Ollama, or OpenAI fallback).
 Stores in ami_listing_embeddings with change detection via text hashing.
 
-768-dim vectors matching the existing Cairn pgvector schema.
+768-dim vectors matching the existing Deek pgvector schema.
 """
 import hashlib
 import json

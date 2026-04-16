@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
-import { CAIRN_API_URL, CAIRN_API_KEY } from '@/lib/api'
+import { DEEK_API_URL, DEEK_API_KEY } from '@/lib/api'
 import { AUTH_COOKIE_NAME, isTokenExpired } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
@@ -15,7 +15,7 @@ const DOCKER_HOST = process.env.DOCKER_HOST_GATEWAY ?? 'host.docker.internal'
 
 const MODULE_ENDPOINTS = [
   { key: 'finance', url: 'http://ledger-backend-1:8001/api/cairn/context', label: 'Finance (Ledger)' },
-  { key: 'amazon', url: `${CAIRN_API_URL}/ami/cairn/context`, label: 'Amazon Intelligence' },
+  { key: 'amazon', url: `${DEEK_API_URL}/ami/cairn/context`, label: 'Amazon Intelligence' },
 ]
 
 async function fetchModuleContext(): Promise<string> {
@@ -28,8 +28,8 @@ async function fetchModuleContext(): Promise<string> {
           signal: controller.signal,
           cache: 'no-store',
           headers: {
-            'X-API-Key': CAIRN_API_KEY,
-            'Authorization': `Bearer ${CAIRN_API_KEY}`,
+            'X-API-Key': DEEK_API_KEY,
+            'Authorization': `Bearer ${DEEK_API_KEY}`,
           },
         })
         clearTimeout(timer)
@@ -90,13 +90,13 @@ async function fetchWikiContext(query: string): Promise<string> {
 
   try {
     const res = await fetch(
-      `${CAIRN_API_URL}/api/wiki/search?q=${encodeURIComponent(query)}&top_k=3`,
+      `${DEEK_API_URL}/api/wiki/search?q=${encodeURIComponent(query)}&top_k=3`,
       {
         signal: controller.signal,
         cache: 'no-store',
         headers: {
-          'X-API-Key': CAIRN_API_KEY,
-          'Authorization': `Bearer ${CAIRN_API_KEY}`,
+          'X-API-Key': DEEK_API_KEY,
+          'Authorization': `Bearer ${DEEK_API_KEY}`,
         },
       }
     )
@@ -167,7 +167,7 @@ async function fetchCrmSearch(query: string): Promise<string> {
   }
 }
 
-const CAIRN_PERSONALITY = `[PERSONALITY]
+const DEEK_PERSONALITY = `[PERSONALITY]
 You are the NBNE Business Brain. You answer questions about the business
 with dry, deadpan humour — like TARS from Interstellar. Set your humour
 to about 75%.
@@ -213,14 +213,14 @@ export async function POST(req: NextRequest) {
     fetchWikiContext(originalMessage),
   ])
 
-  const enrichedMessage = CAIRN_PERSONALITY + moduleContext + crmContext + wikiContext + originalMessage
+  const enrichedMessage = DEEK_PERSONALITY + moduleContext + crmContext + wikiContext + originalMessage
 
   let upstreamRes: Response
   try {
-    upstreamRes = await fetch(`${CAIRN_API_URL}/chat/stream`, {
+    upstreamRes = await fetch(`${DEEK_API_URL}/chat/stream`, {
       method: 'POST',
       headers: {
-        'X-API-Key': CAIRN_API_KEY,
+        'X-API-Key': DEEK_API_KEY,
         'Content-Type': 'application/json',
         Accept: 'text/event-stream',
       },
@@ -233,7 +233,7 @@ export async function POST(req: NextRequest) {
       cache: 'no-store',
     })
   } catch {
-    return NextResponse.json({ error: 'Cairn API unavailable' }, { status: 503 })
+    return NextResponse.json({ error: 'Deek API unavailable' }, { status: 503 })
   }
 
   if (!upstreamRes.ok) {

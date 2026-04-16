@@ -161,7 +161,8 @@
       "Bash(git push:*)",
       "Bash(ssh:*)",
       "Bash(xargs grep:*)",
-      "Bash(find /d/nbne_business/nbne_production -name *.conf -o -name nginx*)"
+      "Bash(find /d/nbne_business/nbne_production -name *.conf -o -name nginx*)",
+      "Bash(pip show:*)"
     ]
   }
 }

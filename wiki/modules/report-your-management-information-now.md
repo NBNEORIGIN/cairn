@@ -54,7 +54,7 @@ For example, March 2026 business must be reported by 9 April 2026.
 **Data accuracy issues:**
 
 - Ensure you're reporting the correct month's data
-- Double-check that all framework sales are included (check Cairn and accounts system)
+- Double-check that all framework sales are included (check Deek and accounts system)
 - Don't include non-framework sales in the figures
 - Keep source documentation in case of audits
 
@@ -80,7 +80,7 @@ To avoid overdue situations:
 
 **If you're unsure about figures:**
 - Check with Finance team for framework sales data
-- Review Cairn for relevant customer orders
+- Review Deek for relevant customer orders
 - It's better to submit an estimate on time and correct later than miss the deadline
 
 ## Who Is Responsible?

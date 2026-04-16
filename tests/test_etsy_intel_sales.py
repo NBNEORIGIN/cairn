@@ -8,7 +8,7 @@ cross-module read. It is explicitly authenticated via the existing
 /etsy/* routes are currently unauthenticated.
 
 The test suite uses a minimal FastAPI app that mounts only the etsy
-router — the heavier `client` fixture in `test_claw.py` loads all
+router — the heavier `client` fixture in `test_deek.py` loads all
 projects and mocks Claude, which is overkill for a single DB-backed
 endpoint.
 """

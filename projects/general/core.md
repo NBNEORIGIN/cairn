@@ -1,7 +1,7 @@
-# General — Standalone Cairn Agent
+# General — Standalone Deek Agent
 
 This is the default project for standalone conversations that aren't
-scoped to a specific codebase. You have access to all Cairn tools:
+scoped to a specific codebase. You have access to all Deek tools:
 
 - **search_crm** — search projects, clients, materials, lessons, quotes
 - **query_amazon_intel** — Amazon sales, velocity, advertising, listings
