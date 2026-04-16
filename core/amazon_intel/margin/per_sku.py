@@ -278,12 +278,13 @@ def bucket_margins(margins: list[SkuMargin]) -> dict:
     quartiles, but drops SKUs without a computed margin.
     """
     scored = [m for m in margins if m.net_margin_pct is not None]
+    all_net_rev = round(sum((float(m.net_revenue) for m in margins), 0.0), 2)
     if not scored:
         return {
             'total_skus': len(margins),
             'scored_skus': 0,
             'buckets': {'healthy': 0, 'thin': 0, 'unprofitable': 0, 'unknown': len(margins)},
-            'total_net_revenue': 0.0,
+            'total_net_revenue': all_net_rev,
             'total_net_profit': 0.0,
         }
     healthy = thin = unprofitable = 0
@@ -295,7 +296,9 @@ def bucket_margins(margins: list[SkuMargin]) -> dict:
             thin += 1
         else:
             unprofitable += 1
-    total_net_rev = sum((float(m.net_revenue) for m in scored), 0.0)
+    # Revenue includes ALL SKUs (it's a fact, not dependent on margin calc).
+    # Profit only includes scored SKUs (requires COGS to compute).
+    total_net_rev = sum((float(m.net_revenue) for m in margins), 0.0)
     total_net_profit = sum((float(m.net_profit or 0) for m in scored), 0.0)
     return {
         'total_skus': len(margins),
