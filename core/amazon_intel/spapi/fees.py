@@ -69,13 +69,16 @@ def get_price_points(marketplace: str, lookback_days: int = 30) -> list[tuple[st
     """
     from ..margin.quartile_brief import MARKETPLACE_ALIASES
     codes = MARKETPLACE_ALIASES.get(marketplace.upper(), [marketplace.upper()])
+    # item_price_amount is the ORDER LINE total (unit_price × quantity).
+    # Divide by quantity to get per-unit price for fee estimation.
     sql = """
-        SELECT asin, item_price_amount
+        SELECT asin, item_price_amount / NULLIF(quantity, 0) AS unit_price
         FROM ami_orders
         WHERE marketplace = ANY(%s)
           AND asin IS NOT NULL AND asin <> ''
           AND item_price_amount IS NOT NULL
           AND item_price_amount > 0
+          AND quantity > 0
           AND order_date >= (CURRENT_DATE - (%s || ' days')::interval)
     """
     rows_by_asin: dict[str, list[float]] = {}
@@ -83,7 +86,8 @@ def get_price_points(marketplace: str, lookback_days: int = 30) -> list[tuple[st
         with conn.cursor() as cur:
             cur.execute(sql, (codes, lookback_days))
             for asin, price in cur.fetchall():
-                rows_by_asin.setdefault(asin, []).append(float(price))
+                if price is not None:
+                    rows_by_asin.setdefault(asin, []).append(float(price))
     result: list[tuple[str, Decimal]] = []
     for asin, prices in rows_by_asin.items():
         med = statistics.median(prices)
