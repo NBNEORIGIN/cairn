@@ -16,7 +16,7 @@
  * cache. sw.js is not versioned by next/static so we handle it here.
  */
 
-const CACHE_VERSION = 'cairn-v1';
+const CACHE_VERSION = 'deek-v1';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 

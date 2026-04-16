@@ -76,7 +76,7 @@ export default function RootLayout({
         <div className="flex min-h-0 flex-1 flex-col">{children}</div>
         {/* Service worker registration — runs after hydration, strategy
             "afterInteractive" so it never blocks the first paint. */}
-        <Script id="cairn-sw-register" strategy="afterInteractive">
+        <Script id="deek-sw-register" strategy="afterInteractive">
           {`
             if ('serviceWorker' in navigator) {
               window.addEventListener('load', function() {

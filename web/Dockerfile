@@ -1,4 +1,4 @@
-# Cairn web UI — Next.js 14 production image.
+# Deek web UI — Next.js 14 production image.
 #
 # Two-stage build:
 #   1. builder  — install deps, run `next build` with output: 'standalone'
@@ -22,17 +22,17 @@ COPY . .
 # Cache-bust the build layer when the caller passes a fresh commit hash
 # (same pattern as deploy/Dockerfile.api). Default 'dev' caches normally.
 ARG GIT_COMMIT=dev
-RUN echo "cairn-web build git_commit=${GIT_COMMIT}" > /app/.build_commit
+RUN echo "deek-web build git_commit=${GIT_COMMIT}" > /app/.build_commit
 
 # Next.js inlines process.env.* into route handler code at build time.
 # These defaults work inside the Docker network; the runner stage env
 # vars override at runtime for any values that Next reads lazily.
-ARG CLAW_API_URL=http://cairn-api:8765
-ARG CLAW_API_KEY=claw-dev-key-change-in-production
-ENV CLAW_API_URL=${CLAW_API_URL}
-ENV CLAW_API_KEY=${CLAW_API_KEY}
-ENV CAIRN_API_URL=${CLAW_API_URL}
-ENV CAIRN_API_KEY=${CLAW_API_KEY}
+ARG DEEK_API_URL=http://deek-api:8765
+ARG DEEK_API_KEY=deek-dev-key-change-in-production
+ENV DEEK_API_URL=${DEEK_API_URL}
+ENV DEEK_API_KEY=${DEEK_API_KEY}
+ENV CLAW_API_URL=${DEEK_API_URL}
+ENV CLAW_API_KEY=${DEEK_API_KEY}
 
 RUN npm run build
 

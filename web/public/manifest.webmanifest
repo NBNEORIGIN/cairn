@@ -1,6 +1,6 @@
 {
-  "name": "Cairn — Sovereign AI Agent",
-  "short_name": "Cairn",
+  "name": "Deek — Sovereign AI Agent",
+  "short_name": "Deek",
   "description": "Sovereign AI agent for NBNE. Counterfactual memory, email triage, principal-developer-grade code assistance.",
   "start_url": "/",
   "scope": "/",
