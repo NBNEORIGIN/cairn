@@ -106,15 +106,17 @@ async def batch_product_data(m_numbers: list[str]) -> dict[str, dict]:
     return result
 
 
-async def get_costs_bulk(m_numbers: list[str] | None = None) -> dict[str, dict]:
+async def get_costs_bulk(m_numbers: list[str] | None = None) -> tuple[dict[str, dict], dict]:
     """
     Fetch Manufacture cost breakdown for many M-numbers in a single call.
 
-    Uses GET /api/costs/price/bulk/ (Bearer-auth). Returns dict keyed by
-    M-number with the full cost dict (cost_gbp, material_gbp, labour_gbp,
-    overhead_gbp, source, confidence, blank_raw, blank_normalized,
-    is_composite, notes). Returns empty dict if the API is unreachable or
-    unauthenticated — callers should degrade gracefully.
+    Uses GET /api/costs/price/bulk/ (Bearer-auth). Returns a tuple of:
+      (costs_by_m_number, overhead_context)
+
+    costs_by_m_number: dict keyed by M-number with cost breakdown
+    overhead_context: dict with monthly_overhead_gbp, b2b/ebay revenue, etc.
+
+    Returns (empty dict, empty dict) if the API is unreachable.
     """
     params: dict = {}
     if m_numbers:
@@ -128,9 +130,13 @@ async def get_costs_bulk(m_numbers: list[str] | None = None) -> dict[str, dict]:
                 headers=_auth_headers(),
             )
             if resp.status_code != 200:
-                return {}
+                return {}, {}
             data = resp.json() or {}
             results = data.get('results') or []
-            return {r['m_number']: r for r in results if r.get('m_number')}
+            overhead_ctx = data.get('overhead_context') or {}
+            return (
+                {r['m_number']: r for r in results if r.get('m_number')},
+                overhead_ctx,
+            )
     except (httpx.ConnectError, httpx.TimeoutException):
-        return {}
+        return {}, {}

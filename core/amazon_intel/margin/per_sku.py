@@ -173,6 +173,53 @@ def _confidence(fee_source: str, cost_source: str, is_composite: bool) -> str:
     return 'LOW'
 
 
+def _fetch_channel_revenue_summary(lookback_days: int = 30) -> dict[str, Decimal]:
+    """
+    Aggregate net revenue across all channels for overhead allocation.
+    Returns dict with keys: 'amazon_total', 'etsy', per-marketplace totals.
+    All values in GBP (Amazon marketplaces converted via VAT rate).
+    """
+    from ..vat import net_revenue as nr
+
+    out: dict[str, Decimal] = {}
+
+    # Amazon — all marketplaces
+    sql = """
+        SELECT marketplace, SUM(item_price_amount) AS gross
+        FROM ami_orders
+        WHERE asin IS NOT NULL AND asin <> ''
+          AND order_date >= CURRENT_DATE - make_interval(days => %(days)s)
+        GROUP BY marketplace
+    """
+    amazon_total = ZERO
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, {'days': lookback_days})
+            for mkt, gross in cur.fetchall():
+                if gross:
+                    net = nr(Decimal(str(gross)), mkt)
+                    out[f'amazon_{mkt}'] = net
+                    amazon_total += net
+    out['amazon_total'] = amazon_total
+
+    # Etsy
+    try:
+        sql_etsy = """
+            SELECT COALESCE(SUM(price * quantity), 0)
+            FROM etsy_sales
+            WHERE sale_date >= CURRENT_DATE - make_interval(days => %(days)s)
+        """
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql_etsy, {'days': lookback_days})
+                etsy_gross = cur.fetchone()[0] or 0
+                out['etsy'] = Decimal(str(etsy_gross)).quantize(TWO_PLACES)
+    except Exception:
+        out['etsy'] = ZERO
+
+    return out
+
+
 async def compute_margins(
     marketplace: str,
     lookback_days: int = 30,
@@ -180,6 +227,9 @@ async def compute_margins(
     """
     Compute per-SKU margins for a marketplace over the lookback window.
     Returns one SkuMargin per distinct ASIN with orders.
+
+    Overhead allocation: instead of flat per-unit overhead, allocates
+    monthly overhead proportional to each channel's share of total revenue.
     """
     orders = _fetch_orders_aggregate(marketplace, lookback_days)
     if not orders:
@@ -189,7 +239,53 @@ async def compute_margins(
     ads = _fetch_ad_spend(marketplace, lookback_days)
 
     m_numbers = sorted({v['m_number'] for v in orders.values() if v.get('m_number')})
-    costs = await get_costs_bulk(m_numbers) if m_numbers else {}
+    costs, overhead_ctx = await get_costs_bulk(m_numbers) if m_numbers else ({}, {})
+
+    # Channel-weighted overhead calculation
+    channel_rev = _fetch_channel_revenue_summary(lookback_days)
+    monthly_overhead = Decimal(str(overhead_ctx.get('monthly_overhead_gbp', 24500)))
+    b2b_rev = Decimal(str(overhead_ctx.get('b2b_monthly_revenue_gbp', 0)))
+    ebay_rev = Decimal(str(overhead_ctx.get('ebay_monthly_revenue_gbp', 0)))
+    flat_overhead = Decimal(str(overhead_ctx.get('overhead_per_unit_gbp', '6.45')))
+
+    # Scale monthly figures to match the lookback window
+    scale = Decimal(str(lookback_days)) / Decimal('30')
+    scaled_overhead = (monthly_overhead * scale).quantize(TWO_PLACES)
+    scaled_b2b = (b2b_rev * scale).quantize(TWO_PLACES)
+    scaled_ebay = (ebay_rev * scale).quantize(TWO_PLACES)
+
+    # Total revenue across ALL channels in the lookback window
+    total_rev = (
+        channel_rev.get('amazon_total', ZERO)
+        + channel_rev.get('etsy', ZERO)
+        + scaled_ebay
+        + scaled_b2b
+    )
+
+    # This marketplace's revenue + units
+    canonical = marketplace.upper()
+    aliases = _marketplace_aliases(marketplace)
+    mkt_rev = ZERO
+    for alias in aliases:
+        mkt_rev += channel_rev.get(f'amazon_{alias}', ZERO)
+
+    # Total units for this marketplace
+    mkt_units = sum(agg['units'] for agg in orders.values())
+
+    # Per-unit overhead for this marketplace
+    if total_rev > 0 and mkt_units > 0:
+        mkt_overhead_share = (mkt_rev / total_rev) if total_rev > 0 else ZERO
+        mkt_overhead_total = (scaled_overhead * mkt_overhead_share).quantize(TWO_PLACES)
+        overhead_per_unit = (mkt_overhead_total / mkt_units).quantize(TWO_PLACES)
+    else:
+        overhead_per_unit = flat_overhead  # fallback to flat rate
+
+    logger.info(
+        "Overhead allocation for %s: rev=%.0f (%.1f%% of %.0f total), "
+        "%d units, £%.2f/unit (flat was £%.2f)",
+        canonical, mkt_rev, (float(mkt_rev / total_rev * 100) if total_rev else 0),
+        total_rev, mkt_units, overhead_per_unit, flat_overhead,
+    )
 
     results: list[SkuMargin] = []
     for (asin, mkt), agg in orders.items():
@@ -210,7 +306,14 @@ async def compute_margins(
 
         cost_row = costs.get(m_number) if m_number else None
         if cost_row and cost_row.get('cost_gbp') is not None:
-            cogs_per_unit = Decimal(str(cost_row['cost_gbp']))
+            # Use material + labour from Manufacture, replace overhead with channel-weighted
+            material = Decimal(str(cost_row.get('material_gbp') or 0))
+            labour = Decimal(str(cost_row.get('labour_gbp') or 0))
+            # For overrides (source='override'), cost_gbp is all-in — use as-is
+            if cost_row.get('source') == 'override':
+                cogs_per_unit = Decimal(str(cost_row['cost_gbp']))
+            else:
+                cogs_per_unit = (material + labour + overhead_per_unit).quantize(TWO_PLACES)
             cogs_total = (cogs_per_unit * units).quantize(TWO_PLACES)
             cost_source = cost_row.get('source') or 'missing'
             is_composite = bool(cost_row.get('is_composite'))
