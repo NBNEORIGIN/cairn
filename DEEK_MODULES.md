@@ -2,7 +2,7 @@
 # NBNE Business Module API Specifications
 # Deek Context Endpoint Definitions
 # North By North East Print & Sign Ltd
-# Last updated: 29 March 2026
+# Last updated: 16 April 2026
 
 ---
 
@@ -77,7 +77,7 @@ Assertions are authored or reviewed by a human before WIGGUM is permitted
 to loop against them. Auto-generated assertions are flagged
 `reviewed: false` in the eval file and WIGGUM refuses to run improvement
 loops against unreviewed sets. This prevents optimising for a bad rubric
-overnight. WIGGUM loop contract is defined in DEEK_PROTOCOL.md.
+overnight. WIGGUM loop contract is defined in NBNE_PROTOCOL.md.
 
 ### Tiered evals
 
@@ -114,9 +114,12 @@ we have blanks for 150 units (Manufacture), current ad ROAS is 4x (Marketing)
 ### Endpoint
 
 ```
-GET /api/cairn/context
+GET /api/deek/context
 Authorization: Bearer <DEEK_API_KEY>
 ```
+
+Legacy aliases `/api/cairn/context` and `CAIRN_API_KEY` are accepted
+during the rename transition window.
 
 ### Response Schema
 
@@ -189,7 +192,7 @@ QA states: pending, approved, rejected
 ### Endpoint
 
 ```
-GET /api/cairn/context
+GET /api/deek/context
 Authorization: Bearer <DEEK_API_KEY>
 ```
 
@@ -266,7 +269,7 @@ Authorization: Bearer <DEEK_API_KEY>
 ### Endpoint
 
 ```
-GET /api/cairn/context
+GET /api/deek/context
 Authorization: Bearer <DEEK_API_KEY>
 ```
 
@@ -327,7 +330,7 @@ Once all three endpoints are live, Deek assembles them into a single business
 state snapshot for the brain:
 
 ```
-GET /api/cairn/context  (on each module)
+GET /api/deek/context  (on each module)
 → assemble into business_state
 → index into pgvector memory
 → brain reasons over business_state
@@ -367,7 +370,8 @@ Example brain output:
 ## Implementation Notes
 
 **Authentication**: All context endpoints use a shared `DEEK_API_KEY` environment
-variable. Set in each module's `.env`. Deek passes this as a Bearer token.
+variable (legacy alias `CAIRN_API_KEY` also accepted during transition). Set in
+each module's `.env`. Deek passes this as a Bearer token.
 
 **Cadence**: Deek polls context endpoints:
 - Manufacture: every 30 minutes during working hours
@@ -409,14 +413,14 @@ endpoints now. Run the brain when the hardware is ready.
 
 ## Cost Tracking Module
 
-**Module**: Deek internal (not a separate app — built into Deek API)
+**Module**: Deek internal (not a separate app -- built into Deek API)
 **Purpose**: Track API and local model costs per prompt, per session, per project
 **Priority**: Implement alongside the MCP server (low complexity, high value)
 
 ### Context Endpoint
 
 ```
-GET /api/cairn/context  (internal — Deek queries itself)
+GET /api/deek/context  (internal -- Deek queries itself)
 ```
 
 ### Response Schema
@@ -435,7 +439,7 @@ GET /api/cairn/context  (internal — Deek queries itself)
       "openai_fallback": 0.00
     },
     "by_project": {
-      "deek": 0.44,
+      "claw": 0.44,
       "phloe": 0.62,
       "render": 0.18
     },
@@ -477,7 +481,7 @@ target hardware profiles that feed this calculation.
 
 ## Hardware Configuration
 
-DEEK reads `DEEK_HARDWARE_PROFILE` from environment to determine routing
+Deek reads `DEEK_HARDWARE_PROFILE` from environment to determine routing
 behaviour. The routing matrix itself lives in CLAUDE.md under Task Breadth
 Classifier. This section describes the hardware states it resolves against.
 

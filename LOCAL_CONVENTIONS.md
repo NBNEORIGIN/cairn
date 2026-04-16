@@ -10,8 +10,8 @@
 ## Purpose
 
 This file exists because the previous arrangement — conventions implied by
-multiple overlapping documents (CLAUDE.md, DEEK_PROTOCOL.md,
-DEEK_MODULES.md) — produced inconsistencies between intent and reality.
+multiple overlapping documents (CLAUDE.md, NBNE_PROTOCOL.md,
+DEEK_MODULES.md) -- produced inconsistencies between intent and reality.
 A fresh Claude Code session must be able to read this one file and know,
 without ambiguity, where things live and what they are called.
 
@@ -27,9 +27,9 @@ Pick a project key for a new project and never change it casually.
 
 | Key | Long name | Status | Notes |
 |---|---|---|---|
-| `deek` | Central brain (formerly cairn, formerly deek) | Active | Rename in progress; aliases below |
+| `deek` | Central brain (formerly cairn, formerly claw) | Active | Rename in progress; aliases below |
 | `cairn` | — | Alias for `deek` | Accepted during rename window; remove after Phase 3 |
-| `deek` | — | Alias for `deek` | Legacy; remove on next pass |
+| `claw` | — | Alias for `deek` | Legacy; remove on next pass |
 | `manufacture` | Manufacture app | Active | |
 | `phloe` | Phloe WaaS booking platform | Active | |
 | `render` | Render product publishing app | Active | |
@@ -85,8 +85,8 @@ https://<key>.nbnesigns.co.uk          Public URL for each module
 ```
 
 Examples: `manufacture.nbnesigns.co.uk`, `phloe.nbnesigns.co.uk`,
-`deek.nbnesigns.co.uk` (post-rename), `deek.nbnesigns.co.uk` (legacy alias
-during rename window).
+`deek.nbnesigns.co.uk`, `cairn.nbnesigns.co.uk` (legacy alias accepted
+during rename transition).
 
 ---
 
@@ -98,7 +98,7 @@ The canonical port map going forward is based on production reality:
 
 | Module | Backend | Frontend | Notes |
 |---|---|---|---|
-| Deek (Deek) API | 8765 | 3020 | Brain — never moves |
+| Deek API | 8765 | 3020 | Brain -- never moves |
 | Manufacture | 8015 | 3015 | Production reality |
 | Render | 8025 | — | Flask, single port |
 | CRM | 3023 | — | Next.js via PM2, single port |
@@ -140,7 +140,7 @@ docker compose -p <key> -f docker/docker-compose.yml up -d
 ```
 
 This produces container names like `manufacture-backend-1`,
-`deek-deek-api-1`, etc. Migrate existing modules during the next
+`deek-api-1`, etc. Migrate existing modules during the next
 maintenance window per module.
 
 **Migration checklist per module:**
@@ -204,14 +204,13 @@ authentication breaks:
 
 | Var | Purpose | Notes |
 |---|---|---|
-| `DEEK_API_KEY` | Bearer auth between modules and brain | Currently accepts `DEEK_API_KEY` as alias |
-| `DEEK_API_KEY` | Same as above | Will become canonical post-rename |
-| `DEEK_API_URL` | Brain API base URL | `http://deploy-deek-api-1:8765` from inside compose network |
+| `DEEK_API_KEY` | Bearer auth between modules and brain | Canonical. Fallback aliases: `CAIRN_API_KEY`, `CLAW_API_KEY` (remove after Phase 3) |
+| `DEEK_API_URL` | Brain API base URL | `http://deek-api-1:8765` from inside compose network. Fallback alias: `CAIRN_API_URL` |
 
-**Rule during rename window:** code reads either `DEEK_API_KEY` or
-`DEEK_API_KEY` (in that priority order), accepts whichever is set. Same
-pattern for `*_API_URL`. New code writes `DEEK_*` only. After Phase 3 of the
-rename (per discipline doc §8.4), `DEEK_*` fallbacks are removed.
+**Rule during rename window:** code reads `DEEK_API_KEY` first, falling back
+to `CAIRN_API_KEY` if not set. Same pattern for `*_API_URL`. New code uses
+`DEEK_*` exclusively. After Phase 3 of the rename, `CAIRN_*` fallbacks are
+removed.
 
 ---
 

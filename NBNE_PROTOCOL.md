@@ -34,7 +34,7 @@ language. The model bridges the gap between plain English and execution.
 The GUI was a thirty-year detour necessitated by the fact that computers
 couldn't understand people.
 
-Deek (the brain, formerly Deek) inherits that lineage directly. The
+Deek (the brain, formerly Cairn) inherits that lineage directly. The
 shell is the execution layer. Claude Code (or any MCP-compatible agent)
 is the intent interpreter. Deek's memory is the accumulating
 institutional knowledge — a developer who has memorised every decision,
@@ -206,11 +206,12 @@ Unacceptable examples:
 - `"Task seemed simple"` — simple tasks are exactly what to delegate
 - `"Continuation of previous work"` — momentum is not a reason
 
-**Rule 1b — Cross-module delegation via `deek_delegate`**
+**Rule 1b -- Cross-module delegation via `deek_delegate`**
 
-Where work is mechanical — CRUD endpoints, SQL query builders, test
-scaffolding, structured reviews, prose extraction, classification —
-delegate to a cheaper tier via `deek_delegate`:
+Where work is mechanical -- CRUD endpoints, SQL query builders, test
+scaffolding, structured reviews, prose extraction, classification --
+delegate to a cheaper tier via `deek_delegate` (legacy alias
+`cairn_delegate` also accepted during transition):
 
 - `task_type="generate"` -> Grok (~0.016p/1K in, 0.04p/1K out)
 - `task_type="review" | "extract" | "classify"` -> Claude Haiku
