@@ -644,10 +644,17 @@ class DeekAgent:
                 self.memory.set_session_subproject(session_id, effective_subproject_id)
             if active_skill_ids:
                 self.memory.set_session_skills(session_id, active_skill_ids)
+            # Tool approvals send empty content — use a placeholder so the
+            # Anthropic API doesn't reject the user message as empty.
+            user_content = envelope.content or (
+                '[tool approved]' if envelope.tool_approval and envelope.tool_approval.get('approved')
+                else '[tool rejected]' if envelope.tool_approval
+                else '(empty)'
+            )
             self.memory.add_message(
                 session_id=session_id,
                 role='user',
-                content=envelope.content,
+                content=user_content,
                 channel=envelope.channel.value,
                 subproject_id=effective_subproject_id,
             )
@@ -1499,12 +1506,14 @@ class DeekAgent:
         available_tools = self._get_tools_for_task(
             envelope.content, read_only=envelope.read_only
         )
+        # Ensure the message to the LLM is never empty (Anthropic rejects it)
+        user_msg = f"{envelope.content}\n\n{tool_result_message}".strip() or tool_result_message
 
         if model_choice == ModelChoice.LOCAL:
             response_text, next_tool_call, usage = await self.ollama.chat(
                 system=context_prompt,
                 history=history,
-                message=f"{envelope.content}\n\n{tool_result_message}",
+                message=user_msg,
                 tools=available_tools,
             )
             cost_usd = 0.0
@@ -1521,7 +1530,7 @@ class DeekAgent:
                 client,
                 system=context_prompt,
                 history=history,
-                message=f"{envelope.content}\n\n{tool_result_message}",
+                message=user_msg,
                 tools=available_tools,
                 use_opus=use_opus,
             )
