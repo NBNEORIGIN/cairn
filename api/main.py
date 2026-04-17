@@ -2807,6 +2807,10 @@ app.include_router(counterparty_risk_router)
 from api.routes.delegation import router as delegation_router
 app.include_router(delegation_router)
 
+# Register Deek Analyze route (enquiry analysis endpoint for CRM)
+from api.routes.analyze import router as analyze_router
+app.include_router(analyze_router)
+
 # Best-effort: ensure social_* tables exist on startup. Failure here must
 # not block API startup — the /social/migrate endpoint can repair if needed.
 try:
