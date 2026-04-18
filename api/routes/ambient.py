@@ -91,16 +91,27 @@ class AmbientPayload(BaseModel):
 class TaskCreate(BaseModel):
     assignee: str
     content: str
-    source: str = "voice"          # voice | web | api
+    source: str = "voice"          # voice | web | api | deek
     location: Optional[str] = None
     created_by: Optional[str] = None
     due_at: Optional[datetime] = None
+    # PM extensions (optional — basic voice tasks skip these)
+    title: Optional[str] = None
+    priority: Optional[str] = None   # low | medium | high | critical
+    context: Optional[str] = None
+    linked_module: Optional[str] = None
+    linked_ref: Optional[str] = None
 
 
 class TaskPatch(BaseModel):
     status: Optional[str] = None    # open | done | cancelled
     content: Optional[str] = None
     due_at: Optional[datetime] = None
+    title: Optional[str] = None
+    priority: Optional[str] = None
+    context: Optional[str] = None
+    linked_module: Optional[str] = None
+    linked_ref: Optional[str] = None
 
 
 class Task(BaseModel):
@@ -114,6 +125,11 @@ class Task(BaseModel):
     created_at: datetime
     due_at: Optional[datetime]
     completed_at: Optional[datetime]
+    title: Optional[str] = None
+    priority: Optional[str] = None
+    context: Optional[str] = None
+    linked_module: Optional[str] = None
+    linked_ref: Optional[str] = None
 
 
 class TaskList(BaseModel):
@@ -149,7 +165,10 @@ def _get_conn():
 
 
 def _ensure_tasks_schema() -> None:
-    """Create deek_tasks if it doesn't exist. Safe to call repeatedly."""
+    """Create deek_tasks if it doesn't exist + defensive ALTERs for new columns.
+
+    Safe to call repeatedly. Idempotent.
+    """
     conn = _get_conn()
     try:
         with conn.cursor() as cur:
@@ -173,7 +192,98 @@ def _ensure_tasks_schema() -> None:
                 "CREATE INDEX IF NOT EXISTS idx_deek_tasks_assignee_status "
                 "ON deek_tasks(assignee, status)"
             )
+            # ── PM extensions (v2 brief) ─────────────────────────
+            cur.execute("ALTER TABLE deek_tasks ADD COLUMN IF NOT EXISTS title VARCHAR(200)")
+            cur.execute("ALTER TABLE deek_tasks ADD COLUMN IF NOT EXISTS priority VARCHAR(10)")
+            cur.execute("ALTER TABLE deek_tasks ADD COLUMN IF NOT EXISTS context TEXT")
+            cur.execute("ALTER TABLE deek_tasks ADD COLUMN IF NOT EXISTS linked_module VARCHAR(40)")
+            cur.execute("ALTER TABLE deek_tasks ADD COLUMN IF NOT EXISTS linked_ref VARCHAR(200)")
+
+            # Task event log for observability
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS deek_task_events (
+                    id SERIAL PRIMARY KEY,
+                    task_id INTEGER REFERENCES deek_tasks(id) ON DELETE CASCADE,
+                    event VARCHAR(30) NOT NULL,
+                    actor VARCHAR(200),
+                    detail JSONB,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_deek_task_events_task ON deek_task_events(task_id, created_at DESC)"
+            )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def _ensure_staff_schema() -> None:
+    """Create deek_staff_profile and deek_pending_briefings. Idempotent."""
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS deek_staff_profile (
+                    email VARCHAR(200) PRIMARY KEY,
+                    display_name VARCHAR(100),
+                    role_tag VARCHAR(30),
+                    briefings_enabled BOOLEAN NOT NULL DEFAULT true,
+                    briefing_time TIME NOT NULL DEFAULT '07:30',
+                    active_days VARCHAR(40) NOT NULL DEFAULT 'mon,tue,wed,thu,fri',
+                    quiet_start TIME NOT NULL DEFAULT '22:00',
+                    quiet_end TIME NOT NULL DEFAULT '06:30',
+                    preferred_voice VARCHAR(200),
+                    preferred_face VARCHAR(20),
+                    notes TEXT,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS deek_pending_briefings (
+                    id SERIAL PRIMARY KEY,
+                    email VARCHAR(200) NOT NULL,
+                    generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    briefing_md TEXT NOT NULL,
+                    seen_at TIMESTAMPTZ,
+                    dismissed_at TIMESTAMPTZ,
+                    incorrect_reason TEXT
+                )
+                """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_pending_briefings_email ON deek_pending_briefings(email, generated_at DESC)"
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _log_task_event(task_id: int, event: str, actor: str | None, detail: dict | None = None) -> None:
+    """Best-effort task-event logging. Never raises."""
+    import json as _json
+    try:
+        conn = _get_conn()
+    except Exception:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO deek_task_events (task_id, event, actor, detail)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (task_id, event, actor, _json.dumps(detail) if detail else None),
+            )
+        conn.commit()
+    except Exception:
+        pass
     finally:
         conn.close()
 
@@ -571,6 +681,27 @@ async def ambient(
 # ── Tasks ───────────────────────────────────────────────────────────────────
 
 
+def _row_to_task(row: tuple) -> "Task":
+    """Map the canonical SELECT column order to a Task model."""
+    return Task(
+        id=row[0], assignee=row[1], content=row[2], status=row[3],
+        source=row[4], location=row[5], created_by=row[6],
+        created_at=row[7], due_at=row[8], completed_at=row[9],
+        title=row[10] if len(row) > 10 else None,
+        priority=row[11] if len(row) > 11 else None,
+        context=row[12] if len(row) > 12 else None,
+        linked_module=row[13] if len(row) > 13 else None,
+        linked_ref=row[14] if len(row) > 14 else None,
+    )
+
+
+_TASK_SELECT_COLS = (
+    "id, assignee, content, status, source, location, created_by, "
+    "created_at, due_at, completed_at, title, priority, context, "
+    "linked_module, linked_ref"
+)
+
+
 @router.post("/tasks", response_model=Task)
 async def create_task(
     body: TaskCreate,
@@ -586,10 +717,15 @@ async def create_task(
             status_code=400,
             detail=f"location must be one of {sorted(VALID_LOCATIONS)}",
         )
-    if body.source not in {"voice", "web", "api"}:
+    if body.source not in {"voice", "web", "api", "deek"}:
         raise HTTPException(
             status_code=400,
-            detail="source must be 'voice', 'web', or 'api'",
+            detail="source must be 'voice', 'web', 'api', or 'deek'",
+        )
+    if body.priority and body.priority not in {"low", "medium", "high", "critical"}:
+        raise HTTPException(
+            status_code=400,
+            detail="priority must be 'low', 'medium', 'high', or 'critical'",
         )
 
     conn = _get_conn()
@@ -598,10 +734,12 @@ async def create_task(
             cur.execute(
                 """
                 INSERT INTO deek_tasks
-                    (assignee, content, source, location, created_by, due_at)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                    (assignee, content, source, location, created_by, due_at,
+                     title, priority, context, linked_module, linked_ref)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id, assignee, content, status, source, location,
-                          created_by, created_at, due_at, completed_at
+                          created_by, created_at, due_at, completed_at,
+                          title, priority, context, linked_module, linked_ref
                 """,
                 (
                     body.assignee.strip().lower(),
@@ -610,6 +748,11 @@ async def create_task(
                     body.location,
                     body.created_by,
                     body.due_at,
+                    body.title,
+                    body.priority,
+                    body.context,
+                    body.linked_module,
+                    body.linked_ref,
                 ),
             )
             row = cur.fetchone()
@@ -617,11 +760,14 @@ async def create_task(
     finally:
         conn.close()
 
-    return Task(
-        id=row[0], assignee=row[1], content=row[2], status=row[3],
-        source=row[4], location=row[5], created_by=row[6],
-        created_at=row[7], due_at=row[8], completed_at=row[9],
+    _log_task_event(
+        task_id=row[0],
+        event="created",
+        actor=body.created_by or "unknown",
+        detail={"source": body.source, "priority": body.priority, "linked": f"{body.linked_module}:{body.linked_ref}" if body.linked_module else None},
     )
+
+    return _row_to_task(row)
 
 
 @router.get("/tasks", response_model=TaskList)
@@ -647,8 +793,7 @@ async def list_tasks(
             params.append(limit)
             cur.execute(
                 f"""
-                SELECT id, assignee, content, status, source, location,
-                       created_by, created_at, due_at, completed_at
+                SELECT {_TASK_SELECT_COLS}
                 FROM deek_tasks
                 {where}
                 ORDER BY created_at DESC
@@ -660,16 +805,7 @@ async def list_tasks(
     finally:
         conn.close()
 
-    return TaskList(
-        tasks=[
-            Task(
-                id=r[0], assignee=r[1], content=r[2], status=r[3],
-                source=r[4], location=r[5], created_by=r[6],
-                created_at=r[7], due_at=r[8], completed_at=r[9],
-            )
-            for r in rows
-        ]
-    )
+    return TaskList(tasks=[_row_to_task(r) for r in rows])
 
 
 @router.patch("/tasks/{task_id}", response_model=Task)
@@ -684,13 +820,20 @@ async def patch_task(
             status_code=400,
             detail="status must be 'open', 'done', or 'cancelled'",
         )
+    if body.priority and body.priority not in {"low", "medium", "high", "critical"}:
+        raise HTTPException(
+            status_code=400,
+            detail="priority must be 'low', 'medium', 'high', or 'critical'",
+        )
 
     # Build the SET clause dynamically
     sets: list[str] = []
     params: list = []
+    status_change = None
     if body.status is not None:
         sets.append("status = %s")
         params.append(body.status)
+        status_change = body.status
         if body.status in {"done", "cancelled"}:
             sets.append("completed_at = NOW()")
         else:
@@ -701,6 +844,21 @@ async def patch_task(
     if body.due_at is not None:
         sets.append("due_at = %s")
         params.append(body.due_at)
+    if body.title is not None:
+        sets.append("title = %s")
+        params.append(body.title)
+    if body.priority is not None:
+        sets.append("priority = %s")
+        params.append(body.priority)
+    if body.context is not None:
+        sets.append("context = %s")
+        params.append(body.context)
+    if body.linked_module is not None:
+        sets.append("linked_module = %s")
+        params.append(body.linked_module)
+    if body.linked_ref is not None:
+        sets.append("linked_ref = %s")
+        params.append(body.linked_ref)
     if not sets:
         raise HTTPException(status_code=400, detail="no fields to update")
 
@@ -714,8 +872,7 @@ async def patch_task(
                 UPDATE deek_tasks
                 SET {', '.join(sets)}
                 WHERE id = %s
-                RETURNING id, assignee, content, status, source, location,
-                          created_by, created_at, due_at, completed_at
+                RETURNING {_TASK_SELECT_COLS}
                 """,
                 params,
             )
@@ -726,11 +883,14 @@ async def patch_task(
     finally:
         conn.close()
 
-    return Task(
-        id=row[0], assignee=row[1], content=row[2], status=row[3],
-        source=row[4], location=row[5], created_by=row[6],
-        created_at=row[7], due_at=row[8], completed_at=row[9],
-    )
+    if status_change:
+        _log_task_event(
+            task_id=task_id,
+            event=f"status_{status_change}",
+            actor=None,
+            detail={"status": status_change},
+        )
+    return _row_to_task(row)
 
 
 # ── Voice chat ──────────────────────────────────────────────────────────────
@@ -1648,3 +1808,688 @@ async def voice_commit(
         turn_count=len(rows),
         sync_result=sync_result,
     )
+
+
+# ── Staff profiles ──────────────────────────────────────────────────────────
+
+
+VALID_ROLE_TAGS = {"production", "dispatch", "tech", "admin", "director"}
+
+
+class StaffProfile(BaseModel):
+    email: str
+    display_name: Optional[str] = None
+    role_tag: Optional[str] = None
+    briefings_enabled: bool = True
+    briefing_time: str = "07:30"        # HH:MM
+    active_days: str = "mon,tue,wed,thu,fri"
+    quiet_start: str = "22:00"
+    quiet_end: str = "06:30"
+    preferred_voice: Optional[str] = None
+    preferred_face: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class StaffProfileList(BaseModel):
+    profiles: list[StaffProfile]
+
+
+class StaffProfileUpsert(BaseModel):
+    email: str
+    display_name: Optional[str] = None
+    role_tag: Optional[str] = None
+    briefings_enabled: Optional[bool] = None
+    briefing_time: Optional[str] = None
+    active_days: Optional[str] = None
+    quiet_start: Optional[str] = None
+    quiet_end: Optional[str] = None
+    preferred_voice: Optional[str] = None
+    preferred_face: Optional[str] = None
+    notes: Optional[str] = None
+
+
+def _row_to_staff(r: tuple) -> StaffProfile:
+    return StaffProfile(
+        email=r[0], display_name=r[1], role_tag=r[2],
+        briefings_enabled=bool(r[3]),
+        briefing_time=r[4].strftime("%H:%M") if r[4] else "07:30",
+        active_days=r[5] or "mon,tue,wed,thu,fri",
+        quiet_start=r[6].strftime("%H:%M") if r[6] else "22:00",
+        quiet_end=r[7].strftime("%H:%M") if r[7] else "06:30",
+        preferred_voice=r[8], preferred_face=r[9], notes=r[10],
+        created_at=r[11], updated_at=r[12],
+    )
+
+
+_STAFF_SELECT_COLS = (
+    "email, display_name, role_tag, briefings_enabled, briefing_time, "
+    "active_days, quiet_start, quiet_end, preferred_voice, preferred_face, "
+    "notes, created_at, updated_at"
+)
+
+
+@router.get("/staff", response_model=StaffProfileList)
+async def list_staff(_: bool = Depends(verify_api_key)):
+    _ensure_staff_schema()
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_STAFF_SELECT_COLS} FROM deek_staff_profile "
+                "ORDER BY role_tag, email"
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+    return StaffProfileList(profiles=[_row_to_staff(r) for r in rows])
+
+
+@router.get("/staff/{email}", response_model=StaffProfile)
+async def get_staff(email: str, _: bool = Depends(verify_api_key)):
+    _ensure_staff_schema()
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_STAFF_SELECT_COLS} FROM deek_staff_profile WHERE email = %s",
+                (email.lower().strip(),),
+            )
+            r = cur.fetchone()
+            if not r:
+                raise HTTPException(status_code=404, detail="staff profile not found")
+    finally:
+        conn.close()
+    return _row_to_staff(r)
+
+
+_TIME_RE = re.compile(r"^([01]?\d|2[0-3]):[0-5]\d$")
+_VALID_DAYS = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
+
+
+def _validate_time(field: str, value: str) -> None:
+    if not _TIME_RE.match(value or ""):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field} must be HH:MM (24h)",
+        )
+
+
+def _validate_active_days(value: str) -> None:
+    parts = [p.strip().lower() for p in value.split(",") if p.strip()]
+    bad = [p for p in parts if p not in _VALID_DAYS]
+    if bad:
+        raise HTTPException(
+            status_code=400,
+            detail=f"active_days contains invalid day(s): {bad}",
+        )
+
+
+@router.put("/staff", response_model=StaffProfile)
+async def upsert_staff(body: StaffProfileUpsert, _: bool = Depends(verify_api_key)):
+    """Upsert a staff profile — creates on first PUT, updates thereafter."""
+    _ensure_staff_schema()
+    email = body.email.strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="email is required and must be valid")
+    if body.role_tag and body.role_tag not in VALID_ROLE_TAGS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"role_tag must be one of {sorted(VALID_ROLE_TAGS)}",
+        )
+    if body.briefing_time is not None:
+        _validate_time("briefing_time", body.briefing_time)
+    if body.quiet_start is not None:
+        _validate_time("quiet_start", body.quiet_start)
+    if body.quiet_end is not None:
+        _validate_time("quiet_end", body.quiet_end)
+    if body.active_days is not None:
+        _validate_active_days(body.active_days)
+
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                INSERT INTO deek_staff_profile
+                    (email, display_name, role_tag, briefings_enabled,
+                     briefing_time, active_days, quiet_start, quiet_end,
+                     preferred_voice, preferred_face, notes)
+                VALUES (%s, %s, %s, COALESCE(%s, true),
+                        COALESCE(%s, '07:30'::time),
+                        COALESCE(%s, 'mon,tue,wed,thu,fri'),
+                        COALESCE(%s, '22:00'::time),
+                        COALESCE(%s, '06:30'::time),
+                        %s, %s, %s)
+                ON CONFLICT (email) DO UPDATE SET
+                    display_name = COALESCE(EXCLUDED.display_name, deek_staff_profile.display_name),
+                    role_tag = COALESCE(EXCLUDED.role_tag, deek_staff_profile.role_tag),
+                    briefings_enabled = COALESCE(%s, deek_staff_profile.briefings_enabled),
+                    briefing_time = COALESCE(EXCLUDED.briefing_time, deek_staff_profile.briefing_time),
+                    active_days = COALESCE(EXCLUDED.active_days, deek_staff_profile.active_days),
+                    quiet_start = COALESCE(EXCLUDED.quiet_start, deek_staff_profile.quiet_start),
+                    quiet_end = COALESCE(EXCLUDED.quiet_end, deek_staff_profile.quiet_end),
+                    preferred_voice = COALESCE(EXCLUDED.preferred_voice, deek_staff_profile.preferred_voice),
+                    preferred_face = COALESCE(EXCLUDED.preferred_face, deek_staff_profile.preferred_face),
+                    notes = COALESCE(EXCLUDED.notes, deek_staff_profile.notes),
+                    updated_at = NOW()
+                RETURNING {_STAFF_SELECT_COLS}
+                """,
+                (
+                    email, body.display_name, body.role_tag, body.briefings_enabled,
+                    body.briefing_time, body.active_days, body.quiet_start, body.quiet_end,
+                    body.preferred_voice, body.preferred_face, body.notes,
+                    body.briefings_enabled,  # second placeholder for ON CONFLICT
+                ),
+            )
+            r = cur.fetchone()
+            conn.commit()
+    finally:
+        conn.close()
+    return _row_to_staff(r)
+
+
+@router.delete("/staff/{email}")
+async def delete_staff(email: str, _: bool = Depends(verify_api_key)):
+    _ensure_staff_schema()
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM deek_staff_profile WHERE email = %s RETURNING email",
+                (email.strip().lower(),),
+            )
+            r = cur.fetchone()
+            conn.commit()
+    finally:
+        conn.close()
+    if not r:
+        raise HTTPException(status_code=404, detail="staff profile not found")
+    return {"deleted": email}
+
+
+# ── Seed default staff profiles at API startup ─────────────────────────────
+
+DEFAULT_STAFF = [
+    ("toby@nbnesigns.com", "Toby", "director",
+     "cross-business overview, blockers, decisions needed"),
+    ("jo@nbnesigns.com", "Jo", "director",
+     "operations, client relationships, cash position"),
+    ("ben@nbnesigns.com", "Ben", "production",
+     "make list, machine assignments, batch priorities"),
+    ("gabby@nbnesigns.com", "Gabby", "dispatch",
+     "dispatch queue, labels, packing"),
+    ("ivan@nbnesigns.com", "Ivan", "tech",
+     "machine maintenance flags, CNC job queue"),
+    ("sanna@nbnesigns.com", "Sanna", "admin",
+     "email triage, quote follow-ups, supplier comms"),
+]
+
+
+def seed_default_staff_profiles() -> None:
+    """Insert the default 6 staff profiles if they don't already exist.
+    Called from API startup. Idempotent — ON CONFLICT DO NOTHING."""
+    try:
+        _ensure_staff_schema()
+        conn = _get_conn()
+    except Exception:
+        return
+    try:
+        with conn.cursor() as cur:
+            for email, name, role, notes in DEFAULT_STAFF:
+                cur.execute(
+                    """
+                    INSERT INTO deek_staff_profile
+                        (email, display_name, role_tag, notes)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (email) DO NOTHING
+                    """,
+                    (email, name, role, notes),
+                )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ── Morning briefing generator ──────────────────────────────────────────────
+
+
+class BriefingResponse(BaseModel):
+    user: str
+    display_name: Optional[str] = None
+    role_tag: Optional[str] = None
+    generated_at: datetime
+    briefing_md: str
+    open_tasks: list[Task] = Field(default_factory=list)
+    stale_snapshots: list[str] = Field(default_factory=list)
+
+
+def _open_tasks_for(email: str, limit: int = 20) -> list[Task]:
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT {_TASK_SELECT_COLS}
+                FROM deek_tasks
+                WHERE assignee = %s AND status = 'open'
+                ORDER BY
+                    CASE priority
+                        WHEN 'critical' THEN 0
+                        WHEN 'high' THEN 1
+                        WHEN 'medium' THEN 2
+                        WHEN 'low' THEN 3
+                        ELSE 4
+                    END,
+                    due_at NULLS LAST,
+                    created_at DESC
+                LIMIT %s
+                """,
+                (email.lower(), limit),
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+    return [_row_to_task(r) for r in rows]
+
+
+def _build_director_briefing(
+    email: str, display_name: str,
+) -> tuple[str, list[str]]:
+    """Cash + follow-ups + pipeline delta + critical tasks + escalations."""
+    stale: list[str] = []
+    led_md, led_ts = _load_snapshot("ledger")
+    crm_md, crm_ts = _load_snapshot("crm")
+    mfg_md, mfg_ts = _load_snapshot("manufacture")
+
+    lines: list[str] = []
+    name = (display_name or email.split("@")[0]).title()
+    lines.append(f"## Deek's morning read — {name}")
+    lines.append("")
+
+    # Cash + revenue (ledger)
+    if led_md:
+        if _is_stale(led_ts):
+            stale.append("ledger")
+        ledger = _parse_ledger_snapshot(led_md)
+        cash = ledger.get("cash_position")
+        rev_mtd = ledger.get("revenue_mtd")
+        gm_mtd = ledger.get("gross_margin_mtd")
+        if cash is not None:
+            lines.append(f"**Cash:** £{cash:,.0f}")
+        if rev_mtd is not None:
+            lines.append(f"**Revenue MTD:** £{rev_mtd:,.0f}")
+        if gm_mtd is not None:
+            lines.append(f"**Gross margin MTD:** {gm_mtd:.1f}%")
+        lines.append("")
+
+    # Pipeline + follow-ups (CRM)
+    if crm_md:
+        if _is_stale(crm_ts):
+            stale.append("crm")
+        crm = _parse_crm_snapshot(crm_md)
+        pipeline = crm.get("pipeline_value")
+        overdue = crm.get("follow_ups_overdue")
+        stale_leads = crm.get("stale_leads")
+        parts = []
+        if overdue is not None and overdue > 0:
+            parts.append(f"**{overdue} follow-ups overdue**")
+        if pipeline is not None:
+            parts.append(f"Pipeline: £{pipeline:,.0f}")
+        if stale_leads is not None and stale_leads > 0:
+            parts.append(f"{stale_leads} stale leads")
+        if parts:
+            lines.append("**CRM:** " + ", ".join(parts))
+            lines.append("")
+
+    # Production summary (manufacture)
+    if mfg_md:
+        if _is_stale(mfg_ts):
+            stale.append("manufacture")
+        mfg = _parse_manufacture_snapshot(mfg_md)
+        open_orders = mfg.get("open_orders")
+        if open_orders:
+            lines.append(f"**Production:** {open_orders} open orders")
+            lines.append("")
+
+    # Critical / high tasks across the team
+    director_tasks = _critical_team_tasks(limit=5)
+    if director_tasks:
+        lines.append("**Team tasks needing attention:**")
+        for t in director_tasks:
+            p = f"[{t.priority}] " if t.priority else ""
+            assignee = t.assignee.split("@")[0]
+            lines.append(f"- {p}{assignee}: {t.title or t.content}")
+        lines.append("")
+
+    return "\n".join(lines).rstrip(), stale
+
+
+def _critical_team_tasks(limit: int = 5) -> list[Task]:
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT {_TASK_SELECT_COLS}
+                FROM deek_tasks
+                WHERE status = 'open'
+                  AND (priority IN ('critical', 'high') OR due_at < NOW())
+                ORDER BY
+                    CASE priority
+                        WHEN 'critical' THEN 0
+                        WHEN 'high' THEN 1
+                        ELSE 2
+                    END,
+                    due_at NULLS LAST
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+    return [_row_to_task(r) for r in rows]
+
+
+def _build_production_briefing(
+    email: str, display_name: str,
+) -> tuple[str, list[str]]:
+    stale: list[str] = []
+    mfg_md, mfg_ts = _load_snapshot("manufacture")
+
+    name = (display_name or email.split("@")[0]).title()
+    lines = [f"## Deek's morning read — {name}", ""]
+
+    if mfg_md:
+        if _is_stale(mfg_ts):
+            stale.append("manufacture")
+        mfg = _parse_manufacture_snapshot(mfg_md)
+        open_orders = mfg.get("open_orders") or 0
+        lines.append(f"**Make list:** {open_orders} open orders")
+        for machine_key, machine_label in (
+            ("rolf_units", "ROLF"), ("mimaki_units", "MIMAKI"), ("mutoh_units", "MUTOH"),
+        ):
+            v = mfg.get(machine_key)
+            if isinstance(v, dict):
+                lines.append(f"- {machine_label}: {v.get('orders', 0)} orders · {v.get('units', 0)} units")
+            else:
+                lines.append(f"- {machine_label}: available")
+        lines.append("")
+
+        deficits = mfg.get("top_deficits", [])[:3]
+        if deficits:
+            lines.append("**Top stock deficits:**")
+            for d in deficits:
+                lines.append(f"- {d['sku']}: {d['short']} short ({d['on_hand']} on hand)")
+            lines.append("")
+
+    return "\n".join(lines).rstrip(), stale
+
+
+def _build_admin_briefing(
+    email: str, display_name: str,
+) -> tuple[str, list[str]]:
+    stale: list[str] = []
+    crm_md, crm_ts = _load_snapshot("crm")
+    name = (display_name or email.split("@")[0]).title()
+    lines = [f"## Deek's morning read — {name}", ""]
+
+    triage = _inbox_triage_counts()
+    if triage.get("total"):
+        lines.append(f"**Inbox (24h):** {triage.get('new_enquiry', 0)} new enquiries, "
+                     f"{triage.get('existing_project_reply', 0)} project replies, "
+                     f"{triage.get('unread', 0)} unreviewed")
+        lines.append("")
+
+    if crm_md:
+        if _is_stale(crm_ts):
+            stale.append("crm")
+        crm = _parse_crm_snapshot(crm_md)
+        overdue = crm.get("follow_ups_overdue") or 0
+        stale_leads = crm.get("stale_leads") or 0
+        if overdue or stale_leads:
+            lines.append(f"**CRM:** {overdue} follow-ups overdue, {stale_leads} stale leads")
+            lines.append("")
+
+    return "\n".join(lines).rstrip(), stale
+
+
+def _build_generic_briefing(
+    email: str, display_name: str,
+) -> tuple[str, list[str]]:
+    name = (display_name or email.split("@")[0]).title()
+    lines = [f"## Deek's morning read — {name}", ""]
+    lines.append("No role-specific template yet. Your open tasks are below.")
+    return "\n".join(lines).rstrip(), []
+
+
+def build_briefing(email: str) -> BriefingResponse:
+    """Generate a briefing for a given user's email. Reads profile + snapshots.
+
+    Returns the briefing object. Does NOT persist to deek_pending_briefings —
+    that's the scheduler's job.
+    """
+    _ensure_staff_schema()
+    _ensure_tasks_schema()
+    email = email.strip().lower()
+
+    # Load profile (may be absent — we still produce a briefing)
+    conn = _get_conn()
+    display_name: Optional[str] = None
+    role_tag: Optional[str] = None
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT display_name, role_tag FROM deek_staff_profile WHERE email = %s",
+                (email,),
+            )
+            r = cur.fetchone()
+            if r:
+                display_name, role_tag = r[0], r[1]
+    finally:
+        conn.close()
+
+    builder_map = {
+        "director": _build_director_briefing,
+        "production": _build_production_briefing,
+        "dispatch": _build_production_briefing,    # dispatch reuses production for now
+        "tech": _build_production_briefing,
+        "admin": _build_admin_briefing,
+    }
+    builder = builder_map.get(role_tag or "", _build_generic_briefing)
+    md, stale = builder(email, display_name or email)
+
+    open_tasks = _open_tasks_for(email)
+    if open_tasks:
+        md += "\n\n## Your open tasks\n"
+        for t in open_tasks:
+            p = f"[{t.priority}] " if t.priority else ""
+            due = f" (due {t.due_at.strftime('%Y-%m-%d')})" if t.due_at else ""
+            md += f"- {p}{t.title or t.content}{due}\n"
+
+    if stale:
+        md += f"\n\n_Note: snapshot data for {', '.join(stale)} is older than 2 hours._"
+
+    return BriefingResponse(
+        user=email,
+        display_name=display_name,
+        role_tag=role_tag,
+        generated_at=datetime.now(timezone.utc),
+        briefing_md=md,
+        open_tasks=open_tasks,
+        stale_snapshots=stale,
+    )
+
+
+@router.get("/briefing", response_model=BriefingResponse)
+async def briefing(
+    user: str = Query(..., description="email address"),
+    _: bool = Depends(verify_api_key),
+):
+    return build_briefing(user)
+
+
+# ── Pending briefings (populated by scheduled job, read by PWA) ──────────
+
+
+class PendingBriefing(BaseModel):
+    id: int
+    email: str
+    generated_at: datetime
+    briefing_md: str
+    seen_at: Optional[datetime]
+    dismissed_at: Optional[datetime]
+    incorrect_reason: Optional[str]
+
+
+class PendingBriefingList(BaseModel):
+    items: list[PendingBriefing]
+    unseen_count: int
+
+
+@router.get("/briefings/pending", response_model=PendingBriefingList)
+async def list_pending_briefings(
+    user: str = Query(..., description="email"),
+    limit: int = Query(10, ge=1, le=50),
+    _: bool = Depends(verify_api_key),
+):
+    _ensure_staff_schema()
+    email = user.strip().lower()
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, email, generated_at, briefing_md, seen_at,
+                       dismissed_at, incorrect_reason
+                FROM deek_pending_briefings
+                WHERE email = %s AND dismissed_at IS NULL
+                ORDER BY generated_at DESC
+                LIMIT %s
+                """,
+                (email, limit),
+            )
+            rows = cur.fetchall()
+            items = [
+                PendingBriefing(
+                    id=r[0], email=r[1], generated_at=r[2], briefing_md=r[3],
+                    seen_at=r[4], dismissed_at=r[5], incorrect_reason=r[6],
+                )
+                for r in rows
+            ]
+            unseen = sum(1 for i in items if i.seen_at is None)
+    finally:
+        conn.close()
+    return PendingBriefingList(items=items, unseen_count=unseen)
+
+
+class BriefingPatch(BaseModel):
+    action: str                          # 'seen' | 'dismissed' | 'incorrect'
+    incorrect_reason: Optional[str] = None
+
+
+@router.patch("/briefings/pending/{briefing_id}", response_model=PendingBriefing)
+async def patch_pending_briefing(
+    briefing_id: int,
+    body: BriefingPatch,
+    _: bool = Depends(verify_api_key),
+):
+    if body.action not in {"seen", "dismissed", "incorrect"}:
+        raise HTTPException(status_code=400, detail="action must be seen|dismissed|incorrect")
+    _ensure_staff_schema()
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            if body.action == "seen":
+                cur.execute(
+                    "UPDATE deek_pending_briefings SET seen_at = COALESCE(seen_at, NOW()) "
+                    "WHERE id = %s RETURNING id, email, generated_at, briefing_md, seen_at, dismissed_at, incorrect_reason",
+                    (briefing_id,),
+                )
+            elif body.action == "dismissed":
+                cur.execute(
+                    "UPDATE deek_pending_briefings SET dismissed_at = NOW(), seen_at = COALESCE(seen_at, NOW()) "
+                    "WHERE id = %s RETURNING id, email, generated_at, briefing_md, seen_at, dismissed_at, incorrect_reason",
+                    (briefing_id,),
+                )
+            else:  # incorrect
+                cur.execute(
+                    "UPDATE deek_pending_briefings SET incorrect_reason = %s, seen_at = COALESCE(seen_at, NOW()) "
+                    "WHERE id = %s RETURNING id, email, generated_at, briefing_md, seen_at, dismissed_at, incorrect_reason",
+                    (body.incorrect_reason or "(no reason given)", briefing_id),
+                )
+            r = cur.fetchone()
+            if not r:
+                raise HTTPException(status_code=404, detail="briefing not found")
+            conn.commit()
+    finally:
+        conn.close()
+    return PendingBriefing(
+        id=r[0], email=r[1], generated_at=r[2], briefing_md=r[3],
+        seen_at=r[4], dismissed_at=r[5], incorrect_reason=r[6],
+    )
+
+
+# ── Scheduler-triggered: generate briefings for everyone enabled today ────
+
+
+def _weekday_key() -> str:
+    """Return today's 3-letter lowercase day key (mon, tue, wed, ...)."""
+    return datetime.now(timezone.utc).strftime("%a").lower()
+
+
+def generate_daily_briefings() -> dict:
+    """Generate + persist briefings for every enabled staff member whose
+    active_days include today. Called by the APScheduler job.
+    """
+    _ensure_staff_schema()
+    day = _weekday_key()
+    results: dict = {"day": day, "generated": [], "skipped": []}
+
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT email, active_days, briefings_enabled "
+                "FROM deek_staff_profile "
+                "WHERE briefings_enabled = true"
+            )
+            candidates = cur.fetchall()
+    finally:
+        conn.close()
+
+    for email, active_days, enabled in candidates:
+        if not enabled:
+            results["skipped"].append({"email": email, "reason": "disabled"})
+            continue
+        if day not in (active_days or "").lower():
+            results["skipped"].append({"email": email, "reason": f"not active on {day}"})
+            continue
+        try:
+            b = build_briefing(email)
+            conn2 = _get_conn()
+            try:
+                with conn2.cursor() as cur:
+                    cur.execute(
+                        "INSERT INTO deek_pending_briefings (email, briefing_md) "
+                        "VALUES (%s, %s) RETURNING id",
+                        (email, b.briefing_md),
+                    )
+                    new_id = cur.fetchone()[0]
+                    conn2.commit()
+                results["generated"].append({"email": email, "id": new_id})
+            finally:
+                conn2.close()
+        except Exception as exc:
+            results["skipped"].append(
+                {"email": email, "reason": f"{type(exc).__name__}: {exc}"}
+            )
+    return results
+
+
+@router.post("/briefings/generate-now")
+async def briefings_generate_now(_: bool = Depends(verify_api_key)):
+    """Manual trigger of the daily briefing generation. For testing + admin."""
+    return generate_daily_briefings()

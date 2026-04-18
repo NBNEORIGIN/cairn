@@ -216,12 +216,28 @@ async def lifespan(app: FastAPI):
     except Exception as fed_err:
         print(f'[DEEK startup] Snapshot poll loop disabled: {fed_err}')
 
+    # ── Seed default staff profiles + start briefing scheduler ──────────
+    _briefing_task = None
+    try:
+        from api.routes.ambient import seed_default_staff_profiles
+        seed_default_staff_profiles()
+        print('[DEEK startup] Default staff profiles seeded')
+    except Exception as seed_err:
+        print(f'[DEEK startup] Staff profile seed skipped: {seed_err}')
+    try:
+        _briefing_task = asyncio.create_task(_briefing_scheduler_loop())
+        print('[DEEK startup] Briefing scheduler loop started')
+    except Exception as sched_err:
+        print(f'[DEEK startup] Briefing scheduler disabled: {sched_err}')
+
     yield
 
     if _reindex_task and not _reindex_task.done():
         _reindex_task.cancel()
     if _snapshot_task and not _snapshot_task.done():
         _snapshot_task.cancel()
+    if _briefing_task and not _briefing_task.done():
+        _briefing_task.cancel()
 
     for watcher in active_watchers:
         try:
@@ -341,6 +357,44 @@ async def _auto_index_if_empty(
         )
     except Exception as e:
         print(f'[Deek] Auto-index failed for {project_id}: {e}')
+
+
+async def _briefing_scheduler_loop() -> None:
+    """Daily briefing generator loop.
+
+    Runs continuously, wakes up once a minute, and fires the briefing
+    generator at 06:45 UTC on weekdays. Safe to run every minute because
+    generate_daily_briefings() inserts new rows; running it twice would
+    create duplicate briefings — so we also track last-fire date and
+    skip if we've already fired today.
+    """
+    from datetime import datetime as _dt, time as _time, timezone as _tz
+    from api.routes.ambient import generate_daily_briefings
+
+    last_fired: str = ''  # YYYY-MM-DD of last fire
+    fire_at = _time(hour=6, minute=45)
+
+    while True:
+        try:
+            now = _dt.now(tz=_tz.utc)
+            today = now.strftime('%Y-%m-%d')
+            # Fire if we've crossed the fire time today and haven't fired yet
+            if last_fired != today and now.time() >= fire_at:
+                try:
+                    result = await asyncio.get_event_loop().run_in_executor(
+                        None, generate_daily_briefings,
+                    )
+                    print(
+                        f"[Deek] Daily briefings generated: "
+                        f"{len(result.get('generated', []))} emitted, "
+                        f"{len(result.get('skipped', []))} skipped"
+                    )
+                except Exception as exc:
+                    print(f'[Deek] Daily briefing generation failed: {exc}')
+                last_fired = today
+        except Exception as outer:
+            print(f'[Deek] Briefing scheduler loop error: {outer}')
+        await asyncio.sleep(60)
 
 
 async def _scheduled_reindex_loop(

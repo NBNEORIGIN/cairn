@@ -1,5 +1,5 @@
 export type Location = 'workshop' | 'office' | 'home'
-export type Mode = 'chat' | 'voice'
+export type Mode = 'briefing' | 'chat' | 'voice'
 
 export interface MeResponse {
   authenticated: boolean

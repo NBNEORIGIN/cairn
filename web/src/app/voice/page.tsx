@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ChatView } from '@/components/voice/ChatView'
 import { VoiceView } from '@/components/voice/VoiceView'
+import { BriefingView } from '@/components/voice/BriefingView'
 import { TopMenu } from '@/components/voice/TopMenu'
 import type { Location, Mode, MeResponse } from '@/components/voice/types'
 import type { VoiceLoopTurn } from '@/hooks/useVoiceLoop'
@@ -27,6 +28,7 @@ export default function VoicePage() {
   const [transcript, setTranscript] = useState<VoiceLoopTurn[]>([])
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [now, setNow] = useState(new Date())
+  const [unseenBriefings, setUnseenBriefings] = useState(0)
 
   const sessionIdRef = useRef<string | null>(null)
 
@@ -35,6 +37,31 @@ export default function VoicePage() {
     const id = setInterval(() => setNow(new Date()), 30_000)
     return () => clearInterval(id)
   }, [])
+
+  // ── Unseen-briefing badge ────────────────────────────────────────
+  const refreshBadge = useCallback(async () => {
+    try {
+      const res = await fetch('/api/voice/briefings/pending', { cache: 'no-store' })
+      if (res.ok) {
+        const data = await res.json()
+        setUnseenBriefings(data.unseen_count || 0)
+      }
+    } catch {}
+  }, [])
+  useEffect(() => {
+    if (!me) return
+    refreshBadge()
+    const id = setInterval(refreshBadge, 120_000) // every 2 min
+    return () => clearInterval(id)
+  }, [me, refreshBadge])
+  // Clear badge when user opens the briefing tab
+  useEffect(() => {
+    if (mode === 'briefing') {
+      setUnseenBriefings(0)
+      // Server-side seen-marking happens inside BriefingView
+      setTimeout(refreshBadge, 2000)
+    }
+  }, [mode, refreshBadge])
 
   // ── Boot: fetch session, restore mode + location, hydrate transcript ─
   useEffect(() => {
@@ -162,6 +189,17 @@ export default function VoicePage() {
         {/* Mode toggle */}
         <div className="flex overflow-hidden rounded-full border border-slate-700 text-xs">
           <button
+            onClick={() => pickMode('briefing')}
+            className={`relative px-3 py-1 ${mode === 'briefing' ? 'bg-slate-800 text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}
+          >
+            Brief
+            {unseenBriefings > 0 && mode !== 'briefing' && (
+              <span className="absolute -right-1 -top-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-emerald-500 px-1 text-[10px] font-semibold text-white">
+                {unseenBriefings}
+              </span>
+            )}
+          </button>
+          <button
             onClick={() => pickMode('chat')}
             className={`px-3 py-1 ${mode === 'chat' ? 'bg-slate-800 text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}
           >
@@ -202,7 +240,9 @@ export default function VoicePage() {
 
       {/* ── Body ────────────────────────────────────────────── */}
       <div className="flex min-h-0 flex-1 flex-col">
-        {mode === 'chat' ? (
+        {mode === 'briefing' ? (
+          <BriefingView onTasksChanged={refreshBadge} />
+        ) : mode === 'chat' ? (
           <ChatView
             location={location}
             transcript={transcript}
