@@ -88,10 +88,11 @@ services:
       DEEK_API_URL: http://deek-api:8765
       CLAW_API_URL: http://deek-api:8765
       DEEK_API_KEY: ${DEEK_API_KEY:-deek-dev-key-change-in-production}
-      # Shared with CRM to decrypt NextAuth session cookies for
-      # cross-subdomain auth on .nbnesigns.co.uk
-      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-}
-      CRM_LOGIN_URL: ${CRM_LOGIN_URL:-https://crm.nbnesigns.co.uk/login}
+      # Self-contained Deek Voice auth. DEEK_USERS is a semicolon-separated
+      # list of `email|bcrypt_hash|name|role` records — see web/src/lib/auth.ts.
+      # DEEK_JWT_SECRET signs the deek.session cookie (HS256).
+      DEEK_USERS: ${DEEK_USERS:-}
+      DEEK_JWT_SECRET: ${DEEK_JWT_SECRET:-}
       PHLOE_API_URL: http://host.docker.internal:8004
       PHLOE_TENANT_SLUG: nbne
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}

@@ -108,11 +108,10 @@ export default function VoicePage() {
       try {
         const res = await fetch('/api/voice/me', { cache: 'no-store' })
         if (res.status === 401) {
-          const json = await res.json().catch(() => ({} as any))
-          if (json?.login_url) {
-            window.location.href = json.login_url
-            return
-          }
+          // Send user to login with this page as callbackUrl
+          const cb = encodeURIComponent('/voice')
+          window.location.href = `/voice/login?callbackUrl=${cb}`
+          return
         }
         const json: Me = await res.json()
         setMe(json)
@@ -257,14 +256,9 @@ export default function VoicePage() {
           }),
         })
         if (res.status === 401) {
-          // Session expired — redirect to CRM login
-          const meRes = await fetch('/api/voice/me').then(r => r.json()).catch(() => null)
-          if (meRes?.login_url) {
-            window.location.href = meRes.login_url
-            return
-          }
-          setBusy(false)
-          setErrorMsg('Session expired — refresh the page to sign in again.')
+          // Session expired — bounce to login with return-to here
+          const cb = encodeURIComponent('/voice')
+          window.location.href = `/voice/login?callbackUrl=${cb}`
           return
         }
         const data: VoiceResponse = await res.json()

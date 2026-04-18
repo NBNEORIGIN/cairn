@@ -1,11 +1,9 @@
 /**
- * GET /api/voice/me — return the current user's session + allowed locations.
- *
- * Used by the /voice PWA on mount to (a) confirm auth, (b) render only
- * the locations this user is allowed to see.
+ * GET /api/voice/me — returns the current user + allowed locations.
+ * Used by /voice on mount to render only permitted locations.
  */
 import { NextResponse } from 'next/server'
-import { getServerSession, canAccessLocation, buildLoginUrl } from '@/lib/auth'
+import { getServerSession, canAccessLocation, LOGIN_PATH } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,7 +15,7 @@ export async function GET(req: Request) {
     return NextResponse.json(
       {
         authenticated: false,
-        login_url: buildLoginUrl(req.url),
+        login_url: LOGIN_PATH,
       },
       { status: 401 },
     )
@@ -26,7 +24,6 @@ export async function GET(req: Request) {
   return NextResponse.json({
     authenticated: true,
     user: {
-      id: session.id,
       email: session.email,
       name: session.name,
       role: session.role,

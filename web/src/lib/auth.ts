@@ -1,104 +1,181 @@
 /**
- * Deek web auth helper — validates CRM-issued NextAuth session cookies.
+ * Deek web — self-contained authentication.
  *
- * The CRM (crm.nbnesigns.co.uk) uses NextAuth v4 with JWT strategy. It
- * sets a session cookie scoped to `.nbnesigns.co.uk` so Deek subdomains
- * can see it.
+ * Design choices:
+ * - Tiny user list from env (DEEK_USERS) rather than a database. Current
+ *   user count is 2 (Toby + Jo); a DB is overkill.
+ * - Session cookie `deek.session` is a HS256 JWT signed with DEEK_JWT_SECRET.
+ *   30-day sliding expiry.
+ * - Passwords stored as bcrypt hashes in env (not plaintext).
+ * - Role-based Location ACL reuses the same shape the earlier CRM-auth
+ *   prototype used — ADMIN/PM see everything, STAFF/READONLY/CLIENT have
+ *   progressively less access.
  *
- * NextAuth v4 JWTs are actually JWEs (encrypted, not just signed). The
- * encryption key is derived from NEXTAUTH_SECRET via HKDF with a fixed
- * info string. We replicate that derivation here so we can decrypt the
- * cookie without running the full NextAuth library.
+ * DEEK_USERS format (semicolon-separated records, pipe-separated fields):
  *
- * See: https://github.com/nextauthjs/next-auth/blob/v4/packages/next-auth/src/jwt/index.ts
+ *   email|bcrypt_hash|NAME|ROLE
  *
- * Both deek-web and the CRM must share the same NEXTAUTH_SECRET env var.
+ * Example (with a fake hash):
+ *   DEEK_USERS='toby@nbnesigns.com|$2a$10$AbC...|Toby|ADMIN;jo@nbnesigns.com|$2a$10$XyZ...|Jo|ADMIN'
  */
 import { cookies } from 'next/headers'
-import { jwtDecrypt } from 'jose'
-import { hkdf } from '@panva/hkdf'
+import { SignJWT, jwtVerify } from 'jose'
+import bcrypt from 'bcryptjs'
 
-// NextAuth v4 uses this info string when deriving the encryption key.
-const HKDF_INFO = 'NextAuth.js Generated Encryption Key'
+const COOKIE_NAME = 'deek.session'
+const COOKIE_MAX_AGE_SEC = 60 * 60 * 24 * 30 // 30 days
+const JWT_ISSUER = 'deek.nbnesigns.co.uk'
+const JWT_AUDIENCE = 'deek-voice-pwa'
 
-// In production the cookie is prefixed with __Secure-. In dev/test it's not.
-const SECURE_COOKIE_NAME = '__Secure-next-auth.session-token'
-const PLAIN_COOKIE_NAME = 'next-auth.session-token'
+export type Role = 'ADMIN' | 'PM' | 'STAFF' | 'READONLY' | 'CLIENT'
 
 export interface DeekSession {
-  id: string
-  email?: string
-  name?: string | null
-  role: 'ADMIN' | 'PM' | 'STAFF' | 'READONLY' | 'CLIENT' | string
-  clientBusinessId?: string | null
+  email: string
+  name: string
+  role: Role
   iat?: number
   exp?: number
 }
 
-let _derivedKeyCache: Uint8Array | null = null
+interface UserRecord {
+  email: string
+  passwordHash: string
+  name: string
+  role: Role
+}
 
-async function deriveKey(): Promise<Uint8Array> {
-  const secret = process.env.NEXTAUTH_SECRET || ''
-  if (!secret) {
+// ── Config loading ──────────────────────────────────────────────────────────
+
+function jwtKey(): Uint8Array {
+  const s = process.env.DEEK_JWT_SECRET || process.env.NEXTAUTH_SECRET || ''
+  if (!s) {
     throw new Error(
-      'NEXTAUTH_SECRET is not set on the deek-web container — cannot ' +
-        'verify CRM session cookies.'
+      'DEEK_JWT_SECRET (or NEXTAUTH_SECRET fallback) is not set — cannot ' +
+        'sign or verify session cookies.'
     )
   }
-  if (_derivedKeyCache) return _derivedKeyCache
-  _derivedKeyCache = await hkdf(
-    'sha256',
-    secret,
-    '',           // no salt (NextAuth v4 default)
-    HKDF_INFO,
-    32,           // 256-bit key for A256GCM
-  )
-  return _derivedKeyCache
+  return new TextEncoder().encode(s)
 }
+
+function loadUsers(): UserRecord[] {
+  const raw = process.env.DEEK_USERS || ''
+  if (!raw.trim()) return []
+  return raw
+    .split(';')
+    .map(r => r.trim())
+    .filter(Boolean)
+    .map(record => {
+      const parts = record.split('|')
+      if (parts.length < 4) {
+        console.warn('[deek-auth] skipping malformed DEEK_USERS record')
+        return null
+      }
+      const [email, passwordHash, name, role] = parts
+      return {
+        email: email.trim().toLowerCase(),
+        passwordHash: passwordHash.trim(),
+        name: name.trim(),
+        role: role.trim().toUpperCase() as Role,
+      }
+    })
+    .filter((u): u is UserRecord => u !== null)
+}
+
+// ── Login / credentials check ───────────────────────────────────────────────
+
+export async function verifyCredentials(
+  email: string,
+  password: string,
+): Promise<Omit<UserRecord, 'passwordHash'> | null> {
+  const lookup = email.trim().toLowerCase()
+  const users = loadUsers()
+  const user = users.find(u => u.email === lookup)
+  if (!user) {
+    // Constant-time-ish: still run a bcrypt compare to avoid timing oracle
+    await bcrypt.compare(password, '$2a$10$' + '.'.repeat(53))
+    return null
+  }
+  const ok = await bcrypt.compare(password, user.passwordHash)
+  if (!ok) return null
+  return { email: user.email, name: user.name, role: user.role }
+}
+
+export async function issueSessionToken(user: {
+  email: string
+  name: string
+  role: Role
+}): Promise<string> {
+  const key = jwtKey()
+  return await new SignJWT({
+    email: user.email,
+    name: user.name,
+    role: user.role,
+  })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setIssuer(JWT_ISSUER)
+    .setAudience(JWT_AUDIENCE)
+    .setExpirationTime(`${COOKIE_MAX_AGE_SEC}s`)
+    .sign(key)
+}
+
+// ── Session verification (called from route handlers & server components) ──
 
 export async function getSessionFromCookie(
   cookieValue: string | undefined,
 ): Promise<DeekSession | null> {
   if (!cookieValue) return null
   try {
-    const key = await deriveKey()
-    const { payload } = await jwtDecrypt(cookieValue, key, {
+    const { payload } = await jwtVerify(cookieValue, jwtKey(), {
+      issuer: JWT_ISSUER,
+      audience: JWT_AUDIENCE,
       clockTolerance: 15,
     })
     const p = payload as any
-    if (!p.id && !p.sub) return null
-    const role = (p.role as string) || 'READONLY'
+    if (!p.email) return null
     return {
-      id: (p.id || p.sub) as string,
-      email: p.email as string | undefined,
-      name: (p.name as string | null) ?? null,
-      role,
-      clientBusinessId: (p.clientBusinessId as string | null) ?? null,
+      email: String(p.email),
+      name: String(p.name || p.email),
+      role: (p.role as Role) || 'READONLY',
       iat: p.iat as number | undefined,
       exp: p.exp as number | undefined,
     }
   } catch {
-    // Malformed, expired, or signed with a different secret
     return null
   }
 }
 
-/** Read the session from the current request's cookies (server components + route handlers). */
 export async function getServerSession(): Promise<DeekSession | null> {
   const cookieStore = cookies()
-  const cookieValue =
-    cookieStore.get(SECURE_COOKIE_NAME)?.value ||
-    cookieStore.get(PLAIN_COOKIE_NAME)?.value
-  return getSessionFromCookie(cookieValue)
+  const value = cookieStore.get(COOKIE_NAME)?.value
+  return getSessionFromCookie(value)
 }
 
-// ── Location ACL ────────────────────────────────────────────────────────────
-// Which roles can see which location's data.
+// Cookie options used by /api/voice/login and /api/voice/logout.
+export function sessionCookieOptions(maxAge = COOKIE_MAX_AGE_SEC) {
+  const secure = process.env.NODE_ENV === 'production'
+  return {
+    name: COOKIE_NAME,
+    httpOnly: true,
+    sameSite: 'lax' as const,
+    path: '/',
+    secure,
+    maxAge,
+  }
+}
 
-const LOCATION_ACCESS: Record<string, ReadonlyArray<string>> = {
+export function clearedCookieOptions() {
+  return sessionCookieOptions(0)
+}
+
+export const SESSION_COOKIE_NAME = COOKIE_NAME
+
+// ── Location ACL ────────────────────────────────────────────────────────────
+
+const LOCATION_ACCESS: Record<string, ReadonlyArray<Role>> = {
   workshop: ['ADMIN', 'PM', 'STAFF'],
   office: ['ADMIN', 'PM', 'STAFF', 'READONLY'],
-  home: ['ADMIN', 'PM'],  // financial — owners/managers only
+  home: ['ADMIN', 'PM'],
 }
 
 export function canAccessLocation(
@@ -107,10 +184,9 @@ export function canAccessLocation(
 ): boolean {
   if (!session) return false
   const allowed = LOCATION_ACCESS[location] || []
-  return allowed.includes(session.role)
+  return (allowed as ReadonlyArray<string>).includes(session.role)
 }
 
-/** Human-readable reason a role cannot access a location, or null if OK. */
 export function locationDenyReason(
   session: DeekSession | null,
   location: string,
@@ -123,11 +199,4 @@ export function locationDenyReason(
   return `Your role (${session.role}) does not have access to the ${location} view.`
 }
 
-export const CRM_LOGIN_URL =
-  process.env.CRM_LOGIN_URL || 'https://crm.nbnesigns.co.uk/login'
-
-/** Build a redirect URL to the CRM login with a callback back to here. */
-export function buildLoginUrl(callbackUrl: string): string {
-  const cb = encodeURIComponent(callbackUrl)
-  return `${CRM_LOGIN_URL}?callbackUrl=${cb}`
-}
+export const LOGIN_PATH = '/voice/login'

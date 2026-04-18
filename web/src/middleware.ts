@@ -1,24 +1,22 @@
 /**
- * Auth middleware — gates /voice and /api/voice/*.
+ * Auth middleware — gates /voice, /api/voice/*, /admin/*.
  *
- * The full session verification (JWE decrypt via jose) runs inside the
- * route handlers where Node runtime is available. The middleware here
- * does a CHEAP check: does the session cookie exist at all? If not,
- * redirect straight to CRM login. If yes, proceed and let the route
- * handler do full verification.
+ * Allows /voice/login and /api/voice/login through unauthenticated.
  *
- * This avoids running jose in the Edge runtime (which is possible but
- * requires the Web Crypto API and adds friction). Cheap gate + real
- * verification downstream is the standard Next.js pattern.
+ * Cheap cookie-presence check in Edge runtime. Route handlers then do
+ * full JWT verification using jose + DEEK_JWT_SECRET.
  */
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
-const SECURE_COOKIE = '__Secure-next-auth.session-token'
-const PLAIN_COOKIE = 'next-auth.session-token'
+const COOKIE_NAME = 'deek.session'
 
-const CRM_LOGIN_URL =
-  process.env.CRM_LOGIN_URL || 'https://crm.nbnesigns.co.uk/login'
+// Paths under the matched prefixes that should skip auth.
+const PUBLIC_PATHS = new Set<string>([
+  '/voice/login',
+  '/api/voice/login',
+  '/api/voice/logout',  // logout is idempotent — allow both authed and not
+])
 
 export const config = {
   matcher: [
@@ -29,29 +27,30 @@ export const config = {
 }
 
 export function middleware(req: NextRequest) {
-  const cookie =
-    req.cookies.get(SECURE_COOKIE)?.value ||
-    req.cookies.get(PLAIN_COOKIE)?.value
+  const pathname = req.nextUrl.pathname
 
-  if (cookie) {
-    // Cookie present — proceed. Route handlers verify the JWT payload.
+  if (PUBLIC_PATHS.has(pathname)) {
     return NextResponse.next()
   }
 
-  // No session — redirect to CRM login for page requests, 401 for API.
-  const isApi = req.nextUrl.pathname.startsWith('/api/')
+  const cookie = req.cookies.get(COOKIE_NAME)?.value
+  if (cookie) {
+    return NextResponse.next()
+  }
+
+  const isApi = pathname.startsWith('/api/')
   if (isApi) {
     return new NextResponse(
-      JSON.stringify({ error: 'not_authenticated', login_url: CRM_LOGIN_URL }),
+      JSON.stringify({ error: 'not_authenticated' }),
       { status: 401, headers: { 'content-type': 'application/json' } },
     )
   }
 
-  // Build a public callback URL from the request's Host header (not
-  // req.nextUrl which is the internal container address like 0.0.0.0:3000).
+  // Build a callback URL using the public host (not internal Docker addr).
   const host = req.headers.get('host') || 'deek.nbnesigns.co.uk'
   const proto = req.headers.get('x-forwarded-proto') || 'https'
-  const callbackUrl = `${proto}://${host}${req.nextUrl.pathname}${req.nextUrl.search || ''}`
-  const loginUrl = `${CRM_LOGIN_URL}?callbackUrl=${encodeURIComponent(callbackUrl)}`
+  const callbackUrl = `${proto}://${host}${pathname}${req.nextUrl.search || ''}`
+  const loginUrl = new URL('/voice/login', `${proto}://${host}`)
+  loginUrl.searchParams.set('callbackUrl', callbackUrl)
   return NextResponse.redirect(loginUrl)
 }
