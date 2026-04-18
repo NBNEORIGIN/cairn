@@ -913,38 +913,68 @@ async def chat_voice(
             budget_remaining=max(0.0, daily_cost_cap_gbp - spent_gbp),
         )
 
-    # ── Route to main chat agent with voice-specific overrides ────────
-    try:
-        from api.main import get_agent
-        from core.channels.envelope import MessageEnvelope, Channel
-    except Exception as exc:
-        _log_voice_telemetry(
-            session_id=session_id, user_label=body.user, location=body.location,
-            question=question, response=None, model_used=None,
-            cost_usd=0.0, latency_ms=0, outcome="backend_error",
-        )
-        raise HTTPException(status_code=500, detail=f"agent import failed: {exc}")
+    # ── Direct Ollama call with pre-loaded ambient context ────────────
+    #
+    # We intentionally BYPASS the agent pipeline for voice. Rationale:
+    # 1. The agent picks OLLAMA_MODEL_PREFERRED (qwen2.5-coder:32b) which
+    #    has 33s cold-load latency — unacceptable for voice UX.
+    # 2. The voice path uses max_tool_rounds=0 anyway, so the agent's
+    #    tool-routing machinery adds cost without value.
+    # 3. Directly calling qwen2.5:7b-instruct (always-warm) gives us
+    #    sub-5s responses with good enough quality for conversational Q&A.
+    #
+    # Context pre-loading: we fetch the location's relevant federation
+    # snapshot(s) and paste them into the system prompt. The model
+    # doesn't need tools because the answer is usually already in
+    # 2-3 KB of live business state.
 
-    location_hint = (
-        f"[Context: user is at {body.location}. Respond in under 60 words, "
-        f"no markdown, no tool calls. Voice response.]\n\n"
+    voice_model = os.getenv(
+        "OLLAMA_VOICE_MODEL",
+        os.getenv("OLLAMA_CLASSIFIER_MODEL", "qwen2.5:7b-instruct"),
     )
-    agent_content = location_hint + question
+    ollama_base = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
 
-    agent = get_agent("nbne")
-    envelope = MessageEnvelope(
-        content=agent_content,
-        channel=Channel("web"),
-        project_id="nbne",
-        session_id=session_id,
-        model_override="local",   # tier 1 → Ollama
-        max_tool_rounds=0,        # no tools in voice path
-        read_only=True,
+    # Pull the relevant snapshot(s) for this location
+    ctx_blocks: list[str] = []
+    snapshot_modules = {
+        "workshop": ["manufacture"],
+        "office": ["crm"],
+        "home": ["ledger", "crm"],
+    }
+    for mod in snapshot_modules.get(body.location, []):
+        md, _ts = _load_snapshot(mod)
+        if md:
+            ctx_blocks.append(f"=== {mod.upper()} SNAPSHOT ===\n{md[:2500]}")
+
+    context_section = "\n\n".join(ctx_blocks) if ctx_blocks else "(no live snapshots available)"
+
+    system_prompt = (
+        VOICE_SYSTEM_PROMPT
+        + f"\n\n=== LIVE BUSINESS CONTEXT (location: {body.location}) ===\n"
+        + context_section
+        + "\n\nAnswer the user's question using ONLY the context above. "
+          "If the answer isn't there, say 'I don't have that information'."
     )
 
     t0 = time.monotonic()
     try:
-        response = await agent.process(envelope)
+        import httpx
+        with httpx.Client(timeout=30.0) as client:
+            r = client.post(
+                f"{ollama_base}/api/chat",
+                json={
+                    "model": voice_model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": question},
+                    ],
+                    "stream": False,
+                    "options": {
+                        "num_predict": 150,
+                        "temperature": 0.2,
+                    },
+                },
+            )
     except Exception as exc:
         latency_ms = int((time.monotonic() - t0) * 1000)
         err_text = (
@@ -954,7 +984,7 @@ async def chat_voice(
         _log_voice_telemetry(
             session_id=session_id, user_label=body.user, location=body.location,
             question=question, response=f"{type(exc).__name__}: {exc}",
-            model_used=None, cost_usd=0.0, latency_ms=latency_ms,
+            model_used=voice_model, cost_usd=0.0, latency_ms=latency_ms,
             outcome="backend_error",
         )
         return VoiceChatResponse(
@@ -965,21 +995,39 @@ async def chat_voice(
         )
 
     latency_ms = int((time.monotonic() - t0) * 1000)
-    reply = _strip_markdown_for_tts((response.content or "").strip())
+
+    if r.status_code != 200:
+        err_text = f"Deek returned HTTP {r.status_code}."
+        _log_voice_telemetry(
+            session_id=session_id, user_label=body.user, location=body.location,
+            question=question, response=err_text, model_used=voice_model,
+            cost_usd=0.0, latency_ms=latency_ms, outcome="backend_error",
+        )
+        return VoiceChatResponse(
+            response=err_text, session_id=session_id,
+            model_used=voice_model, cost_usd=0.0, latency_ms=latency_ms,
+            outcome="backend_error",
+            budget_remaining=max(0.0, daily_cost_cap_gbp - spent_gbp),
+        )
+
+    try:
+        raw = (r.json().get("message", {}) or {}).get("content", "").strip()
+    except Exception:
+        raw = ""
+
+    reply = _strip_markdown_for_tts(raw) or "Sorry, I didn't get an answer."
 
     _log_voice_telemetry(
         session_id=session_id, user_label=body.user, location=body.location,
-        question=question, response=reply,
-        model_used=response.model_used or None,
-        cost_usd=float(response.cost_usd or 0.0),
-        latency_ms=latency_ms, outcome="success",
+        question=question, response=reply, model_used=voice_model,
+        cost_usd=0.0, latency_ms=latency_ms, outcome="success",
     )
 
     return VoiceChatResponse(
-        response=reply or "Sorry, I didn't get an answer.",
+        response=reply,
         session_id=session_id,
-        model_used=response.model_used or "",
-        cost_usd=float(response.cost_usd or 0.0),
+        model_used=voice_model,
+        cost_usd=0.0,
         latency_ms=latency_ms,
         outcome="success",
         budget_remaining=max(0.0, daily_cost_cap_gbp - spent_gbp),
