@@ -894,18 +894,28 @@ async def chat_voice(
     question = body.content.strip()
 
     # ── Budget check ──────────────────────────────────────────────────
+    # Count is the PRIMARY defence (fires even for zero-cost local turns).
+    # £ cap is secondary — meaningful only if we ever fall back to the
+    # paid Claude/DeepSeek path. For local-only voice, spent_gbp stays 0
+    # and only the count ever trips.
     daily_limit = int(os.getenv("DEEK_VOICE_DAILY_LIMIT", "200"))
     daily_cost_cap_gbp = float(os.getenv("DEEK_VOICE_DAILY_COST_GBP", "0.50"))
-    spent_gbp = _voice_daily_spend_gbp()
     count_today = _voice_daily_count()
+    spent_gbp = _voice_daily_spend_gbp()
     if count_today >= daily_limit or spent_gbp >= daily_cost_cap_gbp:
+        trip_reason = (
+            f"count {count_today}/{daily_limit}"
+            if count_today >= daily_limit
+            else f"spend £{spent_gbp:.2f}/£{daily_cost_cap_gbp:.2f}"
+        )
         canned = (
             "Deek is thinking less today. The daily voice budget has been "
             "reached. I'll be back tomorrow."
         )
         _log_voice_telemetry(
             session_id=session_id, user_label=body.user, location=body.location,
-            question=question, response=canned, model_used=None,
+            question=question, response=f"{canned} ({trip_reason})",
+            model_used=None,
             cost_usd=0.0, latency_ms=0, outcome="budget_trip",
         )
         return VoiceChatResponse(
@@ -1033,4 +1043,235 @@ async def chat_voice(
         latency_ms=latency_ms,
         outcome="success",
         budget_remaining=max(0.0, daily_cost_cap_gbp - spent_gbp),
+    )
+
+
+# ── Voice session history ───────────────────────────────────────────────────
+
+
+class VoiceTurn(BaseModel):
+    role: str                    # "user" | "deek"
+    text: str
+    at: datetime
+    outcome: Optional[str] = None
+    model_used: Optional[str] = None
+    latency_ms: Optional[int] = None
+
+
+class VoiceSessionsResponse(BaseModel):
+    turns: list[VoiceTurn]
+
+
+@router.get("/voice/sessions", response_model=VoiceSessionsResponse)
+async def voice_sessions(
+    session_id: Optional[str] = Query(None),
+    user: Optional[str] = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+    _: bool = Depends(verify_api_key),
+):
+    """Return recent voice turns for hydration on PWA load.
+
+    Prefers session_id when given (continuity of a single conversation).
+    Falls back to ``user`` for cross-device history ("tell me more about
+    that" from a different Pi). Returns newest last so the client can
+    append without reordering.
+    """
+    # Short-circuit when neither selector is given — avoids a DB roundtrip
+    # and also means this test path works without a live Postgres.
+    if not session_id and not user:
+        return VoiceSessionsResponse(turns=[])
+
+    _ensure_voice_telemetry_schema()
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            clauses: list[str] = []
+            params: list = []
+            if session_id:
+                clauses.append("session_id = %s")
+                params.append(session_id)
+            elif user:
+                clauses.append("user_label = %s")
+                params.append(user)
+                # 10-minute window for cross-device continuity
+                clauses.append(
+                    "created_at >= NOW() - INTERVAL '10 minutes'"
+                )
+            where = f"WHERE {' AND '.join(clauses)}"
+            params.append(limit)
+            cur.execute(
+                f"""
+                SELECT question, response, outcome, model_used,
+                       latency_ms, created_at
+                FROM deek_voice_sessions
+                {where}
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                params,
+            )
+            rows = list(reversed(cur.fetchall()))
+    finally:
+        conn.close()
+
+    turns: list[VoiceTurn] = []
+    for question, response, outcome, model_used, latency_ms, created_at in rows:
+        turns.append(VoiceTurn(role="user", text=question, at=created_at))
+        if response:
+            turns.append(VoiceTurn(
+                role="deek", text=response, at=created_at,
+                outcome=outcome, model_used=model_used, latency_ms=latency_ms,
+            ))
+    return VoiceSessionsResponse(turns=turns)
+
+
+# ── Voice metrics (telemetry dashboard) ────────────────────────────────────
+
+
+class VoiceMetricsOutcome(BaseModel):
+    outcome: str
+    count: int
+
+
+class VoiceMetricsDaily(BaseModel):
+    day: str                         # YYYY-MM-DD
+    count: int
+    cost_usd: float
+    avg_latency_ms: float
+
+
+class VoiceMetricsResponse(BaseModel):
+    count_24h: int
+    count_7d: int
+    cost_usd_24h: float
+    cost_usd_7d: float
+    avg_latency_ms_24h: float
+    outcomes_24h: list[VoiceMetricsOutcome]
+    by_location_24h: list[dict]      # [{location, count}]
+    by_day_7d: list[VoiceMetricsDaily]
+    recent_turns: list[dict]         # [{session_id, user, location, question,
+                                     #   response, outcome, model_used,
+                                     #   latency_ms, created_at}] last 20
+    budget_limit: int
+    budget_cost_cap_gbp: float
+
+
+@router.get("/voice/metrics", response_model=VoiceMetricsResponse)
+async def voice_metrics(
+    _: bool = Depends(verify_api_key),
+):
+    """Aggregations over deek_voice_sessions for the /admin/voice-metrics UI."""
+    _ensure_voice_telemetry_schema()
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            # Totals
+            cur.execute(
+                """
+                SELECT
+                  COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours'),
+                  COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days'),
+                  COALESCE(SUM(cost_usd) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours'), 0),
+                  COALESCE(SUM(cost_usd) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days'), 0),
+                  COALESCE(AVG(latency_ms) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours' AND outcome = 'success'), 0)
+                FROM deek_voice_sessions
+                """
+            )
+            r = cur.fetchone() or (0, 0, 0, 0, 0)
+            count_24h = int(r[0] or 0)
+            count_7d = int(r[1] or 0)
+            cost_24h = float(r[2] or 0)
+            cost_7d = float(r[3] or 0)
+            avg_latency_24h = float(r[4] or 0)
+
+            # Outcomes breakdown (24h)
+            cur.execute(
+                """
+                SELECT outcome, COUNT(*)
+                FROM deek_voice_sessions
+                WHERE created_at >= NOW() - INTERVAL '24 hours'
+                GROUP BY outcome
+                ORDER BY COUNT(*) DESC
+                """
+            )
+            outcomes = [
+                VoiceMetricsOutcome(outcome=row[0] or "unknown", count=int(row[1]))
+                for row in cur.fetchall()
+            ]
+
+            # By location (24h)
+            cur.execute(
+                """
+                SELECT location, COUNT(*)
+                FROM deek_voice_sessions
+                WHERE created_at >= NOW() - INTERVAL '24 hours'
+                GROUP BY location
+                ORDER BY COUNT(*) DESC
+                """
+            )
+            by_loc = [
+                {"location": row[0] or "unknown", "count": int(row[1])}
+                for row in cur.fetchall()
+            ]
+
+            # By day (last 7)
+            cur.execute(
+                """
+                SELECT
+                  to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS day,
+                  COUNT(*) AS count,
+                  COALESCE(SUM(cost_usd), 0) AS cost_usd,
+                  COALESCE(AVG(latency_ms) FILTER (WHERE outcome = 'success'), 0) AS avg_latency
+                FROM deek_voice_sessions
+                WHERE created_at >= NOW() - INTERVAL '7 days'
+                GROUP BY day
+                ORDER BY day ASC
+                """
+            )
+            by_day = [
+                VoiceMetricsDaily(
+                    day=row[0], count=int(row[1]),
+                    cost_usd=float(row[2]),
+                    avg_latency_ms=float(row[3]),
+                )
+                for row in cur.fetchall()
+            ]
+
+            # Recent 20 turns
+            cur.execute(
+                """
+                SELECT session_id, user_label, location, question, response,
+                       outcome, model_used, latency_ms, created_at
+                FROM deek_voice_sessions
+                ORDER BY created_at DESC
+                LIMIT 20
+                """
+            )
+            recent = [
+                {
+                    "session_id": row[0],
+                    "user": row[1],
+                    "location": row[2],
+                    "question": row[3],
+                    "response": row[4],
+                    "outcome": row[5],
+                    "model_used": row[6],
+                    "latency_ms": row[7],
+                    "created_at": row[8].isoformat() if row[8] else None,
+                }
+                for row in cur.fetchall()
+            ]
+    finally:
+        conn.close()
+
+    return VoiceMetricsResponse(
+        count_24h=count_24h, count_7d=count_7d,
+        cost_usd_24h=cost_24h, cost_usd_7d=cost_7d,
+        avg_latency_ms_24h=avg_latency_24h,
+        outcomes_24h=outcomes,
+        by_location_24h=by_loc,
+        by_day_7d=by_day,
+        recent_turns=recent,
+        budget_limit=int(os.getenv("DEEK_VOICE_DAILY_LIMIT", "200")),
+        budget_cost_cap_gbp=float(os.getenv("DEEK_VOICE_DAILY_COST_GBP", "0.50")),
     )

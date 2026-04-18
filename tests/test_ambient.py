@@ -325,3 +325,76 @@ class TestVoiceChat:
         assert "item" in _strip_markdown_for_tts("- item 1\n- item 2")
         assert "`" not in _strip_markdown_for_tts("use `foo` function")
         assert "```" not in _strip_markdown_for_tts("```py\ncode\n```")
+
+
+class TestVoiceSessionHistory:
+
+    def test_sessions_requires_session_or_user(self, monkeypatch):
+        monkeypatch.setattr(
+            "api.routes.ambient._ensure_voice_telemetry_schema",
+            lambda: None,
+        )
+        from fastapi.testclient import TestClient
+        from api.main import app
+        import os
+        tc = TestClient(app)
+        key = os.environ.get("DEEK_API_KEY", "deek-dev-key-change-in-production")
+        r = tc.get("/api/deek/voice/sessions", headers={"X-API-Key": key})
+        # No session_id, no user → empty turns list, not an error
+        assert r.status_code == 200
+        assert r.json() == {"turns": []}
+
+
+class TestVoiceMetrics:
+
+    def test_metrics_endpoint_exists_and_returns_expected_shape(
+        self, monkeypatch
+    ):
+        """Live DB-backed test uses the actual Postgres. Stub everything
+        that touches the DB so the shape is verifiable in isolation."""
+        # Stub the schema call and DB connection
+        from api.routes import ambient as ambient_module
+        monkeypatch.setattr(
+            ambient_module, "_ensure_voice_telemetry_schema", lambda: None
+        )
+
+        class StubCursor:
+            def __init__(self):
+                self.calls = 0
+            def execute(self, *args, **kwargs):
+                self.calls += 1
+            def fetchone(self):
+                return (0, 0, 0, 0, 0)
+            def fetchall(self):
+                return []
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+        class StubConn:
+            def cursor(self):
+                return StubCursor()
+            def close(self):
+                pass
+            def commit(self):
+                pass
+        monkeypatch.setattr(
+            ambient_module, "_get_conn", lambda: StubConn()
+        )
+
+        from fastapi.testclient import TestClient
+        from api.main import app
+        import os
+        tc = TestClient(app)
+        key = os.environ.get("DEEK_API_KEY", "deek-dev-key-change-in-production")
+        r = tc.get("/api/deek/voice/metrics", headers={"X-API-Key": key})
+        assert r.status_code == 200
+        data = r.json()
+        for expected in (
+            "count_24h", "count_7d", "cost_usd_24h", "cost_usd_7d",
+            "avg_latency_ms_24h", "outcomes_24h", "by_location_24h",
+            "by_day_7d", "recent_turns", "budget_limit", "budget_cost_cap_gbp",
+        ):
+            assert expected in data, f"missing field: {expected}"
+        assert isinstance(data["outcomes_24h"], list)
+        assert isinstance(data["by_day_7d"], list)

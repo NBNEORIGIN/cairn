@@ -26,6 +26,13 @@ import Link from 'next/link'
 
 type Location = 'workshop' | 'office' | 'home'
 
+interface Me {
+  authenticated: boolean
+  user?: { id: string; email?: string; name?: string | null; role: string }
+  allowed_locations?: Location[]
+  login_url?: string
+}
+
 interface MorningNumber {
   number: string
   unit: string
@@ -79,6 +86,7 @@ const LOCATION_KEY = 'deek.location'
 const SESSION_KEY = 'deek.voice.session'
 
 export default function VoicePage() {
+  const [me, setMe] = useState<Me | null>(null)
   const [location, setLocation] = useState<Location | null>(null)
   const [ambient, setAmbient] = useState<AmbientPayload | null>(null)
   const [offline, setOffline] = useState(false)
@@ -93,23 +101,71 @@ export default function VoicePage() {
   const recognitionRef = useRef<any>(null)
   const sessionIdRef = useRef<string | null>(null)
 
-  // ── Boot: load location + session from storage ────────────────────
+  // ── Boot: fetch session + load location + hydrate transcript ──────
   useEffect(() => {
-    const stored = localStorage.getItem(LOCATION_KEY) as Location | null
-    if (stored === 'workshop' || stored === 'office' || stored === 'home') {
-      setLocation(stored)
-    }
-    sessionIdRef.current = localStorage.getItem(SESSION_KEY)
+    const boot = async () => {
+      // 1. Session / ACL
+      try {
+        const res = await fetch('/api/voice/me', { cache: 'no-store' })
+        if (res.status === 401) {
+          const json = await res.json().catch(() => ({} as any))
+          if (json?.login_url) {
+            window.location.href = json.login_url
+            return
+          }
+        }
+        const json: Me = await res.json()
+        setMe(json)
 
-    // Detect Web Speech support
-    const SpeechRecognition =
-      (typeof window !== 'undefined' &&
-        ((window as any).SpeechRecognition ||
-          (window as any).webkitSpeechRecognition)) ||
-      null
-    if (!SpeechRecognition) {
-      setSttUnsupported(true)
+        // 2. Restore location if allowed
+        const stored = localStorage.getItem(LOCATION_KEY) as Location | null
+        if (
+          stored &&
+          (json.allowed_locations || []).includes(stored as Location)
+        ) {
+          setLocation(stored as Location)
+        }
+
+        // 3. Restore session id
+        sessionIdRef.current = localStorage.getItem(SESSION_KEY)
+
+        // 4. Hydrate transcript from server (last 20 turns for this user)
+        try {
+          const qs = sessionIdRef.current
+            ? `?session_id=${sessionIdRef.current}&limit=20`
+            : `?limit=20`
+          const sRes = await fetch(`/api/voice/sessions${qs}`, {
+            cache: 'no-store',
+          })
+          if (sRes.ok) {
+            const sData = await sRes.json()
+            const turns = (sData.turns || []).map((t: any) => ({
+              role: t.role,
+              text: t.text,
+              at: new Date(t.at).getTime(),
+              outcome: t.outcome,
+            }))
+            if (turns.length > 0) {
+              setTranscript(turns)
+            }
+          }
+        } catch {}
+      } catch {
+        // Offline / network failure — let the user try anyway; API proxies
+        // will 401 and we'll handle it there.
+      }
+
+      // 5. Detect Web Speech support
+      const SpeechRecognition =
+        (typeof window !== 'undefined' &&
+          ((window as any).SpeechRecognition ||
+            (window as any).webkitSpeechRecognition)) ||
+        null
+      if (!SpeechRecognition) {
+        setSttUnsupported(true)
+      }
     }
+    boot()
   }, [])
 
   // ── Clock — ticks every second ────────────────────────────────────
@@ -200,6 +256,17 @@ export default function VoicePage() {
             session_id: sessionIdRef.current,
           }),
         })
+        if (res.status === 401) {
+          // Session expired — redirect to CRM login
+          const meRes = await fetch('/api/voice/me').then(r => r.json()).catch(() => null)
+          if (meRes?.login_url) {
+            window.location.href = meRes.login_url
+            return
+          }
+          setBusy(false)
+          setErrorMsg('Session expired — refresh the page to sign in again.')
+          return
+        }
         const data: VoiceResponse = await res.json()
 
         // Persist the session ID for continuity
@@ -282,7 +349,20 @@ export default function VoicePage() {
   // ── Render ────────────────────────────────────────────────────────
 
   if (!location) {
-    return <LocationPicker onPick={pickLocation} />
+    const allowed = me?.allowed_locations || ['workshop', 'office', 'home']
+    if (allowed.length === 0) {
+      return (
+        <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-3 bg-slate-950 p-6 text-center text-slate-300">
+          <div className="text-lg font-semibold">Access restricted</div>
+          <div className="max-w-sm text-sm text-slate-500">
+            Your role ({me?.user?.role || 'unknown'}) does not have access to
+            any Deek voice location. Talk to an admin to adjust your
+            permissions.
+          </div>
+        </div>
+      )
+    }
+    return <LocationPicker allowed={allowed} onPick={pickLocation} />
   }
 
   return (
@@ -306,7 +386,14 @@ export default function VoicePage() {
           </div>
         </div>
         <button
-          onClick={() => pickLocation(nextLocation(location))}
+          onClick={() =>
+            pickLocation(
+              nextLocation(
+                location,
+                me?.allowed_locations || ['workshop', 'office', 'home'],
+              ),
+            )
+          }
           className="rounded-full border border-slate-700 px-3 py-1 text-xs uppercase tracking-wider text-slate-300 hover:border-slate-500"
           title="Cycle location"
         >
@@ -433,7 +520,13 @@ export default function VoicePage() {
 
 // ── Sub-components ────────────────────────────────────────────────────
 
-function LocationPicker({ onPick }: { onPick: (loc: Location) => void }) {
+function LocationPicker({
+  allowed,
+  onPick,
+}: {
+  allowed: Location[]
+  onPick: (loc: Location) => void
+}) {
   return (
     <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-6 bg-slate-950 p-6 text-slate-100">
       <div className="text-center">
@@ -443,24 +536,30 @@ function LocationPicker({ onPick }: { onPick: (loc: Location) => void }) {
         </div>
       </div>
       <div className="flex flex-col gap-3 w-full max-w-sm">
-        <LocButton onClick={() => onPick('workshop')} emoji="🔧">
-          Workshop
-          <span className="text-xs text-slate-400">
-            Machines · make list · stock
-          </span>
-        </LocButton>
-        <LocButton onClick={() => onPick('office')} emoji="💼">
-          Office
-          <span className="text-xs text-slate-400">
-            Email · CRM · follow-ups
-          </span>
-        </LocButton>
-        <LocButton onClick={() => onPick('home')} emoji="🏡">
-          Home
-          <span className="text-xs text-slate-400">
-            Cash · revenue · high-level
-          </span>
-        </LocButton>
+        {allowed.includes('workshop') && (
+          <LocButton onClick={() => onPick('workshop')} emoji="🔧">
+            Workshop
+            <span className="text-xs text-slate-400">
+              Machines · make list · stock
+            </span>
+          </LocButton>
+        )}
+        {allowed.includes('office') && (
+          <LocButton onClick={() => onPick('office')} emoji="💼">
+            Office
+            <span className="text-xs text-slate-400">
+              Email · CRM · follow-ups
+            </span>
+          </LocButton>
+        )}
+        {allowed.includes('home') && (
+          <LocButton onClick={() => onPick('home')} emoji="🏡">
+            Home
+            <span className="text-xs text-slate-400">
+              Cash · revenue · high-level
+            </span>
+          </LocButton>
+        )}
       </div>
     </div>
   )
@@ -552,6 +651,9 @@ function StatusDot({ status }: { status: string }) {
   return <span className={`inline-block h-2 w-2 rounded-full ${cls}`} />
 }
 
-function nextLocation(l: Location): Location {
-  return l === 'workshop' ? 'office' : l === 'office' ? 'home' : 'workshop'
+function nextLocation(l: Location, allowed: Location[]): Location {
+  if (allowed.length === 0) return l
+  const idx = allowed.indexOf(l)
+  if (idx === -1) return allowed[0]
+  return allowed[(idx + 1) % allowed.length]
 }
