@@ -12,7 +12,6 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { HalEye, EyeState } from './HalEye'
-import { useMicAmplitude } from '@/hooks/useMicAmplitude'
 import { useVoiceLoop, VoiceLoopTurn } from '@/hooks/useVoiceLoop'
 import type { Location } from './types'
 
@@ -52,7 +51,15 @@ export function VoiceView({
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const transcriptEndRef = useRef<HTMLDivElement>(null)
 
-  const { state, running, interim, partialResponse, start, stop } = useVoiceLoop({
+  const {
+    state,
+    running,
+    interim,
+    partialResponse,
+    soundDetected,
+    start,
+    stop,
+  } = useVoiceLoop({
     location,
     sessionId,
     onTurn,
@@ -60,8 +67,10 @@ export function VoiceView({
     onError: msg => setErrorMsg(msg),
   })
 
-  // Mic amplitude only matters when listening (and when running — saves battery)
-  const amp = useMicAmplitude(running && state === 'listening')
+  // Use Web Speech's own sound-detection events to drive the eye
+  // (avoids a conflicting getUserMedia stream). When sound is detected
+  // we boost the amplitude; otherwise fall back to a gentle idle hint.
+  const amp = soundDetected ? 0.6 : 0
 
   const eyeState: EyeState = state
 

@@ -41,6 +41,11 @@ export function useVoiceLoop(opts: VoiceLoopOpts) {
   const [interim, setInterim] = useState<string>('')
   const [partialResponse, setPartialResponse] = useState<string>('')
   const [running, setRunning] = useState(false)
+  // Driven by Web Speech's onsoundstart/onsoundend — used by HalEye
+  // to pulse when the user is actually making sound. Avoids holding
+  // a second getUserMedia stream which was blocking recognition on
+  // Android Chrome.
+  const [soundDetected, setSoundDetected] = useState(false)
 
   const recognitionRef = useRef<any>(null)
   const queueRef = useRef<SpeechQueue | null>(null)
@@ -206,6 +211,9 @@ export function useVoiceLoop(opts: VoiceLoopOpts) {
     rec.continuous = false
 
     let finalText = ''
+    rec.onsoundstart = () => setSoundDetected(true)
+    rec.onsoundend = () => setSoundDetected(false)
+    rec.onaudioend = () => setSoundDetected(false)
     rec.onresult = (event: any) => {
       let interimText = ''
       for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -226,7 +234,8 @@ export function useVoiceLoop(opts: VoiceLoopOpts) {
       }
     }
     rec.onerror = (event: any) => {
-      if (event.error === 'no-speech' || event.error === 'aborted') {
+      const code = event.error || 'unknown'
+      if (code === 'no-speech' || code === 'aborted') {
         // Loop: try again
         if (runningRef.current && stateRef.current === 'listening') {
           setTimeout(() => {
@@ -235,10 +244,32 @@ export function useVoiceLoop(opts: VoiceLoopOpts) {
         }
         return
       }
-      opts.onError?.(`Mic: ${event.error}`)
+      // Surface specific, human-readable messages
+      if (code === 'not-allowed' || code === 'service-not-allowed') {
+        opts.onError?.(
+          'Microphone permission denied. Tap the lock icon in the address ' +
+          'bar, allow microphone, then tap Start voice mode again.',
+        )
+      } else if (code === 'audio-capture') {
+        opts.onError?.(
+          'No microphone detected. Check device has a working mic and no ' +
+          'other app is using it.',
+        )
+      } else if (code === 'network') {
+        opts.onError?.(
+          'Speech recognition network error. Check connection and retry.',
+        )
+      } else {
+        opts.onError?.(`Mic: ${code}`)
+      }
+      // Stop the loop so the user isn't stuck in a broken state
+      runningRef.current = false
+      setRunning(false)
+      setS('idle')
     }
     rec.onend = () => {
       setInterim('')
+      setSoundDetected(false)
       const text = finalText.trim()
       finalText = ''
       if (text && runningRef.current) {
@@ -256,8 +287,16 @@ export function useVoiceLoop(opts: VoiceLoopOpts) {
     try {
       rec.start()
       setS('listening')
-    } catch (err) {
-      // e.g. InvalidStateError if already started — swallow
+    } catch (err: any) {
+      const msg = err?.message || String(err)
+      if (/already started|InvalidStateError/i.test(msg)) {
+        // Benign — another start is already in flight
+        return
+      }
+      opts.onError?.(`Could not start microphone: ${msg}`)
+      runningRef.current = false
+      setRunning(false)
+      setS('idle')
     }
   }, [opts, setS, speakStream])
 
@@ -296,6 +335,7 @@ export function useVoiceLoop(opts: VoiceLoopOpts) {
     running,
     interim,
     partialResponse,
+    soundDetected,
     start,
     stop,
   }
