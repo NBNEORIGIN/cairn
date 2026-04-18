@@ -315,6 +315,10 @@ export function ChatWindow() {
   // Subproject
   const [subprojects, setSubprojects] = useState<Subproject[]>([])
   const [activeSubprojectId, setActiveSubprojectId] = useState<string | null>(null)
+  // Mobile sidebar drawer visibility. Defaults closed on every breakpoint;
+  // the `md:static` class overrides positioning on desktop so it's always
+  // visible there regardless of this state.
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const [availableSkills, setAvailableSkills] = useState<SkillOption[]>([])
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([])
 
@@ -913,18 +917,49 @@ export function ChatWindow() {
 
   return (
     <div className="flex h-full min-h-0 bg-slate-50 text-slate-900">
-      <SessionSidebar
-        projectId={projectId}
-        activeSessionId={sessionId}
-        activeSubprojectId={activeSubprojectId}
-        onSessionSelect={loadSession}
-        onSubprojectChange={(spId) => setActiveSubprojectId(spId)}
-      />
+      {/* Sidebar: static on md+, off-canvas drawer on mobile */}
+      <div
+        className={`fixed inset-y-0 left-0 z-40 flex transition-transform md:static md:translate-x-0 ${
+          sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+        }`}
+      >
+        <SessionSidebar
+          projectId={projectId}
+          activeSessionId={sessionId}
+          activeSubprojectId={activeSubprojectId}
+          onSessionSelect={(sid) => {
+            loadSession(sid)
+            setSidebarOpen(false)
+          }}
+          onSubprojectChange={(spId) => setActiveSubprojectId(spId)}
+        />
+      </div>
+      {/* Backdrop for mobile drawer */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/40 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+          aria-hidden
+        />
+      )}
 
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Header */}
         <header className="flex-shrink-0 border-b border-slate-200 bg-white px-5 py-3">
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            {/* Hamburger — mobile only, opens the sidebar drawer */}
+            <button
+              onClick={() => setSidebarOpen(true)}
+              aria-label="Open sidebar"
+              className="-ml-1 inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100 md:hidden"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <line x1="3" y1="6" x2="21" y2="6" />
+                <line x1="3" y1="12" x2="21" y2="12" />
+                <line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+            </button>
+
             {/* Brand + selectors — left group */}
             <div className="flex items-center gap-3">
               <div className="flex h-8 w-8 items-center justify-center rounded-md bg-slate-900">
@@ -938,11 +973,12 @@ export function ChatWindow() {
               </div>
               <div className="leading-tight">
                 <div className="text-sm font-semibold tracking-tight text-slate-900">Deek</div>
-                <div className="text-2xs text-slate-500">Sovereign agent · NBNE</div>
+                <div className="hidden text-2xs text-slate-500 sm:block">Sovereign agent · NBNE</div>
               </div>
             </div>
 
-            <div className="h-6 w-px bg-slate-200" aria-hidden />
+            {/* Divider — hidden on mobile to save horizontal space */}
+            <div className="hidden h-6 w-px bg-slate-200 md:block" aria-hidden />
 
             <div className="flex items-center gap-2">
               <label className="label-xs">Project</label>
@@ -957,7 +993,7 @@ export function ChatWindow() {
             </div>
 
             {visibleSubprojects.length > 0 && (
-              <div className="flex items-center gap-2">
+              <div className="hidden items-center gap-2 md:flex">
                 <label className="label-xs">Client</label>
                 <select
                   value={activeSubprojectId || ''}
@@ -971,7 +1007,7 @@ export function ChatWindow() {
             )}
 
             {visibleSkills.length > 0 && (
-              <div className="flex min-w-[220px] flex-wrap items-center gap-1.5">
+              <div className="hidden min-w-[220px] flex-wrap items-center gap-1.5 md:flex">
                 <label className="label-xs mr-1">Skills</label>
                 {visibleSkills.slice(0, 6).map(skill => {
                   const active = activeSkillIds.includes(skill.skill_id)
@@ -1009,20 +1045,21 @@ export function ChatWindow() {
 
             {/* Right group — metrics + new chat */}
             <div className="ml-auto flex flex-wrap items-center gap-1.5">
-              <div className="chip" title="Session spend">
+              {/* Developer chrome — hidden on mobile, visible from md up */}
+              <div className="chip hidden md:flex" title="Session spend">
                 <span className="label-xs">$</span>
                 <span className="chip-value">{sessionCost.toFixed(4)}</span>
               </div>
-              <div className="chip" title="Local / API calls">
+              <div className="chip hidden md:flex" title="Local / API calls">
                 <span className="chip-value">{localCalls}</span>
                 <span className="text-slate-400">/</span>
                 <span className="chip-value">{apiCalls}</span>
               </div>
-              <div className="chip font-mono" title={`Session ${sessionId}`}>
+              <div className="chip hidden font-mono md:flex" title={`Session ${sessionId}`}>
                 <span className="chip-value">{sessionId.slice(0, 8)}</span>
               </div>
               <div
-                className={`chip ${
+                className={`chip hidden md:flex ${
                   indexChunks === null ? 'text-slate-400'
                   : indexChunks > 0 ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
                   : 'border-amber-200 bg-amber-50 text-amber-700'
@@ -1037,7 +1074,7 @@ export function ChatWindow() {
                 className="focus-ring ml-1 inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-slate-700"
               >
                 <Plus size={14} />
-                New chat
+                <span className="hidden sm:inline">New chat</span>
               </button>
             </div>
           </div>
@@ -1124,9 +1161,11 @@ export function ChatWindow() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Quick-action buttons — show for fresh sessions */}
+        {/* Quick-action buttons — show for fresh sessions.
+            Hidden on mobile (where the input is the priority) and scrolls
+            horizontally on small tablets. */}
         {!loading && messages.length <= 1 && (
-          <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-t border-slate-100 bg-white px-5 py-2.5">
+          <div className="hidden flex-shrink-0 flex-wrap items-center gap-2 border-t border-slate-100 bg-white px-5 py-2.5 md:flex">
             <span className="label-xs mr-1">Quick start</span>
             {[
               { label: 'Amazon Sales', prompt: 'Show me the latest Amazon sales analytics — revenue, top sellers, and velocity trends' },
@@ -1301,7 +1340,7 @@ export function ChatWindow() {
               </button>
             )}
           </div>
-          <p className="mt-1.5 px-0.5 text-2xs text-slate-400">
+          <p className="mt-1.5 hidden px-0.5 text-2xs text-slate-400 md:block">
             ↵ send · ⇧↵ newline · @ pin context
           </p>
         </div>

@@ -20,15 +20,41 @@ const PUBLIC_PATHS = new Set<string>([
 
 export const config = {
   matcher: [
+    '/',
     '/voice/:path*',
     '/api/voice/:path*',
     '/admin/:path*',
   ],
 }
 
+// Simple UA-based mobile detection. Edge runtime has no window.matchMedia,
+// and User-Agent is good enough for "is this a phone?" — we fall back to
+// showing the desktop UI if we're unsure.
+const MOBILE_UA_RE = /Mobi|Android|iPhone|iPod|BlackBerry|Windows Phone/i
+
+function isMobile(req: NextRequest): boolean {
+  const ua = req.headers.get('user-agent') || ''
+  return MOBILE_UA_RE.test(ua)
+}
+
 export function middleware(req: NextRequest) {
   const pathname = req.nextUrl.pathname
 
+  // ── Mobile redirect: / → /voice ─────────────────────────────────
+  // The desktop ChatWindow at / is a power-user interface. On phones
+  // we send users to the mobile-first PWA. Users can still explicitly
+  // visit /?desktop=1 to see the legacy page if they want.
+  if (pathname === '/') {
+    if (isMobile(req) && !req.nextUrl.searchParams.has('desktop')) {
+      const url = req.nextUrl.clone()
+      url.pathname = '/voice'
+      url.search = ''
+      return NextResponse.redirect(url)
+    }
+    return NextResponse.next()
+  }
+
+  // ── Auth gate for protected paths ──────────────────────────────
   if (PUBLIC_PATHS.has(pathname)) {
     return NextResponse.next()
   }
