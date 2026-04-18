@@ -12,8 +12,12 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { HalEye, EyeState } from './HalEye'
+import { DeekConstellation } from './DeekConstellation'
 import { useVoiceLoop, VoiceLoopTurn } from '@/hooks/useVoiceLoop'
 import type { Location } from './types'
+
+const FACE_KEY = 'deek.face'
+type FaceChoice = 'eye' | 'net'
 
 interface AmbientPanel {
   id: string
@@ -47,9 +51,20 @@ export function VoiceView({
   sessionId: string | null
   onSessionId: (id: string) => void
 }) {
-  const [topView, setTopView] = useState<'eye' | 'data'>('eye')
+  const [topView, setTopView] = useState<'face' | 'data'>('face')
+  const [face, setFace] = useState<FaceChoice>('net')  // Deek's own choice wins by default
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const transcriptEndRef = useRef<HTMLDivElement>(null)
+
+  // Restore saved face preference
+  useEffect(() => {
+    const saved = localStorage.getItem(FACE_KEY) as FaceChoice | null
+    if (saved === 'eye' || saved === 'net') setFace(saved)
+  }, [])
+  const pickFace = useCallback((f: FaceChoice) => {
+    setFace(f)
+    try { localStorage.setItem(FACE_KEY, f) } catch {}
+  }, [])
 
   const {
     state,
@@ -121,13 +136,13 @@ export function VoiceView({
     <div className="flex h-full flex-col bg-slate-950 text-slate-100">
       {/* ── Top half ─────────────────────────────────────────────────── */}
       <div className="relative flex h-1/2 min-h-0 items-center justify-center border-b border-slate-800">
-        {/* Top-half toggle */}
+        {/* Top-half view toggle: Face | Data */}
         <div className="absolute left-4 top-4 z-10 flex overflow-hidden rounded-full border border-slate-700 text-xs">
           <button
-            onClick={() => setTopView('eye')}
-            className={`px-3 py-1 ${topView === 'eye' ? 'bg-slate-800 text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}
+            onClick={() => setTopView('face')}
+            className={`px-3 py-1 ${topView === 'face' ? 'bg-slate-800 text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}
           >
-            Eye
+            Face
           </button>
           <button
             onClick={() => setTopView('data')}
@@ -137,14 +152,43 @@ export function VoiceView({
           </button>
         </div>
 
-        {topView === 'eye' ? (
+        {/* Face sub-toggle: Eye | Net — only visible when face is showing */}
+        {topView === 'face' && (
+          <div className="absolute right-4 top-4 z-10 flex overflow-hidden rounded-full border border-slate-700 text-xs">
+            <button
+              onClick={() => pickFace('eye')}
+              title="HAL-style red eye"
+              className={`px-3 py-1 ${face === 'eye' ? 'bg-slate-800 text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}
+            >
+              Eye
+            </button>
+            <button
+              onClick={() => pickFace('net')}
+              title="Constellation — Deek's self-designed face"
+              className={`px-3 py-1 ${face === 'net' ? 'bg-slate-800 text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}
+            >
+              Net
+            </button>
+          </div>
+        )}
+
+        {topView === 'face' ? (
           <div className="flex flex-col items-center gap-6">
-            <HalEye
-              state={eyeState}
-              amplitude={amp}
-              size={280}
-              onClick={toggleRunning}
-            />
+            {face === 'eye' ? (
+              <HalEye
+                state={eyeState}
+                amplitude={amp}
+                size={280}
+                onClick={toggleRunning}
+              />
+            ) : (
+              <DeekConstellation
+                state={eyeState}
+                soundIntensity={amp}
+                size={280}
+                onClick={toggleRunning}
+              />
+            )}
             <div
               className={`text-sm ${
                 state === 'speaking'

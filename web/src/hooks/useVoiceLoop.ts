@@ -77,7 +77,12 @@ export function useVoiceLoop(opts: VoiceLoopOpts) {
 
       // Fresh SpeechQueue each turn
       queueRef.current?.cancel()
+      let preferredVoice: string | undefined
+      try {
+        preferredVoice = localStorage.getItem('deek.voice.preferred') || undefined
+      } catch {}
       const q = new SpeechQueue({
+        voiceName: preferredVoice,
         onSpeakStart: () => setS('speaking'),
         onSpeakEnd: () => {
           // After speaking, loop back to listening if still running

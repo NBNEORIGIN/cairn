@@ -115,11 +115,12 @@ export class SpeechQueue {
     }
 
     const u = new SpeechSynthesisUtterance(next)
-    u.rate = this.opts.rate ?? 0.88
-    u.pitch = this.opts.pitch ?? 0.7
-    u.lang = this.opts.lang ?? 'en-GB'
-
     const chosen = chooseHalVoice(this.opts.voiceName)
+    const tuned = halTuningFor(chosen?.name)
+    // Per-voice tuning wins unless the caller passed explicit rate/pitch
+    u.rate = this.opts.rate ?? tuned.rate
+    u.pitch = this.opts.pitch ?? tuned.pitch
+    u.lang = this.opts.lang ?? 'en-GB'
     if (chosen) u.voice = chosen
 
     u.onstart = () => {
@@ -227,14 +228,63 @@ export function chooseHalVoice(
   return voices[0]
 }
 
-/** List available voices — handy for a future settings panel. */
+/** List available voices — used by the voice picker in the ⋯ menu. */
 export function listHalCandidates(): SpeechSynthesisVoice[] {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
     return []
   }
   const voices = window.speechSynthesis.getVoices()
-  // Prefer English + male-coded
-  return voices
-    .filter(v => v.lang?.startsWith('en'))
-    .filter(v => !HAL_AVOID.test(v.name))
+  // Prefer English + male-coded but still list everything English so the
+  // user can override. We sort: preferred first, then male, then female.
+  const english = voices.filter(v => v.lang?.startsWith('en'))
+  const score = (v: SpeechSynthesisVoice) => {
+    if (HAL_PREFERRED_VOICES.includes(v.name)) {
+      return HAL_PREFERRED_VOICES.length - HAL_PREFERRED_VOICES.indexOf(v.name)
+    }
+    if (!HAL_AVOID.test(v.name)) return 5
+    return 1
+  }
+  return english.sort((a, b) => score(b) - score(a))
+}
+
+// ── Per-voice pitch/rate tuning ─────────────────────────────────────────────
+// Different voices sound best with different pitch/rate. At pitch 0.7 a
+// voice like Microsoft Ryan sounds great but Google UK English Male goes
+// into "chipmunk reverse" territory. These are hand-tuned.
+
+interface HalTuning {
+  rate: number
+  pitch: number
+}
+
+const HAL_VOICE_TUNING: Record<string, HalTuning> = {
+  // Microsoft Windows
+  'Microsoft Ryan Online (Natural) - English (United Kingdom)': { rate: 0.88, pitch: 0.7 },
+  'Microsoft Thomas Online (Natural) - English (France)':        { rate: 0.92, pitch: 0.75 },
+  'Microsoft George - English (United Kingdom)':                 { rate: 0.9,  pitch: 0.75 },
+  'Microsoft David - English (United States)':                   { rate: 0.92, pitch: 0.75 },
+  'Microsoft Mark - English (United States)':                    { rate: 0.9,  pitch: 0.7 },
+
+  // Google (Android Chrome + Chrome desktop)
+  // These are quite low-pitched natively, so don't drop further
+  'Google UK English Male': { rate: 0.92, pitch: 0.85 },
+  'Google US English':      { rate: 0.9,  pitch: 0.8 },
+
+  // Apple
+  'Daniel': { rate: 0.88, pitch: 0.7 },   // en-GB male, iOS/macOS
+  'Alex':   { rate: 0.92, pitch: 0.75 },  // en-US male, macOS
+  'Arthur': { rate: 0.88, pitch: 0.7 },   // en-GB male, iOS
+  'Rishi':  { rate: 0.88, pitch: 0.7 },   // en-IN male, iOS
+  'Oliver': { rate: 0.88, pitch: 0.7 },   // en-GB male, Apple
+
+  // Android system voices — already low and robotic; don't pitch down
+  'en-gb-x-gba-network': { rate: 0.95, pitch: 0.9 },
+  'en-gb-x-rjs-network': { rate: 0.95, pitch: 0.9 },
+}
+
+const HAL_DEFAULT_TUNING: HalTuning = { rate: 0.88, pitch: 0.75 }
+
+export function halTuningFor(voiceName: string | undefined): HalTuning {
+  if (!voiceName) return HAL_DEFAULT_TUNING
+  return HAL_VOICE_TUNING[voiceName] ?? HAL_DEFAULT_TUNING
 }
