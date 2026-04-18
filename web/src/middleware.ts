@@ -47,7 +47,11 @@ export function middleware(req: NextRequest) {
     )
   }
 
-  const callbackUrl = req.nextUrl.href
+  // Build a public callback URL from the request's Host header (not
+  // req.nextUrl which is the internal container address like 0.0.0.0:3000).
+  const host = req.headers.get('host') || 'deek.nbnesigns.co.uk'
+  const proto = req.headers.get('x-forwarded-proto') || 'https'
+  const callbackUrl = `${proto}://${host}${req.nextUrl.pathname}${req.nextUrl.search || ''}`
   const loginUrl = `${CRM_LOGIN_URL}?callbackUrl=${encodeURIComponent(callbackUrl)}`
   return NextResponse.redirect(loginUrl)
 }
