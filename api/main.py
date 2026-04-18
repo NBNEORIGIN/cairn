@@ -1974,6 +1974,12 @@ async def health():
             'last_reindex': last_reindex,
         }
 
+    # Circuit breaker state (the router's view of Ollama health)
+    from core.models import ollama_health as _ollama_health_mod
+    ollama_circuit = _ollama_health_mod.snapshot()
+    ollama_context_limit = _ollama_health_mod.local_context_limit()
+    hardware_profile = os.getenv('DEEK_HARDWARE_PROFILE', 'dev_desktop')
+
     return {
         'status': 'ok',
         'retrieval_mode': _default_retrieval_mode(),
@@ -1983,6 +1989,9 @@ async def health():
         'ollama_model_ready': ollama_model_ready,
         'ollama_vram_warning': ollama_vram_warning,
         'ollama_installed_models': installed_models,
+        'ollama_circuit': ollama_circuit,
+        'ollama_context_limit': ollama_context_limit,
+        'hardware_profile': hardware_profile,
         # Keep legacy key for backwards compat
         'ollama_model': ollama_active_model,
         'ollama_model_ready': ollama_model_ready,

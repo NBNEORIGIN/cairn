@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from core.models.task_classifier import classify, TaskTier
+from core.models import ollama_health
 
 
 class ModelChoice(str, Enum):
@@ -48,7 +49,10 @@ class RoutingDecision:
     explanation: str
 
 
-# RTX 3050 8GB runs Qwen 7B well up to ~6k context tokens
+# Kept for backwards compat — the real value now comes from
+# ollama_health.local_context_limit() which reads DEEK_HARDWARE_PROFILE.
+# Leave the 6000 value here so direct importers of LOCAL_CONTEXT_LIMIT
+# still get the dev_desktop default.
 LOCAL_CONTEXT_LIMIT = 6000
 
 # Legacy keyword sets kept for backwards compatibility with any direct callers
@@ -247,9 +251,18 @@ def _tier_available(
     or None if the tier cannot be used.
     """
     if tier == TaskTier.LOCAL:
-        if not force_api and context_tokens <= LOCAL_CONTEXT_LIMIT:
-            return ModelChoice.LOCAL
-        return None
+        # Local routing gate (in priority order):
+        # 1. DEEK_FORCE_API=true → never route local
+        # 2. Context must fit the hardware profile's window
+        # 3. Ollama endpoint must be reachable (circuit breaker)
+        if force_api:
+            return None
+        profile_limit = ollama_health.local_context_limit()
+        if profile_limit <= 0 or context_tokens > profile_limit:
+            return None
+        if not ollama_health.is_reachable():
+            return None
+        return ModelChoice.LOCAL
 
     if tier == TaskTier.DEEPSEEK:
         if _deepseek_available():
