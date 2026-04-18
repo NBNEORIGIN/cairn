@@ -245,3 +245,83 @@ class TestHTTPEndpoints:
         assert r.status_code == 200
         panel_ids = [p["id"] for p in r.json()["panels"]]
         assert "financial_health" in panel_ids
+
+
+class TestVoiceChat:
+
+    def test_voice_chat_requires_content(self, monkeypatch):
+        monkeypatch.setattr(
+            "api.routes.ambient._voice_daily_spend_gbp", lambda: 0.0
+        )
+        monkeypatch.setattr(
+            "api.routes.ambient._voice_daily_count", lambda: 0
+        )
+        from fastapi.testclient import TestClient
+        from api.main import app
+        import os
+        tc = TestClient(app)
+        key = os.environ.get("DEEK_API_KEY", "deek-dev-key-change-in-production")
+        r = tc.post(
+            "/api/deek/chat/voice",
+            json={"content": "", "location": "workshop"},
+            headers={"X-API-Key": key},
+        )
+        assert r.status_code == 400
+
+    def test_voice_chat_rejects_invalid_location(self, monkeypatch):
+        monkeypatch.setattr(
+            "api.routes.ambient._voice_daily_spend_gbp", lambda: 0.0
+        )
+        monkeypatch.setattr(
+            "api.routes.ambient._voice_daily_count", lambda: 0
+        )
+        from fastapi.testclient import TestClient
+        from api.main import app
+        import os
+        tc = TestClient(app)
+        key = os.environ.get("DEEK_API_KEY", "deek-dev-key-change-in-production")
+        r = tc.post(
+            "/api/deek/chat/voice",
+            json={"content": "what's cooking", "location": "moon"},
+            headers={"X-API-Key": key},
+        )
+        assert r.status_code == 400
+
+    def test_voice_chat_budget_trip(self, monkeypatch):
+        """When daily budget is exhausted, return canned message w/o LLM call."""
+        monkeypatch.setattr(
+            "api.routes.ambient._voice_daily_spend_gbp", lambda: 0.0
+        )
+        # Force count_today >= daily_limit
+        monkeypatch.setattr(
+            "api.routes.ambient._voice_daily_count", lambda: 999
+        )
+        monkeypatch.setattr(
+            "api.routes.ambient._log_voice_telemetry",
+            lambda **kwargs: None,
+        )
+        monkeypatch.setenv("DEEK_VOICE_DAILY_LIMIT", "200")
+
+        from fastapi.testclient import TestClient
+        from api.main import app
+        import os
+        tc = TestClient(app)
+        key = os.environ.get("DEEK_API_KEY", "deek-dev-key-change-in-production")
+        r = tc.post(
+            "/api/deek/chat/voice",
+            json={"content": "what should we make today", "location": "workshop"},
+            headers={"X-API-Key": key},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["outcome"] == "budget_trip"
+        assert "budget" in data["response"].lower()
+        assert data["cost_usd"] == 0.0
+
+    def test_markdown_stripped_for_tts(self):
+        from api.routes.ambient import _strip_markdown_for_tts
+        assert _strip_markdown_for_tts("**bold** text") == "bold text"
+        assert _strip_markdown_for_tts("# Heading\nBody") == "Heading Body"
+        assert "item" in _strip_markdown_for_tts("- item 1\n- item 2")
+        assert "`" not in _strip_markdown_for_tts("use `foo` function")
+        assert "```" not in _strip_markdown_for_tts("```py\ncode\n```")

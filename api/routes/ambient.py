@@ -119,6 +119,24 @@ class TaskList(BaseModel):
     tasks: list[Task]
 
 
+class VoiceChatRequest(BaseModel):
+    content: str
+    location: str                 # workshop | office | home
+    session_id: Optional[str] = None  # auto-generated if absent
+    user: Optional[str] = None    # "toby" | "jo" etc; logged in telemetry
+    allow_tools: bool = False     # Phase 1: deny tool use in voice path (safety)
+
+
+class VoiceChatResponse(BaseModel):
+    response: str
+    session_id: str
+    model_used: str
+    cost_usd: float
+    latency_ms: int
+    outcome: str                  # success | budget_trip | backend_error
+    budget_remaining: Optional[float] = None
+
+
 # ── DB helpers ──────────────────────────────────────────────────────────────
 
 
@@ -711,4 +729,258 @@ async def patch_task(
         id=row[0], assignee=row[1], content=row[2], status=row[3],
         source=row[4], location=row[5], created_by=row[6],
         created_at=row[7], due_at=row[8], completed_at=row[9],
+    )
+
+
+# ── Voice chat ──────────────────────────────────────────────────────────────
+
+
+VOICE_SYSTEM_PROMPT = (
+    "You are Deek, NBNE's sovereign business brain, answering a VOICE query. "
+    "Your response will be read aloud by text-to-speech, so:\n"
+    "- Keep it UNDER 60 words.\n"
+    "- Use short sentences. No markdown, no code blocks, no bullet points.\n"
+    "- No tool calls — rely only on the context provided in this conversation.\n"
+    "- If you don't know, say so plainly: 'I don't have that information.'\n"
+    "- For money, say 'two thousand four hundred pounds' not '£2,400'.\n"
+    "- If the user is at the WORKSHOP, prioritise production + machine data.\n"
+    "- If OFFICE, prioritise CRM + email + client data.\n"
+    "- If HOME, softer tone, prioritise financial + high-level summary.\n"
+)
+
+
+def _ensure_voice_telemetry_schema() -> None:
+    """Create deek_voice_sessions if it doesn't exist. Safe to call repeatedly."""
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS deek_voice_sessions (
+                    id SERIAL PRIMARY KEY,
+                    session_id VARCHAR(100) NOT NULL,
+                    user_label VARCHAR(100),
+                    location VARCHAR(20),
+                    question TEXT NOT NULL,
+                    response TEXT,
+                    model_used VARCHAR(100),
+                    cost_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
+                    latency_ms INTEGER NOT NULL DEFAULT 0,
+                    outcome VARCHAR(30) NOT NULL DEFAULT 'success',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_deek_voice_sessions_created "
+                "ON deek_voice_sessions(created_at DESC)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_deek_voice_sessions_session "
+                "ON deek_voice_sessions(session_id, created_at DESC)"
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _voice_daily_spend_gbp() -> float:
+    """Sum cost_usd over voice sessions from the last 24h, ~0.80 GBP/USD."""
+    _ensure_voice_telemetry_schema()
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COALESCE(SUM(cost_usd), 0)
+                FROM deek_voice_sessions
+                WHERE created_at >= NOW() - INTERVAL '24 hours'
+                """
+            )
+            usd = float(cur.fetchone()[0] or 0)
+    finally:
+        conn.close()
+    return usd * 0.80
+
+
+def _voice_daily_count() -> int:
+    _ensure_voice_telemetry_schema()
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COUNT(*)
+                FROM deek_voice_sessions
+                WHERE created_at >= NOW() - INTERVAL '24 hours'
+                """
+            )
+            return int(cur.fetchone()[0] or 0)
+    finally:
+        conn.close()
+
+
+def _log_voice_telemetry(
+    session_id: str, user_label: Optional[str], location: Optional[str],
+    question: str, response: Optional[str], model_used: Optional[str],
+    cost_usd: float, latency_ms: int, outcome: str,
+) -> None:
+    _ensure_voice_telemetry_schema()
+    try:
+        conn = _get_conn()
+    except Exception:
+        return  # telemetry failure must never break the voice path
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO deek_voice_sessions
+                    (session_id, user_label, location, question, response,
+                     model_used, cost_usd, latency_ms, outcome)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (session_id, user_label, location, question, response,
+                 model_used, cost_usd, latency_ms, outcome),
+            )
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
+
+def _strip_markdown_for_tts(text: str) -> str:
+    """Remove markdown so SpeechSynthesis reads cleanly."""
+    text = re.sub(r"```[^`]*```", "", text, flags=re.DOTALL)
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+    text = re.sub(r"^#{1,6}\s*", "", text, flags=re.MULTILINE)
+    text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
+    text = re.sub(r"__([^_]+)__", r"\1", text)
+    text = re.sub(r"\*([^*]+)\*", r"\1", text)
+    text = re.sub(r"_([^_]+)_", r"\1", text)
+    text = re.sub(r"^[-*+]\s+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"\n+", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+@router.post("/chat/voice", response_model=VoiceChatResponse)
+async def chat_voice(
+    body: VoiceChatRequest,
+    _: bool = Depends(verify_api_key),
+):
+    """Voice-optimised chat turn.
+
+    - Forces tier-1 routing with qwen2.5:7b-instruct so responses are fast
+      and don't compete with Qwen-coder-32B for VRAM.
+    - Enforces a daily budget via DEEK_VOICE_DAILY_LIMIT and
+      DEEK_VOICE_DAILY_COST_GBP. Tripped budget returns a canned message.
+    - Logs every turn to deek_voice_sessions for telemetry.
+    """
+    import time
+    import uuid
+
+    if not body.content or not body.content.strip():
+        raise HTTPException(status_code=400, detail="content is required")
+    if body.location not in VALID_LOCATIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"location must be one of {sorted(VALID_LOCATIONS)}",
+        )
+
+    session_id = body.session_id or f"voice-{uuid.uuid4().hex[:12]}"
+    question = body.content.strip()
+
+    # ── Budget check ──────────────────────────────────────────────────
+    daily_limit = int(os.getenv("DEEK_VOICE_DAILY_LIMIT", "200"))
+    daily_cost_cap_gbp = float(os.getenv("DEEK_VOICE_DAILY_COST_GBP", "0.50"))
+    spent_gbp = _voice_daily_spend_gbp()
+    count_today = _voice_daily_count()
+    if count_today >= daily_limit or spent_gbp >= daily_cost_cap_gbp:
+        canned = (
+            "Deek is thinking less today. The daily voice budget has been "
+            "reached. I'll be back tomorrow."
+        )
+        _log_voice_telemetry(
+            session_id=session_id, user_label=body.user, location=body.location,
+            question=question, response=canned, model_used=None,
+            cost_usd=0.0, latency_ms=0, outcome="budget_trip",
+        )
+        return VoiceChatResponse(
+            response=canned, session_id=session_id,
+            model_used="", cost_usd=0.0, latency_ms=0,
+            outcome="budget_trip",
+            budget_remaining=max(0.0, daily_cost_cap_gbp - spent_gbp),
+        )
+
+    # ── Route to main chat agent with voice-specific overrides ────────
+    try:
+        from api.main import get_agent
+        from core.delegation.context import MessageEnvelope, Channel
+    except Exception as exc:
+        _log_voice_telemetry(
+            session_id=session_id, user_label=body.user, location=body.location,
+            question=question, response=None, model_used=None,
+            cost_usd=0.0, latency_ms=0, outcome="backend_error",
+        )
+        raise HTTPException(status_code=500, detail=f"agent import failed: {exc}")
+
+    location_hint = (
+        f"[Context: user is at {body.location}. Respond in under 60 words, "
+        f"no markdown, no tool calls. Voice response.]\n\n"
+    )
+    agent_content = location_hint + question
+
+    agent = get_agent("nbne")
+    envelope = MessageEnvelope(
+        content=agent_content,
+        channel=Channel("web"),
+        project_id="nbne",
+        session_id=session_id,
+        model_override="local",   # tier 1 → Ollama
+        max_tool_rounds=0,        # no tools in voice path
+        read_only=True,
+    )
+
+    t0 = time.monotonic()
+    try:
+        response = await agent.process(envelope)
+    except Exception as exc:
+        latency_ms = int((time.monotonic() - t0) * 1000)
+        err_text = (
+            "Sorry, something went wrong reaching the brain. "
+            "Try again in a moment."
+        )
+        _log_voice_telemetry(
+            session_id=session_id, user_label=body.user, location=body.location,
+            question=question, response=f"{type(exc).__name__}: {exc}",
+            model_used=None, cost_usd=0.0, latency_ms=latency_ms,
+            outcome="backend_error",
+        )
+        return VoiceChatResponse(
+            response=err_text, session_id=session_id,
+            model_used="", cost_usd=0.0, latency_ms=latency_ms,
+            outcome="backend_error",
+            budget_remaining=max(0.0, daily_cost_cap_gbp - spent_gbp),
+        )
+
+    latency_ms = int((time.monotonic() - t0) * 1000)
+    reply = _strip_markdown_for_tts((response.content or "").strip())
+
+    _log_voice_telemetry(
+        session_id=session_id, user_label=body.user, location=body.location,
+        question=question, response=reply,
+        model_used=response.model_used or None,
+        cost_usd=float(response.cost_usd or 0.0),
+        latency_ms=latency_ms, outcome="success",
+    )
+
+    return VoiceChatResponse(
+        response=reply or "Sorry, I didn't get an answer.",
+        session_id=session_id,
+        model_used=response.model_used or "",
+        cost_usd=float(response.cost_usd or 0.0),
+        latency_ms=latency_ms,
+        outcome="success",
+        budget_remaining=max(0.0, daily_cost_cap_gbp - spent_gbp),
     )

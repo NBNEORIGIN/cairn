@@ -2,10 +2,11 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { MessageSquare, Share2, Activity, BarChart3, ShoppingBag } from 'lucide-react'
+import { MessageSquare, Share2, Activity, BarChart3, ShoppingBag, Mic } from 'lucide-react'
 
 const NAV_ITEMS = [
   { href: '/', label: 'Chat', icon: MessageSquare },
+  { href: '/voice', label: 'Voice', icon: Mic },
   { href: '/social', label: 'Social', icon: Share2 },
   { href: '/status', label: 'Status', icon: Activity },
 ]
