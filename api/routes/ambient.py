@@ -31,6 +31,7 @@ from typing import Optional
 
 import psycopg2
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from api.middleware.auth import verify_api_key
@@ -1046,6 +1047,172 @@ async def chat_voice(
     )
 
 
+# ── Voice chat — STREAMING variant ───────────────────────────────────────
+
+
+def _build_voice_context(location: str) -> tuple[str, str]:
+    """Return (voice_model, system_prompt) with ambient context pre-loaded."""
+    voice_model = os.getenv(
+        "OLLAMA_VOICE_MODEL",
+        os.getenv("OLLAMA_CLASSIFIER_MODEL", "qwen2.5:7b-instruct"),
+    )
+    ctx_blocks: list[str] = []
+    snapshot_modules = {
+        "workshop": ["manufacture"],
+        "office": ["crm"],
+        "home": ["ledger", "crm"],
+    }
+    for mod in snapshot_modules.get(location, []):
+        md, _ts = _load_snapshot(mod)
+        if md:
+            ctx_blocks.append(f"=== {mod.upper()} SNAPSHOT ===\n{md[:2500]}")
+
+    context_section = "\n\n".join(ctx_blocks) if ctx_blocks else "(no live snapshots available)"
+    system_prompt = (
+        VOICE_SYSTEM_PROMPT
+        + f"\n\n=== LIVE BUSINESS CONTEXT (location: {location}) ===\n"
+        + context_section
+        + "\n\nAnswer the user's question using ONLY the context above. "
+          "If the answer isn't there, say 'I don't have that information'."
+    )
+    return voice_model, system_prompt
+
+
+@router.post("/chat/voice/stream")
+async def chat_voice_stream(
+    body: VoiceChatRequest,
+    _: bool = Depends(verify_api_key),
+):
+    """Streaming variant of /chat/voice — yields SSE events:
+
+        event: response_delta   data: {"text": "chunk"}
+        event: done             data: {"session_id", "model_used", "latency_ms", "outcome", "cost_usd"}
+        event: error            data: {"error": "..."}
+
+    Identical auth / budget / telemetry logic to the non-streaming endpoint;
+    only the model call differs (stream=True, chunked yields).
+    """
+    import json as _json
+    import time
+    import uuid
+
+    if not body.content or not body.content.strip():
+        raise HTTPException(status_code=400, detail="content is required")
+    if body.location not in VALID_LOCATIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"location must be one of {sorted(VALID_LOCATIONS)}",
+        )
+
+    session_id = body.session_id or f"voice-{uuid.uuid4().hex[:12]}"
+    question = body.content.strip()
+
+    # Budget check — same logic as non-streaming endpoint
+    daily_limit = int(os.getenv("DEEK_VOICE_DAILY_LIMIT", "200"))
+    daily_cost_cap_gbp = float(os.getenv("DEEK_VOICE_DAILY_COST_GBP", "0.50"))
+    count_today = _voice_daily_count()
+    spent_gbp = _voice_daily_spend_gbp()
+
+    voice_model, system_prompt = _build_voice_context(body.location)
+    ollama_base = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+
+    async def event_gen():
+        if count_today >= daily_limit or spent_gbp >= daily_cost_cap_gbp:
+            canned = (
+                "Deek is thinking less today. The daily voice budget has been "
+                "reached. I'll be back tomorrow."
+            )
+            _log_voice_telemetry(
+                session_id=session_id, user_label=body.user, location=body.location,
+                question=question, response=canned, model_used=None,
+                cost_usd=0.0, latency_ms=0, outcome="budget_trip",
+            )
+            yield f"event: response_delta\ndata: {_json.dumps({'text': canned})}\n\n"
+            yield f"event: done\ndata: {_json.dumps({'session_id': session_id, 'model_used': '', 'latency_ms': 0, 'outcome': 'budget_trip', 'cost_usd': 0.0})}\n\n"
+            return
+
+        t0 = time.monotonic()
+        collected = []
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                async with client.stream(
+                    "POST",
+                    f"{ollama_base}/api/chat",
+                    json={
+                        "model": voice_model,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": question},
+                        ],
+                        "stream": True,
+                        "options": {
+                            "num_predict": 200,
+                            "temperature": 0.2,
+                        },
+                    },
+                ) as r:
+                    if r.status_code != 200:
+                        err = f"Ollama HTTP {r.status_code}"
+                        yield f"event: error\ndata: {_json.dumps({'error': err})}\n\n"
+                        latency_ms = int((time.monotonic() - t0) * 1000)
+                        _log_voice_telemetry(
+                            session_id=session_id, user_label=body.user,
+                            location=body.location, question=question,
+                            response=err, model_used=voice_model, cost_usd=0.0,
+                            latency_ms=latency_ms, outcome="backend_error",
+                        )
+                        return
+
+                    async for line in r.aiter_lines():
+                        if not line.strip():
+                            continue
+                        try:
+                            obj = _json.loads(line)
+                        except Exception:
+                            continue
+                        # Ollama streaming chunks: {"message": {"content": "chunk"}, "done": false}
+                        msg = obj.get("message") or {}
+                        delta = msg.get("content") or ""
+                        if delta:
+                            collected.append(delta)
+                            yield f"event: response_delta\ndata: {_json.dumps({'text': delta})}\n\n"
+                        if obj.get("done"):
+                            break
+        except Exception as exc:
+            err = f"{type(exc).__name__}: {exc}"
+            yield f"event: error\ndata: {_json.dumps({'error': err})}\n\n"
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            _log_voice_telemetry(
+                session_id=session_id, user_label=body.user, location=body.location,
+                question=question, response=err, model_used=voice_model,
+                cost_usd=0.0, latency_ms=latency_ms, outcome="backend_error",
+            )
+            return
+
+        latency_ms = int((time.monotonic() - t0) * 1000)
+        full_reply = _strip_markdown_for_tts("".join(collected).strip()) \
+            or "Sorry, I didn't get an answer."
+
+        _log_voice_telemetry(
+            session_id=session_id, user_label=body.user, location=body.location,
+            question=question, response=full_reply, model_used=voice_model,
+            cost_usd=0.0, latency_ms=latency_ms, outcome="success",
+        )
+
+        yield f"event: done\ndata: {_json.dumps({'session_id': session_id, 'model_used': voice_model, 'latency_ms': latency_ms, 'outcome': 'success', 'cost_usd': 0.0})}\n\n"
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 # ── Voice session history ───────────────────────────────────────────────────
 
 
@@ -1274,4 +1441,210 @@ async def voice_metrics(
         recent_turns=recent,
         budget_limit=int(os.getenv("DEEK_VOICE_DAILY_LIMIT", "200")),
         budget_cost_cap_gbp=float(os.getenv("DEEK_VOICE_DAILY_COST_GBP", "0.50")),
+    )
+
+
+# ── Commit transcript to wiki ───────────────────────────────────────────────
+
+
+class CommitRequest(BaseModel):
+    session_id: str
+    max_turns: int = 40
+    title_hint: Optional[str] = None    # optional user-provided title
+
+
+class CommitResponse(BaseModel):
+    ok: bool
+    wiki_path: str
+    title: str
+    slug: str
+    turn_count: int
+    sync_result: dict = Field(default_factory=dict)
+
+
+_COMMIT_SUMMARISER_SYSTEM = (
+    "You are distilling a Q&A voice conversation into a concise wiki article. "
+    "Output STRICT JSON only, no prose:\n"
+    "{\n"
+    '  "title": "short 4-8 word title describing the topic",\n'
+    '  "slug": "kebab-case-slug-from-title (no date, no spaces)",\n'
+    '  "summary": "1-2 sentence summary of the key facts or decision",\n'
+    '  "body_md": "markdown body with bullet points of facts exchanged, quoting key figures exactly. Under 300 words.",\n'
+    '  "tags": ["topic1", "topic2"]\n'
+    "}\n"
+    "Copy figures and names exactly as they appear in the conversation. "
+    "If the conversation was trivial (e.g. greetings only), set title to "
+    "'Trivial exchange' and body_md to a one-line note."
+)
+
+
+def _slugify(text: str) -> str:
+    text = (text or "").strip().lower()
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    text = re.sub(r"-+", "-", text).strip("-")
+    return text[:60] or "untitled"
+
+
+@router.post("/voice/commit", response_model=CommitResponse)
+async def voice_commit(
+    body: CommitRequest,
+    _: bool = Depends(verify_api_key),
+):
+    """Distill a voice session into a wiki article and trigger embedding.
+
+    Pipeline:
+      1. Load up to N recent turns for this session_id from deek_voice_sessions
+      2. Ask the local voice model (Qwen 7B) to emit a JSON article
+      3. Write the markdown to wiki/modules/voice-{slug}-{date}.md
+         (mounted from /opt/nbne/deek/wiki on the host)
+      4. Trigger /admin/wiki-sync to embed into claw_code_chunks so it's
+         findable via search_wiki
+    """
+    import json as _json
+    from datetime import date
+    import httpx
+
+    _ensure_voice_telemetry_schema()
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT question, response, created_at, location
+                FROM deek_voice_sessions
+                WHERE session_id = %s
+                ORDER BY created_at ASC
+                LIMIT %s
+                """,
+                (body.session_id, body.max_turns),
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    if not rows:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No turns found for session_id={body.session_id}",
+        )
+
+    transcript_md = []
+    location_seen: Optional[str] = None
+    for question, response, created_at, location in rows:
+        if location and not location_seen:
+            location_seen = location
+        transcript_md.append(f"**User:** {question}")
+        if response:
+            transcript_md.append(f"**Deek:** {response}")
+        transcript_md.append("")
+    transcript_text = "\n".join(transcript_md)
+
+    # Ask the local model for a structured summary
+    voice_model = os.getenv(
+        "OLLAMA_VOICE_MODEL",
+        os.getenv("OLLAMA_CLASSIFIER_MODEL", "qwen2.5:7b-instruct"),
+    )
+    ollama_base = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+
+    user_prompt = (
+        (f"Title hint (optional): {body.title_hint}\n\n" if body.title_hint else "")
+        + f"Location context: {location_seen or 'unknown'}\n\n"
+        + f"Conversation:\n\n{transcript_text}\n\n"
+        + "Return the JSON article now."
+    )
+
+    try:
+        with httpx.Client(timeout=60.0) as client:
+            r = client.post(
+                f"{ollama_base}/api/chat",
+                json={
+                    "model": voice_model,
+                    "messages": [
+                        {"role": "system", "content": _COMMIT_SUMMARISER_SYSTEM},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "stream": False,
+                    "format": "json",
+                    "options": {"num_predict": 800, "temperature": 0.1},
+                },
+            )
+    except Exception as exc:
+        raise HTTPException(502, f"summariser failed: {type(exc).__name__}: {exc}")
+    if r.status_code != 200:
+        raise HTTPException(502, f"summariser HTTP {r.status_code}: {r.text[:200]}")
+
+    raw = (r.json().get("message", {}) or {}).get("content", "").strip()
+    try:
+        parsed = _json.loads(raw)
+    except Exception:
+        # Fallback extraction if the model wrapped JSON in prose
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if not match:
+            raise HTTPException(502, f"summariser output could not be parsed: {raw[:200]}")
+        parsed = _json.loads(match.group(0))
+
+    title = (parsed.get("title") or "Deek voice session").strip()[:100]
+    slug_part = body.title_hint or parsed.get("slug") or title
+    slug = _slugify(slug_part)
+    summary = (parsed.get("summary") or "").strip()
+    body_md = (parsed.get("body_md") or "").strip()
+    tags = parsed.get("tags") or []
+    if not isinstance(tags, list):
+        tags = []
+
+    date_str = date.today().isoformat()
+    filename = f"voice-{slug}-{date_str}.md"
+    wiki_dir = Path(os.getenv("DEEK_WIKI_DIR") or os.getenv("CAIRN_WIKI_DIR") or "/app/wiki").resolve()
+    modules_dir = wiki_dir / "modules"
+    try:
+        modules_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:
+        raise HTTPException(500, f"wiki directory not writable: {exc}")
+
+    wiki_path = modules_dir / filename
+    tags_line = ", ".join(tags) if tags else ""
+    article = (
+        f"# {title}\n\n"
+        f"_Committed from Deek voice session on {date_str}. "
+        f"Session: `{body.session_id}`"
+        f"{', location: ' + location_seen if location_seen else ''}_\n\n"
+        f"{('**Tags:** ' + tags_line + chr(10) + chr(10)) if tags_line else ''}"
+        f"## Summary\n\n{summary}\n\n"
+        f"## Detail\n\n{body_md}\n\n"
+        f"---\n\n"
+        f"## Full transcript\n\n{transcript_text}\n"
+    )
+    try:
+        wiki_path.write_text(article, encoding="utf-8")
+    except Exception as exc:
+        raise HTTPException(500, f"failed to write wiki article: {exc}")
+
+    # Trigger wiki-sync for embedding. Best-effort; the file is on disk
+    # even if embedding fails (cron will pick it up next cycle).
+    sync_result: dict = {}
+    try:
+        api_key = (
+            os.getenv("DEEK_API_KEY")
+            or os.getenv("CAIRN_API_KEY")
+            or os.getenv("CLAW_API_KEY", "")
+        )
+        with httpx.Client(timeout=30.0) as client:
+            sr = client.post(
+                "http://localhost:8765/admin/wiki-sync",
+                headers={"X-API-Key": api_key},
+            )
+            if sr.status_code == 200:
+                sync_result = sr.json()
+            else:
+                sync_result = {"error": f"HTTP {sr.status_code}"}
+    except Exception as exc:
+        sync_result = {"error": f"{type(exc).__name__}: {exc}"}
+
+    return CommitResponse(
+        ok=True,
+        wiki_path=str(wiki_path),
+        title=title,
+        slug=slug,
+        turn_count=len(rows),
+        sync_result=sync_result,
     )
