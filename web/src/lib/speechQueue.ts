@@ -37,9 +37,12 @@ export class SpeechQueue {
 
   constructor(opts: SpeechQueueOpts = {}) {
     this.opts = {
+      // HAL 9000 defaults — deep, calm, deliberate.
+      // Browser voices vary wildly; we pick the most HAL-like available
+      // at speak time via chooseHalVoice() below.
       lang: 'en-GB',
-      rate: 1.0,
-      pitch: 1.0,
+      rate: 0.88,   // slower than conversational — HAL-like deliberation
+      pitch: 0.7,   // lower than default — male, resonant
       ...opts,
     }
   }
@@ -112,16 +115,11 @@ export class SpeechQueue {
     }
 
     const u = new SpeechSynthesisUtterance(next)
-    u.rate = this.opts.rate ?? 1.0
-    u.pitch = this.opts.pitch ?? 1.0
+    u.rate = this.opts.rate ?? 0.88
+    u.pitch = this.opts.pitch ?? 0.7
     u.lang = this.opts.lang ?? 'en-GB'
 
-    const voices = window.speechSynthesis.getVoices()
-    const chosen =
-      (this.opts.voiceName &&
-        voices.find(v => v.name === this.opts.voiceName)) ||
-      voices.find(v => v.lang?.startsWith(u.lang)) ||
-      voices[0]
+    const chosen = chooseHalVoice(this.opts.voiceName)
     if (chosen) u.voice = chosen
 
     u.onstart = () => {
@@ -155,4 +153,88 @@ export class SpeechQueue {
       this.speaking = false
     }
   }
+}
+
+// ── HAL-ish voice selection ─────────────────────────────────────────────────
+//
+// The stock SpeechSynthesis voice list varies wildly by platform. To get a
+// HAL 9000 quality (deep, calm, mid-Atlantic male) we prefer specific
+// voice names in priority order, falling back to any male-sounding voice,
+// then any en-GB / en-US voice, then whatever's available.
+//
+// If the user sets a voice name explicitly (e.g. via future settings), it
+// takes precedence.
+
+const HAL_PREFERRED_VOICES = [
+  // High-quality male voices across platforms
+  'Microsoft Ryan Online (Natural) - English (United Kingdom)',
+  'Microsoft Thomas Online (Natural) - English (France)',  // surprisingly HAL-like
+  'Google UK English Male',
+  'Microsoft George - English (United Kingdom)',
+  'Microsoft David - English (United States)',
+  'Microsoft Mark - English (United States)',
+  // Apple
+  'Daniel',       // en-GB male, iOS/macOS — the closest Apple voice to HAL
+  'Alex',         // en-US male, macOS (compact, warm)
+  'Arthur',       // en-GB male, iOS
+  'Rishi',        // en-IN male — deep, measured
+  'Oliver',       // en-GB male, Apple
+  // Android
+  'en-gb-x-gba-network',
+  'en-gb-x-rjs-network',
+]
+
+// Female voices to actively DE-prioritise (HAL is male-coded)
+const HAL_AVOID = /female|woman|samantha|victoria|fiona|tessa|karen|serena|martha|susan|catherine/i
+
+export function chooseHalVoice(
+  explicit?: string,
+): SpeechSynthesisVoice | undefined {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+    return undefined
+  }
+  const voices = window.speechSynthesis.getVoices()
+  if (!voices.length) return undefined
+
+  // 1. Explicit user override
+  if (explicit) {
+    const byName = voices.find(v => v.name === explicit)
+    if (byName) return byName
+  }
+
+  // 2. Our preferred list, in order
+  for (const name of HAL_PREFERRED_VOICES) {
+    const found = voices.find(v => v.name === name)
+    if (found) return found
+  }
+
+  // 3. Any en-GB male-coded voice (filter out obviously female ones)
+  const enGbMale = voices.find(
+    v => v.lang?.startsWith('en-GB') && !HAL_AVOID.test(v.name),
+  )
+  if (enGbMale) return enGbMale
+
+  // 4. Any en-US male-coded voice
+  const enUsMale = voices.find(
+    v => v.lang?.startsWith('en-US') && !HAL_AVOID.test(v.name),
+  )
+  if (enUsMale) return enUsMale
+
+  // 5. Any English voice (even female) — better than nothing
+  const anyEn = voices.find(v => v.lang?.startsWith('en'))
+  if (anyEn) return anyEn
+
+  return voices[0]
+}
+
+/** List available voices — handy for a future settings panel. */
+export function listHalCandidates(): SpeechSynthesisVoice[] {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+    return []
+  }
+  const voices = window.speechSynthesis.getVoices()
+  // Prefer English + male-coded
+  return voices
+    .filter(v => v.lang?.startsWith('en'))
+    .filter(v => !HAL_AVOID.test(v.name))
 }
