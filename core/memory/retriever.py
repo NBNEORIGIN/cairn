@@ -445,6 +445,23 @@ class HybridRetriever:
         top_k = self.context_engine.MAX_TIER2_CHUNKS
         final = self._follow_backlinks(boosted[:top_k])
 
+        # ── Schema retrieval (Brief 2 Phase B, Task 7) ──────────────
+        # Strategic queries also pull top-K schemas from the consolidation
+        # table. Schema hits are attached as a separate list on the
+        # returned chunks so Deek can cite them distinctly.
+        schema_hits: list[dict] = []
+        try:
+            from core.memory.schema_retrieval import (
+                is_strategic_query, retrieve_schemas,
+                reinforce_schemas_async,
+            )
+            if is_strategic_query(task):
+                schema_hits = retrieve_schemas(task, embedding_fn, top_k=3)
+                if schema_hits:
+                    reinforce_schemas_async([s['id'] for s in schema_hits])
+        except Exception as exc:
+            logger.debug('[retriever] schema retrieval failed: %s', exc)
+
         # ── Impressions layer (Brief 2 Phase A) ─────────────────────
         # Attach salience/recency/chunk_id to each candidate, rerank,
         # and fire async reinforcement on the memory-bearing hits.
@@ -471,8 +488,26 @@ class HybridRetriever:
                 reinforce_async(mem_ids)
             if shadow_enabled():
                 log_shadow_comparison(task, old_dicts, new_order, debug)
-                return old_dicts
-            return new_order
+                result = old_dicts
+            else:
+                result = new_order
+            # Attach schema hits as a trailing section so existing
+            # callers that just iterate the list see them, but the
+            # metadata (chunk_type='schema') makes them filterable.
+            for s in schema_hits:
+                result.append({
+                    'file': f'schema/{s["id"]}',
+                    'content': s['statement'],
+                    'chunk_type': 'schema',
+                    'chunk_name': s['statement'][:80],
+                    'score': s['boosted_score'],
+                    'match_quality': 'schema',
+                    'schema_id': s['id'],
+                    'schema_confidence': s['confidence'],
+                    'schema_source_memory_ids': s['source_memory_ids'],
+                    'similarity': s['similarity'],
+                })
+            return result
         except Exception as exc:
             logger.debug(
                 '[retriever] impressions rerank failed, serving old order: %s',
