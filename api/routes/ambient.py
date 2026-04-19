@@ -912,6 +912,46 @@ VOICE_SYSTEM_PROMPT = (
 )
 
 
+def _voice_identity_block() -> str:
+    """Compact identity-aware header for voice/chat prompts.
+
+    Keeps voice style intact (short, TTS-friendly) while giving the
+    model the live module-reachability picture and a one-line company
+    identity, both sourced from DEEK_IDENTITY.md + DEEK_MODULES.yaml
+    via the identity layer. Without this, voice prompts bypass
+    core/agent.py and have no self-awareness of what modules Deek can
+    reach.
+    """
+    try:
+        from core.identity import assembler as _ia, probe as _ip
+        reach = _ip.get_reachable_modules()
+        errs = _ip.get_errors()
+        modules = _ia.get_modules()
+        reach_names = [m.display_name for m in modules if m.name in reach]
+        unreach = [
+            (m.display_name, errs.get(m.name, 'offline'))
+            for m in modules if m.name not in reach
+        ]
+        lines = [
+            "You are Deek, NBNE's sovereign AI brain for North By North East "
+            "Print & Sign Ltd (Alnwick, Northumberland). Directors: Toby and "
+            "Jo Fletcher.",
+            f"Modules reachable right now: "
+            f"{', '.join(reach_names) if reach_names else '(none)'}.",
+        ]
+        if unreach:
+            lines.append(
+                "Modules currently UNREACHABLE (do not claim live data from "
+                "them; if asked about them, say they are offline): "
+                + ', '.join(f'{n} [{e}]' for n, e in unreach)
+                + "."
+            )
+        return '\n'.join(lines) + '\n\n'
+    except Exception:
+        # Identity layer failures must never silently break voice.
+        return ''
+
+
 def _ensure_voice_telemetry_schema() -> None:
     """Create deek_voice_sessions if it doesn't exist. Safe to call repeatedly."""
     conn = _get_conn()
@@ -1122,7 +1162,8 @@ async def chat_voice(
     context_section = "\n\n".join(ctx_blocks) if ctx_blocks else "(no live snapshots available)"
 
     system_prompt = (
-        VOICE_SYSTEM_PROMPT
+        _voice_identity_block()
+        + VOICE_SYSTEM_PROMPT
         + f"\n\n=== LIVE BUSINESS CONTEXT (location: {body.location}) ===\n"
         + context_section
         + "\n\nAnswer the user's question using ONLY the context above. "
@@ -1229,7 +1270,8 @@ def _build_voice_context(location: str) -> tuple[str, str]:
 
     context_section = "\n\n".join(ctx_blocks) if ctx_blocks else "(no live snapshots available)"
     system_prompt = (
-        VOICE_SYSTEM_PROMPT
+        _voice_identity_block()
+        + VOICE_SYSTEM_PROMPT
         + f"\n\n=== LIVE BUSINESS CONTEXT (location: {location}) ===\n"
         + context_section
         + "\n\nAnswer the user's question using ONLY the context above. "
