@@ -106,6 +106,13 @@ if [ "$MODE" = "deploy" ] || [ "$MODE" = "full" ]; then
     200|302|307) echo "[build-deek-web] OK" ;;
     *) echo "[build-deek-web] WARNING: unexpected HTTP ${HTTP_CODE}" ;;
   esac
+
+  echo "[build-deek-web] post-deploy smoke test..."
+  python3 "${REPO_ROOT}/tests/smoke/test_identity_deploy.py" \
+    --url https://deek.nbnesigns.co.uk || {
+      echo "[build-deek-web] SMOKE FAILED — deploy considered unhealthy" >&2
+      exit 1
+    }
 fi
 
 echo "[build-deek-web] done"

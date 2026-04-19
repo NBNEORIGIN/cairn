@@ -57,6 +57,13 @@ if [ "$MODE" = "deploy" ] || [ "$MODE" = "full" ]; then
   echo "[build-deek-api] health check..."
   curl -sS --max-time 8 -o /dev/null -w "HTTP: %{http_code}\n" \
     http://127.0.0.1:8765/health
+
+  echo "[build-deek-api] post-deploy smoke test..."
+  python3 "${REPO_ROOT}/tests/smoke/test_identity_deploy.py" \
+    --url https://deek.nbnesigns.co.uk || {
+      echo "[build-deek-api] SMOKE FAILED — deploy considered unhealthy" >&2
+      exit 1
+    }
 fi
 
 echo "[build-deek-api] done"
