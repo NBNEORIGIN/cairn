@@ -77,6 +77,11 @@ class RetrievedChunk:
         return name.lower()
 
 
+_MEM_TYPES = frozenset({
+    'memory', 'email', 'wiki', 'module_snapshot', 'social_post',
+})
+
+
 class HybridRetriever:
     """
     Hybrid Tier 2 retrieval for the current ContextEngine contract.
@@ -243,6 +248,11 @@ class HybridRetriever:
                 )
             )
         return results
+
+    # Memory-bearing chunk types (Brief 2 Phase A) — only these receive
+    # salience-based reranking and reinforcement. Keeping the set local
+    # avoids an import cycle with core.memory.salience at module load.
+    # Must match salience.MEMORY_CHUNK_TYPES.
 
     def _to_chunk(self, row: dict, cosine_rank: int | None = None) -> RetrievedChunk:
         return RetrievedChunk(
@@ -434,7 +444,123 @@ class HybridRetriever:
         boosted = self._apply_wiki_boost(merged)
         top_k = self.context_engine.MAX_TIER2_CHUNKS
         final = self._follow_backlinks(boosted[:top_k])
-        return [self._to_dict(chunk) for chunk in final[:top_k]]
+
+        # ── Impressions layer (Brief 2 Phase A) ─────────────────────
+        # Attach salience/recency/chunk_id to each candidate, rerank,
+        # and fire async reinforcement on the memory-bearing hits.
+        # Shadow-mode gated — under DEEK_IMPRESSIONS_SHADOW=true (the
+        # default) we compute the new ordering and log the diff but
+        # return the existing ordering. Setting the env to 'false'
+        # after a week of reviewed shadow data flips to live.
+        old_dicts = [self._to_dict(c) for c in final[:top_k]]
+        try:
+            decorated = self._attach_impressions_fields(old_dicts)
+            from core.memory.impressions import (
+                rerank, shadow_enabled, log_shadow_comparison,
+                reinforce_async,
+            )
+            rrf_scores = [c.get('score', 0.0) for c in decorated]
+            new_order, debug = rerank(decorated, rrf_scores=rrf_scores)
+            # Reinforce memory-bearing chunks we're about to return.
+            mem_ids = [
+                c['chunk_id'] for c in decorated
+                if c.get('chunk_id') is not None
+                and c.get('chunk_type') in _MEM_TYPES
+            ]
+            if mem_ids:
+                reinforce_async(mem_ids)
+            if shadow_enabled():
+                log_shadow_comparison(task, old_dicts, new_order, debug)
+                return old_dicts
+            return new_order
+        except Exception as exc:
+            logger.debug(
+                '[retriever] impressions rerank failed, serving old order: %s',
+                exc,
+            )
+            return old_dicts
+
+    def _attach_impressions_fields(self, chunks: list[dict]) -> list[dict]:
+        """Batch-fetch chunk_id / salience / last_accessed_at / access_count.
+
+        The retrieval SQL in the hybrid path and ``engine.py`` don't
+        currently SELECT these columns, and changing every SELECT is
+        out of scope for Phase A. Instead we do one lookup per chunk
+        keyed on (project_id, file_path, chunk_type) — enough to
+        disambiguate memory entries which are all
+        project/file_path-unique. For code chunks the salience stays
+        at its default 1.0.
+        """
+        if not chunks:
+            return chunks
+        try:
+            conn = self.context_engine._get_connection()
+        except Exception as exc:
+            logger.debug(
+                '[retriever] impressions: cannot open conn: %s', exc,
+            )
+            return chunks
+        try:
+            triples = [
+                (self.context_engine.project_id, c.get('file', ''),
+                 c.get('chunk_type', ''))
+                for c in chunks
+            ]
+            # One query, VALUES-joined — fast even at top_k=20.
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    WITH needle(project_id, file_path, chunk_type) AS (
+                        SELECT * FROM unnest(
+                            %s::text[], %s::text[], %s::text[]
+                        )
+                    )
+                    SELECT n.file_path, n.chunk_type,
+                           c.id, c.salience, c.last_accessed_at,
+                           c.access_count
+                      FROM needle n
+                      LEFT JOIN LATERAL (
+                          SELECT id, salience, last_accessed_at,
+                                 access_count
+                            FROM claw_code_chunks
+                           WHERE project_id = n.project_id
+                             AND file_path  = n.file_path
+                             AND chunk_type = n.chunk_type
+                           ORDER BY indexed_at DESC
+                           LIMIT 1
+                      ) c ON TRUE
+                    """,
+                    (
+                        [t[0] for t in triples],
+                        [t[1] for t in triples],
+                        [t[2] for t in triples],
+                    ),
+                )
+                rows = cur.fetchall()
+            lookup = {(r[0], r[1]): r for r in rows}
+            decorated: list[dict] = []
+            for c in chunks:
+                key = (c.get('file', ''), c.get('chunk_type', ''))
+                r = lookup.get(key)
+                d = dict(c)
+                if r is not None and r[2] is not None:
+                    d['chunk_id'] = r[2]
+                    d['salience'] = float(r[3] or 1.0)
+                    d['last_accessed_at'] = r[4]
+                    d['access_count'] = int(r[5] or 0)
+                else:
+                    d.setdefault('chunk_id', None)
+                    d.setdefault('salience', 1.0)
+                    d.setdefault('last_accessed_at', None)
+                    d.setdefault('access_count', 0)
+                d.setdefault('dedupe_key', f"{c.get('file')}:{c.get('chunk_type')}")
+                decorated.append(d)
+            return decorated
+        except Exception as exc:
+            logger.debug(
+                '[retriever] impressions: decorate failed: %s', exc,
+            )
+            return chunks
 
     # ── Wiki layer methods ─────────────────────────────────────
 

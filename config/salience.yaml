@@ -1,0 +1,22 @@
+# config/salience.yaml
+#
+# Salience weights for core/memory/salience.py. Changes take effect on
+# next API restart. Fail-safe: if this file is absent, defaults in
+# salience.py are used.
+#
+# All signal scores are clipped to 0..1 individually; final salience is
+# base_score + sum(weight * signal) clipped to [min_score, max_score].
+#
+# Defaults calibrated so a £5,000 quote with customer pushback and a
+# failed outcome scores ~8-9; a trivial acknowledgement scores ~1.
+
+base_score: 1.0
+min_score: 0.0
+max_score: 10.0
+
+weights:
+  money:              2.5   # log-scaled amounts in £/$/€
+  customer_pushback:  2.0   # keyword-based friction detection
+  outcome_weight:     3.0   # fail > deferred > partial > win (failures high)
+  novelty:            1.5   # 1 − max cosine vs recent memories
+  toby_flag:          5.0   # hard star — strong prior
