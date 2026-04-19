@@ -1,0 +1,29 @@
+# CODEOWNERS — Deek identity & smoke-test gate
+#
+# GitHub surfaces these owners as required reviewers on any PR
+# touching the listed paths. Paired with branch protection on master
+# (required-approving-review-count >= 1), this means identity-layer
+# changes can never be merged without human review.
+#
+# Keep this file short and focused. It is NOT a general-purpose review
+# list — only paths where a regression has outsized blast radius.
+#
+# See docs/audit/IDENTITY_ISOLATION_AUDIT_2026-04.md (R1) for context.
+
+# Identity layer — source of truth for who Deek is and what modules it knows
+/DEEK_IDENTITY.md           @NBNEORIGIN
+/DEEK_MODULES.yaml          @NBNEORIGIN
+/core/identity/             @NBNEORIGIN
+
+# Post-deploy smoke-test gate — breaking these hides future regressions
+/tests/smoke/               @NBNEORIGIN
+
+# Deploy scripts — the only blessed build path, enforces DEEK_API_KEY
+# build-arg that prevents SWC placeholder-folding (see audit F3)
+/deploy/build-deek-api.sh   @NBNEORIGIN
+/deploy/build-deek-web.sh   @NBNEORIGIN
+/web/Dockerfile             @NBNEORIGIN
+
+# Canonical protocol docs — vendored from nbne-policy but changes here
+# should also be flagged
+/NBNE_PROTOCOL.md           @NBNEORIGIN
