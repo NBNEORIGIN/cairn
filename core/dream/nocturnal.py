@@ -401,6 +401,25 @@ def _parse_response(content: str, bundle: Bundle) -> RawCandidate | None:
 
 # ── Persistence ───────────────────────────────────────────────────────
 
+def _embed(text: str) -> list[float] | None:
+    """Embed a candidate statement for dedupe comparisons.
+
+    Returns None on any failure — callers must store NULL embedding in
+    that case; the duplication gate then can't use that row but the
+    candidate still persists.
+    """
+    try:
+        from core.wiki.embeddings import get_embed_fn
+        fn = get_embed_fn()
+        if fn is None:
+            return None
+        v = fn(text[:2000])
+        return [float(x) for x in v] if v else None
+    except Exception as exc:
+        logger.debug('[dream] candidate embed failed: %s', exc)
+        return None
+
+
 def write_candidates(
     conn, survivors: list[dict], rejected: list[dict],
     model: str, temperature: float,
@@ -408,19 +427,24 @@ def write_candidates(
     """Insert survivors + rejected candidates. Returns count of survivors
     written (which is also surfaced — the morning briefing queries
     surfaced_at IS NULL candidates).
+
+    Phase C: each candidate is embedded at write time. The embedding
+    feeds the duplication gate on future nights — rejected candidates
+    become negative examples so the same pattern doesn't resurface.
     """
     written = 0
     with conn.cursor() as cur:
         for surv in survivors:
+            emb = _embed(surv['candidate_text'])
             cur.execute(
                 """INSERT INTO dream_candidates
                     (id, candidate_text, candidate_type,
                      source_memory_ids, source_entity_ids,
                      generation_temperature, generation_model,
-                     confidence, filter_signals, score,
+                     confidence, filter_signals, score, embedding,
                      generated_at, surfaced_at)
                    VALUES (%s, %s, %s, %s::int[], %s::uuid[],
-                           %s, %s, %s, %s::jsonb, %s,
+                           %s, %s, %s, %s::jsonb, %s, %s::vector,
                            NOW(), NOW())""",
                 (
                     str(uuid.uuid4()),
@@ -432,19 +456,21 @@ def write_candidates(
                     float(surv.get('confidence', 0.0)),
                     json.dumps(surv.get('filter_signals') or {}),
                     float(surv.get('score', 0.0)),
+                    emb,
                 ),
             )
             written += 1
         for rej in rejected:
+            emb = _embed(rej['candidate_text'])
             cur.execute(
                 """INSERT INTO dream_candidates
                     (id, candidate_text, candidate_type,
                      source_memory_ids, source_entity_ids,
                      generation_temperature, generation_model,
-                     confidence, filter_signals, score,
+                     confidence, filter_signals, embedding,
                      generated_at, reviewed_at, review_action)
                    VALUES (%s, %s, %s, %s::int[], %s::uuid[],
-                           %s, %s, %s, %s::jsonb, NULL,
+                           %s, %s, %s, %s::jsonb, %s::vector,
                            NOW(), NOW(), 'rejected')""",
                 (
                     str(uuid.uuid4()),
@@ -455,6 +481,7 @@ def write_candidates(
                     temperature, model,
                     float(rej.get('confidence', 0.0)),
                     json.dumps(rej.get('filter_signals') or {}),
+                    emb,
                 ),
             )
     return written

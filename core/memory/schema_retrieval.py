@@ -91,13 +91,17 @@ def retrieve_schemas(
 
     try:
         with conn.cursor() as cur:
+            # Brief 4 Phase C: dormant schemas are retrievable but at
+            # a lower weight — they're still findable but rank below
+            # active ones with similar similarity.
             cur.execute(
                 """
                 SELECT id::text, schema_text, salience, confidence,
-                       source_memory_ids, derived_at,
+                       source_memory_ids, derived_at, status,
                        1 - (embedding <=> %s::vector) AS similarity
                   FROM schemas
-                 WHERE status = 'active' AND embedding IS NOT NULL
+                 WHERE status IN ('active', 'dormant')
+                   AND embedding IS NOT NULL
                  ORDER BY embedding <=> %s::vector
                  LIMIT %s
                 """,
@@ -119,9 +123,13 @@ def retrieve_schemas(
 
     results: list[dict] = []
     for row in rows:
-        sim = float(row[6] or 0.0)
+        status = str(row[6] or 'active')
+        sim = float(row[7] or 0.0)
         if sim < min_similarity:
             continue
+        # Active schemas: 1.5x boost. Dormant: 0.75x (retrievable but
+        # half the weight of active — Task 10 of Brief 4 Phase C).
+        boost_factor = 1.5 if status == 'active' else 0.75
         results.append({
             'id': row[0],
             'statement': row[1],
@@ -129,8 +137,9 @@ def retrieve_schemas(
             'confidence': float(row[3] or 0.0),
             'source_memory_ids': list(row[4] or []),
             'derived_at': row[5].isoformat() if row[5] else None,
+            'status': status,
             'similarity': sim,
-            'boosted_score': sim * 1.5,  # Task 7: schemas get 1.5x weight
+            'boosted_score': sim * boost_factor,
         })
     return results
 
@@ -156,13 +165,21 @@ def _reinforce_schemas_sync(schema_ids: list[str]) -> None:
         conn = psycopg2.connect(db_url, connect_timeout=5)
         try:
             with conn.cursor() as cur:
+                # Brief 4 Phase C: dormant schemas that get retrieved
+                # are re-activated. Reinforcement still applies; the
+                # status flip is what takes it out of the "stale"
+                # bucket so the next decay sweep leaves it alone.
                 cur.execute(
                     """UPDATE schemas
                           SET access_count = access_count + 1,
                               last_accessed_at = NOW(),
-                              salience = LEAST(10.0, salience + 0.1)
+                              salience = LEAST(10.0, salience + 0.1),
+                              status = CASE
+                                WHEN status = 'dormant' THEN 'active'
+                                ELSE status
+                              END
                         WHERE id::text = ANY(%s::text[])
-                          AND status = 'active'""",
+                          AND status IN ('active', 'dormant')""",
                     (schema_ids,),
                 )
             conn.commit()
