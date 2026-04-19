@@ -2010,6 +2010,7 @@ async def _all_project_chunk_counts() -> dict[str, int]:
         return {}
 
 
+@app.get("/api/deek/identity/status")
 @app.get("/identity/status")
 async def identity_status():
     """Deek identity + module reachability. No auth (internal)."""
@@ -2026,6 +2027,7 @@ async def identity_status():
     }
 
 
+@app.get("/api/deek/identity/prompt")
 @app.get("/identity/prompt")
 async def identity_prompt():
     """Exact system-prompt prefix the next request would use.

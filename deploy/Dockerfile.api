@@ -49,6 +49,10 @@ COPY projects/ ./projects/
 COPY wiki/ ./wiki/
 COPY scripts/ ./scripts/
 COPY deploy/modules.json ./deploy/modules.json
+# Identity layer — loaded at boot by core/identity/assembler.py.
+# Missing either file fails startup loudly.
+COPY DEEK_IDENTITY.md ./DEEK_IDENTITY.md
+COPY DEEK_MODULES.yaml ./DEEK_MODULES.yaml
 # Create data dir
 RUN mkdir -p ./data
 
