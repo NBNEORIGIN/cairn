@@ -106,18 +106,22 @@ export async function POST(req: NextRequest) {
               continue
             }
             const t = evt?.type
-            if (t === 'tool_start') {
+            if (t === 'response_delta') {
+              // Agent already streams tokens in response_delta — pass through.
+              if (evt.text) send('response_delta', { text: evt.text })
+            } else if (t === 'tool_start') {
               send('response_delta', {
                 text: `\n[🔧 ${evt.tool || 'tool'}…]\n`,
               })
             } else if (t === 'tool_end') {
-              // Optional: show duration inline. Keep it short.
-              send('response_delta', {
-                text: `[done in ${Math.round((evt.duration_ms || 0) / 100) / 10}s]\n`,
-              })
+              const secs = Math.max(
+                0.1,
+                Math.round((evt.duration_ms || 0) / 100) / 10,
+              )
+              send('response_delta', { text: `[done in ${secs}s]\n` })
             } else if (t === 'complete') {
-              const text = evt.response || ''
-              if (text) send('response_delta', { text })
+              // Agent already emitted the body via response_delta; just
+              // close the stream cleanly with session metadata.
               send('done', {
                 session_id: sessionId,
                 model_used: evt.model_used || '',
@@ -129,7 +133,7 @@ export async function POST(req: NextRequest) {
             } else if (t === 'error') {
               send('error', { error: evt.message || 'agent error' })
             }
-            // routing / tokens / tool_queued / done — ignore (not user-facing)
+            // routing / tokens / status / tool_queued / done — ignore.
           }
         }
         if (!completed) {
