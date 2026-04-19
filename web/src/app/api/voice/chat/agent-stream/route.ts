@@ -12,12 +12,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from '@/lib/auth'
 
-const DEEK_API_URL =
-  process.env.DEEK_API_URL ||
-  process.env.CLAW_API_URL ||
-  'http://localhost:8765'
-const DEEK_API_KEY =
-  process.env.DEEK_API_KEY || process.env.CLAW_API_KEY || ''
+// Read env *inside* the handler at request time, not at module load —
+// otherwise Next.js inlines the build-time value and a missing build-arg
+// silently bakes a stale dev key into the production bundle.
+function deekConfig() {
+  return {
+    apiUrl:
+      process.env.DEEK_API_URL ||
+      process.env.CLAW_API_URL ||
+      'http://localhost:8765',
+    apiKey:
+      process.env.DEEK_API_KEY || process.env.CLAW_API_KEY || '',
+  }
+}
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -49,10 +56,11 @@ export async function POST(req: NextRequest) {
     message,
   })
 
-  const upstream = await fetch(`${DEEK_API_URL}/chat/stream?${qs.toString()}`, {
+  const cfg = deekConfig()
+  const upstream = await fetch(`${cfg.apiUrl}/chat/stream?${qs.toString()}`, {
     method: 'GET',
     headers: {
-      'X-API-Key': DEEK_API_KEY,
+      'X-API-Key': cfg.apiKey,
       Accept: 'text/event-stream',
     },
   })

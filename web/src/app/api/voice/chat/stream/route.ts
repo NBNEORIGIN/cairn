@@ -7,12 +7,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession, locationDenyReason } from '@/lib/auth'
 
-const DEEK_API_URL =
-  process.env.DEEK_API_URL ||
-  process.env.CLAW_API_URL ||
-  'http://localhost:8765'
-const DEEK_API_KEY =
-  process.env.DEEK_API_KEY || process.env.CLAW_API_KEY || ''
+// Read env at request time so Next.js can't inline a stale build-time value.
+function deekConfig() {
+  return {
+    apiUrl:
+      process.env.DEEK_API_URL ||
+      process.env.CLAW_API_URL ||
+      'http://localhost:8765',
+    apiKey:
+      process.env.DEEK_API_KEY || process.env.CLAW_API_KEY || '',
+  }
+}
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -42,11 +47,12 @@ export async function POST(req: NextRequest) {
   const payload = { ...body, user: session.email }
 
   // Open the upstream SSE stream and proxy it straight through.
-  const upstream = await fetch(`${DEEK_API_URL}/api/deek/chat/voice/stream`, {
+  const cfg = deekConfig()
+  const upstream = await fetch(`${cfg.apiUrl}/api/deek/chat/voice/stream`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-API-Key': DEEK_API_KEY,
+      'X-API-Key': cfg.apiKey,
       Accept: 'text/event-stream',
     },
     body: JSON.stringify(payload),
