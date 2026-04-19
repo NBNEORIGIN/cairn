@@ -32,11 +32,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-try:
-    import httpx
-except ImportError:
-    print("FATAL: httpx is required (pip install httpx)", file=sys.stderr)
-    sys.exit(2)
+# stdlib only — this runs on arbitrary deploy hosts with no pip install
+from urllib.request import urlopen, Request
+from urllib.error import URLError, HTTPError
 
 
 FIXTURE_PATH = Path(__file__).parent / 'golden_identity.json'
@@ -64,19 +62,32 @@ def check_identity(url: str, golden: dict) -> list[str]:
     failures: list[str] = []
     endpoint = url.rstrip('/') + '/api/deek/identity/status'
     log(f'-> GET {endpoint}')
+    # Cloudflare blocks urllib's default UA (Error 1010). Send a real-
+    # browser-shaped UA since this endpoint is explicitly intended to
+    # be hit by automation on every deploy.
+    req = Request(endpoint, headers={
+        'Accept': 'application/json',
+        'User-Agent': 'deek-smoke-test/1.0 (+https://github.com/NBNEORIGIN/deek)',
+    })
     try:
-        r = httpx.get(endpoint, timeout=10.0)
-    except Exception as exc:
+        with urlopen(req, timeout=10) as r:
+            status = r.status
+            body = r.read().decode('utf-8', errors='replace')
+    except HTTPError as exc:
+        fail('identity.http',
+             f'status_code={exc.code} body={exc.read()[:200]!r}')
+        return ['identity.http']
+    except (URLError, Exception) as exc:
         fail('identity.fetch', f'{type(exc).__name__}: {exc}')
         return ['identity.fetch']
 
-    if r.status_code != 200:
+    if status != 200:
         fail('identity.http',
-             f'status_code={r.status_code} body={r.text[:200]}')
+             f'status_code={status} body={body[:200]}')
         return ['identity.http']
 
     try:
-        live = r.json()
+        live = json.loads(body)
     except Exception as exc:
         fail('identity.json', f'{type(exc).__name__}: response was not JSON')
         return ['identity.json']
