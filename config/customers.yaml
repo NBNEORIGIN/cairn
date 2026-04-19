@@ -1,0 +1,41 @@
+# config/customers.yaml
+#
+# Toby-curated canonical customer names for the entity extractor.
+# CRM API sync is a Phase B+ enhancement — for Phase A this file is
+# the source of truth.
+#
+# Format:
+#   - canonical: Display Name Here
+#     aliases: [alternative spellings, short forms, common typos]
+#
+# Canonicalisation at runtime lowercases + collapses whitespace, so
+# entries should just use their normal-case display form.
+
+customers:
+  # Seed list — grow as Deek encounters them.
+  - canonical: Flowers By Julie
+    aliases: [Julie Flowers, FBJ, Flowers by Julie Ltd]
+
+  - canonical: Ridley Properties
+    aliases: [Ridley]
+
+  - canonical: Clayport Jewellers
+    aliases: [Clayport, Clayport Jewellers Ltd]
+
+  - canonical: DemNurse
+    aliases: [Dem Nurse, DemNurse Ltd, dem-nurse]
+
+  - canonical: Amble Pin Cushion
+    aliases: [APC, Amble Haberdashery]
+
+  - canonical: NAPCO Pizza
+    aliases: [NAPCO, Budle Pizza, budlepizza]
+
+  - canonical: Ganbarukai
+    aliases: [Northumberland Karate, NKA]
+
+  - canonical: House of Hair Alnwick
+    aliases: [House of Hair, HOH]
+
+  - canonical: Origin Designed
+    aliases: [Origin, Origin Design]

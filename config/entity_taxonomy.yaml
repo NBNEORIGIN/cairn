@@ -1,0 +1,55 @@
+# config/entity_taxonomy.yaml
+#
+# Entity types Deek extracts from memories, plus the stop-entity
+# blocklist. Changes take effect on next API restart.
+#
+# Philosophy (see docs/CROSSLINK_GRAPH.md):
+# - Canonical forms are lower-cased with whitespace collapsed.
+# - Extraction methods are composable. The order below is the
+#   precedence order when multiple methods might claim the same text
+#   span (earlier wins).
+# - spaCy is deliberately NOT used. Generic NER is weak for our
+#   domain (M-numbers, SKUs, small-business client names). Canonical
+#   lists + regex + proper-noun heuristic perform better at <1ms.
+
+# Entity types in precedence order. Later types only match text the
+# earlier ones didn't claim.
+entity_types:
+  - name: m_number
+    source: regex
+    pattern: '\bM\d{4,5}\b'
+    # e.g. "M1234" — NBNE's job-number convention. Stable, high-signal.
+
+  - name: module
+    source: deek_modules_yaml
+    # Uses DEEK_MODULES.yaml — already authoritative for these names.
+
+  - name: customer
+    source: canonical_list
+    list_path: config/customers.yaml
+    # Toby-curated starter list. CRM API sync is Phase B+.
+
+  - name: supplier
+    source: canonical_list
+    list_path: config/suppliers.yaml
+
+  - name: material
+    source: canonical_list
+    list_path: config/materials.yaml
+
+  - name: error_type
+    source: regex
+    pattern: '(?i)\b(timeout|connection refused|nameerror|keyerror|valueerror|typeerror|attributeerror|importerror|exception|segfault|oom|503|502|401|403|429|500|429 too many requests|rate limit|ssl error|certificate expired)\b'
+
+# Stop entities — too ubiquitous to carry signal. A walk through
+# these would match nearly every memory. Case-insensitive exact match
+# after canonicalisation.
+stop_entities:
+  - toby
+  - jo
+  - deek
+  - nbne
+  - cairn
+  - claude
+  - claude code
+  - deek agent
