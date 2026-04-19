@@ -1804,10 +1804,34 @@ def _embed_memory_to_pgvector(
                     content_hash, embedding, indexed_at,
                     salience, salience_signals, last_accessed_at, access_count)
                    VALUES (%s, %s, %s, 'memory', %s, %s, %s::vector, NOW(),
-                           %s, %s::jsonb, NOW(), 0)""",
+                           %s, %s::jsonb, NOW(), 0)
+                   RETURNING id""",
                 (project, file_path, content, chunk_name, content_hash, embedding,
                  sal.score, _json.dumps(sal.signals)),
             )
+            (new_chunk_id,) = cur.fetchone()
+
+        # Brief 3 Phase A — entity extraction + graph upsert. Failure
+        # here must not break the memory write, so exceptions are
+        # caught and logged. The caller already holds the conn, so
+        # upsert_entities_and_edges adds rows inside the same
+        # transaction committed below.
+        try:
+            from core.memory.entities import (
+                extract_entities, outcome_signal, upsert_entities_and_edges,
+            )
+            refs = extract_entities(content, metadata={'outcome': outcome})
+            if refs:
+                sig = outcome_signal({'outcome': outcome})
+                upsert_entities_and_edges(
+                    memory_id=int(new_chunk_id),
+                    refs=refs,
+                    outcome=sig,
+                    conn=conn,
+                )
+        except Exception as exc:
+            logger.warning('entity extraction failed (non-fatal): %s', exc)
+
         conn.commit()
         conn.close()
         return True

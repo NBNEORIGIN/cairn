@@ -1,0 +1,24 @@
+# config/materials.yaml
+#
+# Canonical material names for the entity extractor. Seed list only —
+# Phase B+ should sync from Manufacture's material catalog.
+
+materials:
+  # Common NBNE materials — grow organically as memories mention them.
+  - canonical: 3mm ACM
+    aliases: [3mm Dibond, 3mm aluminium composite, ACM 3mm]
+
+  - canonical: 5mm ACM
+    aliases: [5mm Dibond, 5mm aluminium composite]
+
+  - canonical: vinyl graphics
+    aliases: [vinyl, adhesive vinyl, cut vinyl]
+
+  - canonical: acrylic
+    aliases: [perspex, plexiglass]
+
+  - canonical: dibond
+    aliases: [aluminium composite]
+
+  - canonical: foamex
+    aliases: [foam PVC]

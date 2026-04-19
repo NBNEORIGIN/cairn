@@ -1,0 +1,36 @@
+# config/suppliers.yaml
+#
+# Toby-curated canonical supplier names for the entity extractor.
+
+suppliers:
+  # Seed list — grow as Deek encounters them. Keep conservative —
+  # false positives are worse than misses in Phase A.
+  - canonical: Amazon SP-API
+    aliases: [SP-API, Amazon Seller Central]
+
+  - canonical: Etsy
+    aliases: [Etsy API]
+
+  - canonical: eBay
+    aliases: [eBay API]
+
+  - canonical: Stripe
+    aliases: [stripe.com]
+
+  - canonical: Postmark
+    aliases: [postmarkapp]
+
+  - canonical: Google Ads
+    aliases: [Google Ads API, Google Adwords]
+
+  - canonical: Anthropic
+    aliases: [Claude API]
+
+  - canonical: OpenAI
+    aliases: [OpenAI API]
+
+  - canonical: Hetzner
+    aliases: []
+
+  - canonical: Cloudflare
+    aliases: []
