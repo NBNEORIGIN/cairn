@@ -35,7 +35,7 @@ modules:
       cost routing, or Deek's own state. Effectively always reachable by
       definition of the request being in flight.
     base_url: https://deek.nbnesigns.co.uk
-    health_endpoint: /api/deek/health
+    health_endpoint: /health
     context_endpoint: /api/deek/context
     auth_mode: none
     owner: Toby
