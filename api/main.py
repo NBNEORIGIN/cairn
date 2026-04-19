@@ -2058,6 +2058,117 @@ async def _all_project_chunk_counts() -> dict[str, int]:
 
 
 @app.get("/api/deek/identity/status")
+@app.get("/memory/salience/distribution")
+@app.get("/api/deek/memory/salience/distribution")
+async def memory_salience_distribution():
+    """Histogram of salience across memory-bearing chunks.
+
+    Sanity-checks the extractor isn't producing degenerate distributions
+    (all 1.0 = extractor not firing; all 10.0 = weights blown out).
+    No auth — internal network only.
+    """
+    db_url = os.getenv('DATABASE_URL', '')
+    if not db_url:
+        raise HTTPException(status_code=503, detail='database not configured')
+    try:
+        import psycopg2
+        conn = psycopg2.connect(db_url, connect_timeout=3)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f'db: {exc}')
+    try:
+        mem_types = ('memory', 'email', 'wiki', 'module_snapshot', 'social_post')
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""SELECT
+                      COUNT(*) FILTER (WHERE salience = 1.0)             AS at_floor,
+                      COUNT(*) FILTER (WHERE salience > 1.0 AND salience <= 3.0) AS low,
+                      COUNT(*) FILTER (WHERE salience > 3.0 AND salience <= 6.0) AS mid,
+                      COUNT(*) FILTER (WHERE salience > 6.0 AND salience <  10.0) AS high,
+                      COUNT(*) FILTER (WHERE salience = 10.0)            AS at_ceiling,
+                      MIN(salience), MAX(salience), AVG(salience), COUNT(*)
+                    FROM claw_code_chunks
+                    WHERE chunk_type = ANY(%s::text[])""",
+                (list(mem_types),),
+            )
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return {'bins': {}, 'count': 0}
+    return {
+        'bins': {
+            'at_floor_1.0': int(row[0] or 0),
+            'low_1_to_3': int(row[1] or 0),
+            'mid_3_to_6': int(row[2] or 0),
+            'high_6_to_10': int(row[3] or 0),
+            'at_ceiling_10.0': int(row[4] or 0),
+        },
+        'min': float(row[5] or 0),
+        'max': float(row[6] or 0),
+        'mean': float(row[7] or 0),
+        'count': int(row[8] or 0),
+        'chunk_types_included': list(mem_types),
+    }
+
+
+@app.get("/memory/schemas/active")
+@app.get("/api/deek/memory/schemas/active")
+async def memory_schemas_active(limit: int = 50):
+    """Active schemas with confidence and source count.
+
+    No auth — internal network only.
+    """
+    db_url = os.getenv('DATABASE_URL', '')
+    if not db_url:
+        raise HTTPException(status_code=503, detail='database not configured')
+    try:
+        import psycopg2
+        conn = psycopg2.connect(db_url, connect_timeout=3)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f'db: {exc}')
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id::text, schema_text, confidence, salience,
+                          access_count, array_length(source_memory_ids, 1),
+                          derived_at, last_accessed_at, model
+                     FROM schemas
+                    WHERE status = 'active'
+                    ORDER BY salience DESC, derived_at DESC
+                    LIMIT %s""",
+                (limit,),
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+    return {
+        'count': len(rows),
+        'schemas': [
+            {
+                'id': r[0],
+                'statement': r[1],
+                'confidence': float(r[2] or 0),
+                'salience': float(r[3] or 1),
+                'access_count': int(r[4] or 0),
+                'source_count': int(r[5] or 0),
+                'derived_at': r[6].isoformat() if r[6] else None,
+                'last_accessed_at': r[7].isoformat() if r[7] else None,
+                'model': r[8],
+            }
+            for r in rows
+        ],
+    }
+
+
+@app.get("/memory/consolidation/last-run")
+@app.get("/api/deek/memory/consolidation/last-run")
+async def memory_consolidation_last_run():
+    """Last consolidation run metadata — or null if never run."""
+    from core.memory.consolidation import read_last_run
+    last = read_last_run()
+    return {'last_run': last}
+
+
 @app.get("/identity/status")
 async def identity_status():
     """Deek identity + module reachability. No auth (internal)."""

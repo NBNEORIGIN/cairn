@@ -4,10 +4,11 @@ Deek's retrieval layer weights memories by **relevance × salience ×
 recency**, not relevance alone. Strong impressions last longer;
 unused memories fade; repetition becomes schema.
 
-Status: **Phase A — shadow mode**. The ranker computes the new ordering
+Status: **Phase B — shadow mode**. The ranker computes the new ordering
 on every retrieval but returns the OLD ordering to callers. Shadow
 data lands in `data/impressions_shadow.jsonl` for review before the
-flip.
+flip. Nightly consolidation, schema retrieval, and diagnostic
+endpoints are live as of Phase B; cutover (shadow off) is Phase C.
 
 ## Three components
 
@@ -97,12 +98,74 @@ Migration `migrations/postgres/0001_impressions_layer.sql` adds:
 Applied automatically at API startup by
 `core/memory/migrations.py`. Idempotent — safe to re-run.
 
-## Not in Phase A
+## Nightly consolidation (Phase B)
 
-- Nightly consolidation → Brief 2 Phase B
-- Schema retrieval (reading from `schemas` during relevant queries) → Phase B
-- Diagnostic endpoints (`/memory/salience/distribution` etc.) → Phase B
+`core/memory/consolidation.py` + `scripts/consolidate_memories.py` run
+nightly via Hetzner cron at 02:00 UTC. Each pass:
+
+1. Samples up to 50 memories from the last 30 days ranked by
+   `salience × exp(-hours_since_access / 72h)`.
+2. Clusters them with single-link agglomerative clustering over
+   pairwise cosine similarity (threshold 0.55).
+3. For each cluster of ≥3 members, asks the local Ollama model
+   (`qwen2.5:7b-instruct` via Tailscale to deek-gpu) to distil a
+   recurring pattern.
+4. Filters: confidence ≥ 0.7, ≥3 source memories (IDs grounded in
+   the cluster — not hallucinated).
+5. Dedupes against existing active schemas (cosine > 0.9 = duplicate,
+   skip).
+6. Writes survivors to the `schemas` table.
+
+Hard cap: 500 active schemas. Overflow demotes the lowest-salience
+actives to `dormant`.
+
+Cost: zero cloud calls. Every run is bounded by `max_schemas=10`
+writes so a bad clustering day can't flood the table.
+
+Cron entry (Hetzner `/etc/crontab` snippet):
+
+```cron
+# Deek impressions — nightly memory consolidation at 02:00 UTC.
+# Samples high-salience recent memories, clusters, distils via
+# local Ollama, writes schemas. Zero cloud cost.
+0 2 * * * docker exec -w /app -e PYTHONPATH=/app deploy-deek-api-1 \
+  python scripts/consolidate_memories.py \
+  >> /var/log/deek-consolidation.log 2>&1
+```
+
+Last-run metadata is logged to `data/consolidation_runs.jsonl` and
+surfaced via `GET /memory/consolidation/last-run`.
+
+## Schema retrieval (Phase B)
+
+When a query looks **strategic** (keyword match on architecture,
+decision, principle, pattern, plan, etc., OR length ≥ 20 tokens),
+the retriever also pulls top-3 active schemas by cosine similarity
+and appends them to the result list tagged `chunk_type='schema'`.
+
+Schemas carry a 1.5× score boost because they're distilled — each
+row is richer per token than a raw memory.
+
+Reinforcement also applies: every retrieved schema gets
+`access_count += 1`, `last_accessed_at = NOW()`, `salience += 0.1`.
+
+## Diagnostic endpoints (Phase B)
+
+- `GET /api/deek/memory/salience/distribution` — histogram of
+  salience across memory-bearing chunks. Sanity-check the extractor
+  isn't producing all-1.0 (not firing) or all-10.0 (weights too
+  hot).
+- `GET /api/deek/memory/schemas/active` — active schemas with
+  confidence, source count, recent access.
+- `GET /api/deek/memory/consolidation/last-run` — most recent
+  run summary from `data/consolidation_runs.jsonl`.
+
+No auth — internal network only.
+
+## Not yet live
+
 - Flipping off shadow mode → Phase C after 1 week of shadow data
+- Patching NBNE_PROTOCOL.md → Phase C, post-cutover
 
 ## Files
 
