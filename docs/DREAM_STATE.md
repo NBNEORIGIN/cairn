@@ -13,11 +13,10 @@ default. The value is in the filter.** Budget ~100 attempts in → ~3
 surface. Every surfaced candidate cites specific source memory IDs
 and is falsifiable on inspection.
 
-Status: **Phase B — nightly loop, morning API, PWA surfacing live**.
-Cron fires at 02:30 UTC; candidates surface in the PWA Brief tab
-with accept/reject/edit/defer cards; accepted cards promote to
-`schemas` and become retrievable. Phase C adds the stale-candidate
-sweep, schema decay, Postmark digest, and `nbne-policy` patch.
+Status: **Phase C — complete**. Every layer live: nocturnal
+generation, morning surface, PWA review, schema promotion, stale
+sweep, schema decay, daily digest. Nothing deferred except the
+`nbne-policy#3` doc patch (open; merges when Toby does).
 
 ## Mechanism
 
@@ -194,15 +193,94 @@ live briefing. Each card has:
 Empty state: *"No candidates survived the filter. Memory is the
 product — some nights there's nothing worth saying."*
 
-## Not yet (Phase C)
+## Phase C additions
 
-- Stale-candidate sweep (7-day auto-archive + alert if > 50%
-  expire unreviewed)
-- Schema decay (90-day → dormant, 180-day → archived) — extends
-  Brief 2's schema lifecycle
-- Postmark daily digest email
-- `nbne-policy#3` — new NBNE_PROTOCOL.md section stacked on
-  `#1` (identity+impressions) and `#2` (crosslink)
+### Maintenance cron
+
+Runs daily at 03:00 UTC, 30 minutes after the nocturnal loop has
+finished:
+
+```cron
+# Deek dream state — daily maintenance (Brief 4 Phase C)
+# Expires stale candidates (7d unreviewed), ages schemas
+# (active → dormant @ 90d, dormant → archived @ 180d),
+# sends the digest email.
+0 3 * * * docker exec -w /app -e PYTHONPATH=/app deploy-deek-api-1 \
+  python scripts/dream_maintenance.py \
+  >> /var/log/deek-dream-maint.log 2>&1
+```
+
+Safe to run manually at any time (`--dry-run` reports without
+applying). Zero external dependencies — SMTP is optional.
+
+### Stale-candidate sweep
+
+Candidates surfaced for >= 7 days without a review action are
+marked `review_action='expired'`, `reviewed_at=NOW()`. If >50% of
+the week's surfaced candidates expire, the digest includes a
+`⚠ EXPIRED RATE > 50%` warning — either the briefing isn't being
+read or the filter is too permissive.
+
+### Schema decay
+
+| Transition | Rule | Effect |
+|---|---|---|
+| active → dormant | not accessed in 90 days | still retrievable, half weight (0.75× vs 1.5×) |
+| dormant → archived | not accessed in 180 days | not retrieved by default |
+| dormant → active | any retrieval + reinforcement | automatic on hit |
+
+Reactivation is handled by the retrieval path (`core/memory/
+schema_retrieval.py::_reinforce_schemas_sync`) — a dormant schema
+that gets retrieved bumps its `last_accessed_at`, increments
+`access_count`, nudges salience, AND flips status back to `active`
+in the same UPDATE. The next decay sweep then leaves it alone.
+
+### Duplication gate learns from rejects
+
+`core/dream/filter.py::_fetch_existing_embeddings` now pulls both:
+
+- **All non-archived schema embeddings** (active + dormant)
+- **Recently-rejected dream candidate embeddings** (last 30 days)
+
+Each candidate is embedded at write time and the embedding stored
+in `dream_candidates.embedding`. Reject a candidate once and the
+pattern can't resurface for at least 30 days — the filter
+calibrates from Toby's judgement.
+
+### Daily digest
+
+Printed to stdout and — if `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS`
+are set — emailed to `DEEK_DREAM_DIGEST_TO` (default
+`toby@nbnesigns.com`). Shape:
+
+```
+Deek dream-state digest — 2026-04-27
+============================================================
+
+Last night's run (2026-04-27):
+  candidates generated: 5
+  surfaced:             3
+  actions so far:       1 accepted · 1 rejected · 0 deferred · 0 expired
+
+Stale-candidate sweep:
+  expired this run: 0 (of 12 surfaced in last 7 days = 0.0%)
+
+Schema lifecycle:
+  active:   14   dormant: 2   archived: 0
+
+— Deek
+```
+
+SMTP reuses the shared transactional path the email-triage sender
+already uses. No Postmark SDK dep needed.
+
+### Policy patch
+
+`NBNEORIGIN/nbne-policy#3` — Dream State section stacked on #2
+(crosslink) which stacks on #1 (identity+impressions). Merge in
+order: 1 → 2 → 3. When all three are merged, `sync-policy.sh` on
+the next deploy pulls all three new sections into the deek repo's
+vendored `NBNE_PROTOCOL.md`.
 
 ## Files
 

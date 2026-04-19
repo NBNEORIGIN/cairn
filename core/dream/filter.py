@@ -284,15 +284,34 @@ def compute_score(
 # ── Orchestrator ──────────────────────────────────────────────────────
 
 def _fetch_existing_embeddings(conn, window_days: int = 30) -> list[list[float]]:
-    """Pull active schema embeddings + embeddings of recently-rejected
-    dream candidates (for dedupe).
+    """Pull active+dormant schema embeddings plus embeddings of
+    recently-rejected dream candidates.
+
+    Phase C behaviour: dormant schemas ALSO dedupe (don't resurface
+    a pattern we put to sleep), and rejected dream candidates within
+    the last `window_days` feed back as negative examples so the
+    filter doesn't suggest the same pattern twice.
     """
     embeddings: list[list[float]] = []
     try:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT embedding FROM schemas "
-                "WHERE status = 'active' AND embedding IS NOT NULL"
+                "WHERE status IN ('active', 'dormant') "
+                "AND embedding IS NOT NULL"
+            )
+            for (vec,) in cur.fetchall():
+                try:
+                    if vec is not None:
+                        embeddings.append([float(x) for x in list(vec)])
+                except Exception:
+                    continue
+            cur.execute(
+                """SELECT embedding FROM dream_candidates
+                    WHERE review_action = 'rejected'
+                      AND embedding IS NOT NULL
+                      AND reviewed_at > NOW() - (INTERVAL '1 day' * %s)""",
+                (window_days,),
             )
             for (vec,) in cur.fetchall():
                 try:
