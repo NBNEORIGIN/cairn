@@ -24,11 +24,15 @@ COPY . .
 ARG GIT_COMMIT=dev
 RUN echo "deek-web build git_commit=${GIT_COMMIT}" > /app/.build_commit
 
-# Next.js inlines process.env.* into route handler code at build time.
-# These defaults work inside the Docker network; the runner stage env
-# vars override at runtime for any values that Next reads lazily.
+# Next.js inlines process.env.* into route handler code at build time,
+# regardless of function-wrapping tricks — so the key MUST be passed
+# as a build arg. If it isn't, we fail the build loudly rather than
+# bake a placeholder into production. This class of bug cost us a
+# full session on 2026-04-19 when the placeholder 'deek-dev-key-…'
+# got compiled into prod and every chat request 502'd.
 ARG DEEK_API_URL=http://deek-api:8765
-ARG DEEK_API_KEY=deek-dev-key-change-in-production
+ARG DEEK_API_KEY
+RUN test -n "$DEEK_API_KEY" && [ "$DEEK_API_KEY" != "deek-dev-key-change-in-production" ] || (echo "FATAL: DEEK_API_KEY build-arg missing or placeholder. Pass --build-arg DEEK_API_KEY=\$DEEK_API_KEY from deploy/.env." >&2 && exit 1)
 ENV DEEK_API_URL=${DEEK_API_URL}
 ENV DEEK_API_KEY=${DEEK_API_KEY}
 ENV CLAW_API_URL=${DEEK_API_URL}
