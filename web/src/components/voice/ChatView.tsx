@@ -3,7 +3,10 @@
 /**
  * ChatView — ChatGPT-like text interface for Deek.
  *
- * Same streaming backend as Voice mode (/api/voice/chat/stream) but:
+ * Routes to /api/voice/chat/agent-stream — the FULL agent pipeline with
+ * tools (query_amazon_intel, search_crm, search_wiki, etc). Voice mode
+ * still uses /api/voice/chat/stream (tool-less, TTS-optimised) for
+ * latency + TTS word budget reasons.
  * - Input is a textarea, not a microphone
  * - Output is rendered as text, not spoken
  * - No turn-taking state machine — one question → one streamed response
@@ -53,13 +56,14 @@ export function ChatView({
       abortRef.current = new AbortController()
 
       try {
-        const res = await fetch('/api/voice/chat/stream', {
+        const res = await fetch('/api/voice/chat/agent-stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             content: userText,
             location,
             session_id: sessionId,
+            project: 'deek',
           }),
           signal: abortRef.current.signal,
         })
