@@ -926,7 +926,11 @@ def _voice_identity_block() -> str:
         from core.identity import assembler as _ia, probe as _ip
         reach = _ip.get_reachable_modules()
         errs = _ip.get_errors()
-        modules = _ia.get_modules()
+        # Exclude the 'deek' entry — Deek is answering the question, so
+        # self-reachability via the public URL is noisy (nginx hairpin
+        # returns 502 even when Deek is clearly online) and confuses the
+        # 7B voice model into cherry-picking names.
+        modules = [m for m in _ia.get_modules() if m.name != 'deek']
         reach_names = [m.display_name for m in modules if m.name in reach]
         unreach = [
             (m.display_name, errs.get(m.name, 'offline'))
@@ -936,16 +940,23 @@ def _voice_identity_block() -> str:
             "You are Deek, NBNE's sovereign AI brain for North By North East "
             "Print & Sign Ltd (Alnwick, Northumberland). Directors: Toby and "
             "Jo Fletcher.",
-            f"Modules reachable right now: "
-            f"{', '.join(reach_names) if reach_names else '(none)'}.",
+            "",
+            "=== NBNE MODULES (ground truth for 'what can you access?') ===",
+            "ONLINE right now — you can use data from these: "
+            + (", ".join(reach_names) if reach_names else "(none)") + ".",
         ]
         if unreach:
             lines.append(
-                "Modules currently UNREACHABLE (do not claim live data from "
-                "them; if asked about them, say they are offline): "
-                + ', '.join(f'{n} [{e}]' for n, e in unreach)
-                + "."
+                "OFFLINE right now — do NOT claim data from these: "
+                + ", ".join(n for n, _ in unreach) + "."
             )
+        else:
+            lines.append("OFFLINE right now: (none).")
+        lines.append(
+            "If asked 'what modules can you access' or similar, list the "
+            "ONLINE modules exactly as shown above. Do not invent names. "
+            "Do not include any module from the OFFLINE list."
+        )
         return '\n'.join(lines) + '\n\n'
     except Exception:
         # Identity layer failures must never silently break voice.
