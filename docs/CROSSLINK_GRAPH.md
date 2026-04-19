@@ -159,11 +159,55 @@ tests is likely to be unreachable at this scale — the infrastructure
 is correct but there aren't enough memories yet for cross-domain
 patterns to emerge. Revisit when memory volume reaches ~100+.
 
-## Not yet live (Phase C)
+## Phase C — automated cutover
 
-- Flipping `DEEK_CROSSLINK_SHADOW=false` after shadow review
-- `NBNE_PROTOCOL.md` patch (in `nbne-policy`)
+Same pattern as Impressions Phase C. A one-shot Hetzner cron entry
+fires on **2026-04-27 at 09:00 UTC** (one day after the Impressions
+cutover, to avoid cron collision):
 
-Phase C automation pattern will mirror Impressions Phase C: a
-cron-scheduled cutover script with safety gates that runs after
-sufficient shadow data accumulates.
+```cron
+# Deek crosslink Phase C — ONE-SHOT cutover scheduled for 2026-04-27
+0 9 27 4 * cd /opt/nbne/deek && python3 scripts/crosslink_cutover.py \
+  >> /var/log/deek-crosslink-cutover.log 2>&1
+```
+
+When it fires, `scripts/crosslink_cutover.py`:
+
+1. Runs `scripts/analyze_graph_shadow.py` against
+   `data/graph_shadow.jsonl`.
+2. Applies safety gates — all must pass:
+   - `>= 50` shadow records logged
+   - `>= 72h` span
+   - Empty-walk rate `<= 95%` (otherwise graph is too sparse to
+     cut over safely — wait for more memories)
+   - Top path entity not dominating `> 80%` of hits (catches
+     degenerate high-centrality nodes the stop-list missed)
+   - Env file writable, container running
+3. If all pass: flips `DEEK_CROSSLINK_SHADOW=false` in `deploy/.env`,
+   restarts `deploy-deek-api-1`, runs `sync-policy.sh` to pull the
+   (hopefully merged) `nbne-policy#2` Crosslink Graph section.
+4. Writes a record to `data/crosslink_cutover.jsonl`.
+
+Gate failures exit 0 with a written reason — no retries, no noise.
+
+### Companion PR
+
+`NBNEORIGIN/nbne-policy#2` adds the Crosslink Graph section to
+`NBNE_PROTOCOL.md`. Stacks on `#1` (Identity + Impressions); merge
+`#1` first. The cutover's `sync-policy` step pulls whichever state
+`#2` is in on the day.
+
+### Cancelling or rescheduling
+
+```bash
+ssh root@178.104.1.152
+crontab -l | grep -v 'crosslink_cutover' | crontab -
+```
+
+To run manually once shadow data exists:
+
+```bash
+ssh root@178.104.1.152
+python3 /opt/nbne/deek/scripts/crosslink_cutover.py --dry-run
+python3 /opt/nbne/deek/scripts/crosslink_cutover.py
+```
