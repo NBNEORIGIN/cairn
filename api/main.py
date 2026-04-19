@@ -230,6 +230,21 @@ async def lifespan(app: FastAPI):
     except Exception as sched_err:
         print(f'[DEEK startup] Briefing scheduler disabled: {sched_err}')
 
+    # ── Postgres migrations (Brief 2 Phase A) ───────────────────────
+    # Applied before the identity layer so the schema is ready before
+    # anything else reads it. Failures are logged but non-fatal at
+    # startup — identity probe will still run against whatever schema
+    # exists.
+    try:
+        from core.memory.migrations import apply_migrations
+        _mig_summary = apply_migrations()
+        if _mig_summary['applied']:
+            print(f"[DEEK startup] migrations applied: {_mig_summary['applied']}")
+        if _mig_summary['errors']:
+            print(f"[DEEK startup] migration errors: {_mig_summary['errors']}")
+    except Exception as mig_err:
+        print(f'[DEEK startup] migration bootstrapper failed: {mig_err}')
+
     # ── Identity layer: probe modules + emit startup log block ──────────
     try:
         from core.identity import assembler as _identity_assembler
@@ -1748,6 +1763,32 @@ def _embed_memory_to_pgvector(
 
         embedding = embed_fn(content[:6000])
 
+        # Brief 2 Phase A — compute salience at write time for memory-
+        # bearing chunk types only. Code chunks (indexed via a different
+        # path) stay at the default 1.0. See core/memory/salience.py.
+        from core.memory.salience import extract_salience
+        import json as _json
+        # Sample up to 100 recent memory embeddings for novelty scoring.
+        recent_embs: list[list[float]] = []
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT embedding FROM claw_code_chunks
+                       WHERE chunk_type = 'memory' AND embedding IS NOT NULL
+                       ORDER BY indexed_at DESC LIMIT 100""",
+                )
+                for (vec,) in cur.fetchall():
+                    if vec is not None:
+                        recent_embs.append(list(vec))
+        except Exception as exc:
+            logger.debug('salience: recent embed fetch failed: %s', exc)
+        sal = extract_salience(
+            memory_text=content,
+            metadata={'outcome': outcome},
+            embedding_fn=lambda t: embed_fn(t[:6000]) if embed_fn else [],
+            recent_embeddings=recent_embs or None,
+        )
+
         with conn.cursor() as cur:
             cur.execute(
                 """DELETE FROM claw_code_chunks
@@ -1757,9 +1798,12 @@ def _embed_memory_to_pgvector(
             cur.execute(
                 """INSERT INTO claw_code_chunks
                    (project_id, file_path, chunk_content, chunk_type, chunk_name,
-                    content_hash, embedding, indexed_at)
-                   VALUES (%s, %s, %s, 'memory', %s, %s, %s::vector, NOW())""",
-                (project, file_path, content, chunk_name, content_hash, embedding),
+                    content_hash, embedding, indexed_at,
+                    salience, salience_signals, last_accessed_at, access_count)
+                   VALUES (%s, %s, %s, 'memory', %s, %s, %s::vector, NOW(),
+                           %s, %s::jsonb, NOW(), 0)""",
+                (project, file_path, content, chunk_name, content_hash, embedding,
+                 sal.score, _json.dumps(sal.signals)),
             )
         conn.commit()
         conn.close()

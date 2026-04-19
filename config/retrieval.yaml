@@ -1,0 +1,17 @@
+# config/retrieval.yaml
+#
+# Tuning knobs for the impressions-layer rerank (Brief 2 Phase A).
+# Changes take effect on next API restart. Fail-safe: missing file =
+# defaults in core/memory/impressions.py.
+#
+# Formula (applied after RRF fusion, min-max normalised per call):
+#   final = alpha * relevance + beta * salience + gamma * recency
+# where recency = exp(-hours_since_access / tau_hours)
+
+alpha: 0.5    # relevance weight
+beta: 0.25    # salience weight
+gamma: 0.25   # recency weight
+
+tau_hours: 72.0   # recency half-life (3 days). Hits this old score 0.37.
+
+top_k: 20     # how many RRF candidates to pass into the rerank pass
