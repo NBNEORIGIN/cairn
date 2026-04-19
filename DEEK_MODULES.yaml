@@ -63,13 +63,19 @@ modules:
   - name: manufacture
     display_name: Manufacture
     purpose: >
-      Production planning, make-list, machine state and restock
-      planning for NBNE's D2C and Amazon fulfilment. Includes the
-      Newsvendor FBA restock planner that Origin Designed relies on.
+      Production planning, make-list, machine state, restock planning,
+      AND the Amazon Intelligence (AMI) integration for NBNE's Origin
+      Designed e-commerce business. Manufacture owns the SP-API
+      integration across all five Amazon marketplaces (UK, US, CA, AU,
+      DE), Catalog Items enrichment, velocity + traffic analytics, and
+      the Newsvendor FBA restock planner.
     when_to_consult: >
-      For questions about what is being made today, machine utilisation,
-      restock recommendations, FBA shipment plans, or production
-      capacity. Works hand-in-hand with AMI for the Amazon side.
+      For any question about what is being made today, machine
+      utilisation, production capacity, FBA shipment plans, restock
+      recommendations, AND for any Amazon question — sales, orders,
+      velocity, impressions, conversion, search-term reports, FBA
+      inventory, or specific ASINs. There is no separate AMI service;
+      Manufacture is the canonical source of truth for all Amazon data.
     base_url: https://manufacture.nbnesigns.co.uk
     health_endpoint: /api/health
     context_endpoint: /api/deek/context
@@ -93,23 +99,11 @@ modules:
     owner: Toby
     status: production
 
-  - name: ami
-    display_name: Amazon Intelligence
-    purpose: >
-      SP-API integration across all five Amazon marketplaces (UK, US,
-      CA, AU, DE). Orders, traffic, velocity, catalogue enrichment,
-      search-term reports, SQS notifications. Revenue Truth Engine for
-      Origin Designed.
-    when_to_consult: >
-      For any question about Amazon sales, velocity, impressions,
-      conversion, search-term performance, FBA inventory, or specific
-      ASINs. The canonical source of truth for everything Amazon.
-    base_url: https://ami.nbnesigns.co.uk
-    health_endpoint: /api/health
-    context_endpoint: /api/deek/context
-    auth_mode: service_token
-    owner: Toby
-    status: production
+  # NOTE: AMI (Amazon Intelligence) is NOT a peer module. The SP-API
+  # integration, Catalog Items enrichment, velocity analytics, and
+  # FBA restock planner all live inside Manufacture — Deek reaches
+  # Amazon data through Manufacture's context endpoint, not a standalone
+  # ami.nbnesigns.co.uk host. Do not add an `ami` entry here.
 
   - name: crm
     display_name: CRM
