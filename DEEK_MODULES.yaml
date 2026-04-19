@@ -75,7 +75,13 @@ modules:
       recommendations, AND for any Amazon question — sales, orders,
       velocity, impressions, conversion, search-term reports, FBA
       inventory, or specific ASINs. There is no separate AMI service;
-      Manufacture is the canonical source of truth for all Amazon data.
+      Manufacture is the canonical owner of Amazon data.
+      ACCESS PATH for Amazon data: use the query_amazon_intel(sql)
+      tool to SELECT from ami_* tables (ami_orders, ami_velocity,
+      ami_advertising_data, ami_listing_snapshots, ami_daily_traffic,
+      etc.) — these live in Deek's own Postgres and are kept in sync
+      by Manufacture. Do not try to hit an HTTP endpoint for Amazon
+      data — go straight to SQL.
     base_url: https://manufacture.nbnesigns.co.uk
     health_endpoint: /api/health
     context_endpoint: /api/deek/context
