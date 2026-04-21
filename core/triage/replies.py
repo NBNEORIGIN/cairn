@@ -500,8 +500,16 @@ def apply_reply(conn, reply: ParsedReply, raw_body: str) -> dict:
         try:
             if ans.category == 'match_confirm':
                 if ans.verdict == 'affirm':
-                    # Keep candidate 1 (already in project_id)
-                    action['result'] = f'kept project_id={final_project_id}'
+                    # YES = candidate #1 is correct. If project_id
+                    # was None (match was below confidence threshold
+                    # but Toby confirmed it anyway), fall through to
+                    # candidates[0] so downstream actions have a
+                    # project to attach to.
+                    if not final_project_id:
+                        cands = row.get('match_candidates') or []
+                        if cands:
+                            final_project_id = cands[0].get('project_id') or final_project_id
+                    action['result'] = f'confirmed project_id={final_project_id}'
                 elif ans.verdict == 'select_candidate':
                     idx = ans.selected_candidate_index or 1
                     cands = row.get('match_candidates') or []
