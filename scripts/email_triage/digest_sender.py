@@ -261,11 +261,14 @@ def format_digest_body(row: dict) -> tuple[str, str]:
         else:
             body_parts.append('_(analyzer brief not available)_')
     elif classification == 'existing_project_reply':
-        body_parts.append(
-            f'This looks like a follow-up on an existing project '
-            f'({project_id or "no match found"}). No new analyzer '
-            f'brief generated — see the original message below.'
-        )
+        # Phase A (2026-04-21): the previous "no match found — see
+        # original message below" digest was identical every time
+        # and trained Toby to ignore it. Now we surface top-N
+        # candidates + drafted reply + structured reply-back block
+        # so a single email closes the loop.
+        body_parts.extend(_build_candidates_block(row))
+        body_parts.extend(_build_draft_block(row))
+        body_parts.extend(_build_reply_back_block(row))
 
     body_parts.append('')
     body_parts.append('=' * 60)
