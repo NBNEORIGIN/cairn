@@ -107,6 +107,109 @@ def send_via_smtp(
         server.send_message(msg)
 
 
+def _build_candidates_block(row: dict) -> list[str]:
+    """Render the top-N candidate projects block for the digest.
+
+    Accepts the JSONB match_candidates field (already parsed to a
+    Python list/dict by psycopg2) or falls back to the legacy single
+    project_id when the field is absent.
+    """
+    import json as _json
+    cands = row.get('match_candidates')
+    if isinstance(cands, str):
+        try:
+            cands = _json.loads(cands)
+        except Exception:
+            cands = None
+    if not cands:
+        pid = row.get('project_id') or '(no match found)'
+        return [
+            '=' * 60,
+            'PROJECT MATCH',
+            '=' * 60,
+            '',
+            f'  {pid}',
+            '',
+        ]
+
+    lines = [
+        '=' * 60,
+        'CANDIDATE PROJECTS (top guess + alternatives)',
+        '=' * 60,
+        '',
+    ]
+    for i, c in enumerate(cands, 1):
+        marker = '->' if i == 1 else '  '
+        name = c.get('project_name') or '(unnamed)'
+        pid = c.get('project_id') or '(no id)'
+        score = float(c.get('match_score') or 0.0)
+        last = c.get('last_activity_at') or ''
+        status = c.get('status') or ''
+        lines.append(f'  {marker} {i}. {name}')
+        lines.append(f'       id:       {pid}')
+        lines.append(f'       score:    {score:.3f}')
+        if last:
+            lines.append(f'       last:     {last[:19]}')
+        if status:
+            lines.append(f'       status:   {status}')
+        excerpt = (c.get('excerpt') or '').strip()
+        if excerpt:
+            for line in excerpt.splitlines()[:3]:
+                lines.append(f'       | {line}')
+        lines.append('')
+    return lines
+
+
+def _build_draft_block(row: dict) -> list[str]:
+    """Render the drafted reply block, or a reason for its absence."""
+    draft = (row.get('draft_reply') or '').strip()
+    lines = [
+        '=' * 60,
+        'PROPOSED REPLY (draft — edit before sending)',
+        '=' * 60,
+        '',
+    ]
+    if not draft:
+        lines.append('  (no draft — insufficient context or drafter error)')
+        lines.append('')
+        return lines
+    for line in draft.splitlines():
+        lines.append(f'  {line}')
+    lines.append('')
+    model = row.get('draft_model') or 'local'
+    lines.append(f'  (drafted by: {model})')
+    lines.append('')
+    return lines
+
+
+def _build_reply_back_block(row: dict) -> list[str]:
+    """The structured answer block Toby fills in. Phase B parses this
+    same shape back into CRM updates + memory corrections.
+    """
+    return [
+        '=' * 60,
+        'YOUR ANSWER (reply to this email; keep the Q<n> headers intact)',
+        '=' * 60,
+        '',
+        '--- Q1 (match_confirm) ---',
+        '  Is the #1 candidate the correct project?',
+        '  Reply: YES / NO / [candidate number 1-3]',
+        '',
+        '--- Q2 (reply_approval) ---',
+        '  Use the drafted reply above?',
+        '  Reply: USE / EDIT: <new text> / REJECT',
+        '',
+        '--- Q3 (project_folder) ---',
+        '  Where does this project live on disk? (optional — skip to pass)',
+        '  Reply: <path, e.g. D:\\NBNE\\Projects\\M1234-flowers-by-julie>',
+        '',
+        '--- Q4 (notes) ---',
+        '  Anything else Deek should remember about this client / project?',
+        '  Reply: (free text, optional)',
+        '',
+    ]
+
+
 def format_digest_body(row: dict) -> tuple[str, str]:
     """Return (subject, body) for a triage row.
 

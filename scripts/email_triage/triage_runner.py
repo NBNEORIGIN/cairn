@@ -298,10 +298,42 @@ def _process_one(email: dict, commit: bool) -> dict:
         match = match_project(email, classification)
         row['project_id'] = match.get('project_id') or None
         row['project_match_score'] = match.get('match_score')
-        # For existing-project replies we don't run analyze_enquiry —
-        # a summary line in the digest is enough. The runner still
-        # records a triage row so the digest sender has something
-        # to deliver.
+        # Phase A (2026-04-21): the digest now shows top-N candidates
+        # instead of single-thresholded yes/no. Stash the full list
+        # so the digest sender can render alternatives.
+        row['match_candidates'] = match.get('candidates') or []
+        # Draft a reply using local Ollama, grounded on whatever
+        # history we can pull for the top candidate. Best-effort —
+        # failure to draft still delivers the digest with candidates.
+        try:
+            from .response_drafter import draft_reply
+            from .project_history import fetch_project_history
+            top = (match.get('candidates') or [None])[0]
+            history = fetch_project_history(top) if top else ''
+            drafted = draft_reply(
+                email=email,
+                candidate=top,
+                project_history=history,
+                low_confidence=(
+                    classification.get('confidence', 'medium') == 'low'
+                ),
+            )
+            if drafted.text:
+                row['draft_reply'] = drafted.text + (
+                    '\n\n' + drafted.confidence_note
+                    if drafted.confidence_note else ''
+                )
+                row['draft_model'] = drafted.model
+            elif drafted.error:
+                log.info(
+                    'draft_reply returned empty for %s: %s',
+                    email.get('message_id'), drafted.error,
+                )
+        except Exception as exc:
+            log.warning(
+                'draft_reply crashed on %s (non-fatal): %s',
+                email.get('message_id'), exc,
+            )
         return row
 
     if classification_name == 'new_enquiry':
