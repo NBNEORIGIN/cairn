@@ -28,10 +28,17 @@ CRM_DEFAULT_BASE_URL = 'https://crm.nbnesigns.co.uk'
 CRM_SEARCH_PATH = '/api/cairn/search'
 CRM_REQUEST_TIMEOUT = 10.0
 
-# Minimum RRF score from the CRM hybrid search to accept as a match.
-# The CRM's scores typically range 0.01-0.10 for decent matches; we
-# require higher than 0.025 to filter out weak semantic hits.
-MIN_MATCH_SCORE = 0.025
+# Minimum RRF score from the CRM hybrid search for the digest to
+# flag a match as confident. At 2026-04-21 we lowered this from 0.025
+# to 0.015 AND changed the digest to always surface the top 3
+# candidates so Toby picks — rather than Deek guessing single-
+# threshold yes/no. False-positive pressure now lives in the
+# reply-back confirmation step.
+MIN_MATCH_SCORE = 0.015
+
+# Number of candidate projects the digest shows — best guess plus
+# two alternatives.
+TOP_CANDIDATES = 3
 
 
 def match_project(
@@ -52,7 +59,7 @@ def match_project(
     base = (base_url or os.getenv('CRM_BASE_URL') or CRM_DEFAULT_BASE_URL).rstrip('/')
     token = api_key or (os.getenv('DEEK_API_KEY') or os.getenv('CAIRN_API_KEY') or os.getenv('CLAW_API_KEY', '')).strip()
     if not token:
-        return {'project_id': '', 'match_score': 0.0}
+        return {'project_id': '', 'match_score': 0.0, 'project_name': '', 'candidates': []}
 
     # Build the best query we can from the signals available
     query_parts: list[str] = []
@@ -77,7 +84,7 @@ def match_project(
         query_parts.append(sender.split('@')[0])
 
     if not query_parts:
-        return {'project_id': '', 'match_score': 0.0}
+        return {'project_id': '', 'match_score': 0.0, 'project_name': '', 'candidates': []}
 
     query = ' '.join(query_parts)[:300]
 
@@ -94,36 +101,66 @@ def match_project(
             )
     except Exception as exc:
         log.warning('project_matcher: CRM search failed: %s', exc)
-        return {'project_id': '', 'match_score': 0.0}
+        return {'project_id': '', 'match_score': 0.0, 'project_name': '', 'candidates': []}
 
     if response.status_code != 200:
         log.warning(
             'project_matcher: CRM search HTTP %d — %s',
             response.status_code, response.text[:200],
         )
-        return {'project_id': '', 'match_score': 0.0}
+        return {'project_id': '', 'match_score': 0.0, 'project_name': '', 'candidates': []}
 
     try:
         data = response.json()
     except Exception:
-        return {'project_id': '', 'match_score': 0.0}
+        return {'project_id': '', 'match_score': 0.0, 'project_name': '', 'candidates': []}
 
     results = data.get('results') or []
     if not results:
-        return {'project_id': '', 'match_score': 0.0}
+        return {'project_id': '', 'match_score': 0.0, 'project_name': '', 'candidates': []}
 
     # Prefer project rows over client rows — a project ID is what the
     # triage runner actually wants for attaching activity updates.
     project_rows = [r for r in results if r.get('source_type') == 'project']
     target_rows = project_rows or results
 
-    top = target_rows[0]
-    score = float(top.get('score', 0.0))
-    if score < MIN_MATCH_SCORE:
-        return {'project_id': '', 'match_score': score}
+    # Build the full candidate list (top N). Phase A wants alternatives
+    # in the digest, not just the winner.
+    candidates: list[dict] = []
+    for r in target_rows[:TOP_CANDIDATES]:
+        score = float(r.get('score', 0.0))
+        md = r.get('metadata') or {}
+        candidates.append({
+            'project_id': r.get('source_id', ''),
+            'match_score': score,
+            'project_name': (
+                md.get('project_name')
+                or md.get('title')
+                or r.get('title')
+                or ''
+            ),
+            'source_type': r.get('source_type', ''),
+            'last_activity_at': (
+                md.get('last_activity_at') or md.get('updated_at') or ''
+            ),
+            'status': md.get('status', ''),
+            'excerpt': (r.get('excerpt') or '')[:280],
+        })
 
+    if not candidates:
+        return {
+            'project_id': '', 'match_score': 0.0,
+            'project_name': '', 'candidates': [],
+        }
+
+    top = candidates[0]
+    # project_id on the return is set only when the top match clears
+    # the confidence bar. Callers wanting the unconditional top can
+    # read candidates[0]. Backwards compatible with the pre-Phase-A
+    # dict shape.
     return {
-        'project_id': top.get('source_id', ''),
-        'match_score': score,
-        'project_name': (top.get('metadata') or {}).get('project_name', ''),
+        'project_id': top['project_id'] if top['match_score'] >= MIN_MATCH_SCORE else '',
+        'match_score': top['match_score'],
+        'project_name': top['project_name'],
+        'candidates': candidates,
     }

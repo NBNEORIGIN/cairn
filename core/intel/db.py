@@ -166,6 +166,27 @@ ALTER TABLE cairn_intel.email_triage
 ALTER TABLE cairn_intel.email_triage
     ADD COLUMN IF NOT EXISTS last_send_attempt_at TIMESTAMPTZ;
 
+-- Triage Phase A (2026-04-21): top-N match candidates + draft reply.
+-- match_candidates carries the full top-N from the CRM search so the
+-- digest can surface alternatives, not just the winner. draft_reply
+-- is the Ollama-drafted response for the user to accept/edit.
+-- reviewed_at + review_action track the user's reply-back feedback
+-- (Phase B parses the reply and populates these).
+ALTER TABLE cairn_intel.email_triage
+    ADD COLUMN IF NOT EXISTS match_candidates JSONB;
+ALTER TABLE cairn_intel.email_triage
+    ADD COLUMN IF NOT EXISTS draft_reply TEXT;
+ALTER TABLE cairn_intel.email_triage
+    ADD COLUMN IF NOT EXISTS draft_model TEXT;
+ALTER TABLE cairn_intel.email_triage
+    ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
+ALTER TABLE cairn_intel.email_triage
+    ADD COLUMN IF NOT EXISTS review_action TEXT;
+ALTER TABLE cairn_intel.email_triage
+    ADD COLUMN IF NOT EXISTS review_notes TEXT;
+ALTER TABLE cairn_intel.email_triage
+    ADD COLUMN IF NOT EXISTS project_folder_path TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_email_triage_unsent
     ON cairn_intel.email_triage(processed_at DESC)
     WHERE sent_to_toby_at IS NULL;
@@ -230,19 +251,32 @@ def upsert_email_triage(
     ``scripts.email_triage.triage_runner`` to record every classification
     attempt exactly once per email.
     """
+    # Phase A: accept match_candidates + draft_reply + draft_model
+    # as optional fields. Older callers that don't set them pass
+    # None through cleanly.
+    import json as _json
+    row = dict(row)
+    cands = row.get('match_candidates')
+    row['match_candidates_json'] = (
+        _json.dumps(cands) if cands is not None else None
+    )
+    row.setdefault('draft_reply', None)
+    row.setdefault('draft_model', None)
+
     sql = f"""
     INSERT INTO {schema}.email_triage (
         email_message_id, email_mailbox, email_sender, email_subject,
         email_received_at, classification, classification_confidence,
         classification_reason, client_name_guess, project_id,
         project_match_score, analyzer_brief, analyzer_job_size,
-        skip_reason
+        skip_reason, match_candidates, draft_reply, draft_model
     ) VALUES (
         %(email_message_id)s, %(email_mailbox)s, %(email_sender)s,
         %(email_subject)s, %(email_received_at)s, %(classification)s,
         %(classification_confidence)s, %(classification_reason)s,
         %(client_name_guess)s, %(project_id)s, %(project_match_score)s,
-        %(analyzer_brief)s, %(analyzer_job_size)s, %(skip_reason)s
+        %(analyzer_brief)s, %(analyzer_job_size)s, %(skip_reason)s,
+        %(match_candidates_json)s::jsonb, %(draft_reply)s, %(draft_model)s
     )
     ON CONFLICT (email_message_id) DO UPDATE SET
         classification            = EXCLUDED.classification,
@@ -254,6 +288,9 @@ def upsert_email_triage(
         analyzer_brief            = EXCLUDED.analyzer_brief,
         analyzer_job_size         = EXCLUDED.analyzer_job_size,
         skip_reason               = EXCLUDED.skip_reason,
+        match_candidates          = EXCLUDED.match_candidates,
+        draft_reply               = EXCLUDED.draft_reply,
+        draft_model               = EXCLUDED.draft_model,
         processed_at              = NOW()
     RETURNING id
     """
@@ -290,7 +327,9 @@ def load_unsent_triage_drafts(
            email_subject, email_received_at, classification,
            classification_confidence, client_name_guess, project_id,
            analyzer_brief, analyzer_job_size, processed_at,
-           send_attempts, send_error
+           send_attempts, send_error,
+           match_candidates, draft_reply, draft_model,
+           project_match_score
     FROM {schema}.email_triage
     WHERE sent_to_toby_at IS NULL
       AND classification IN ('new_enquiry', 'existing_project_reply')
