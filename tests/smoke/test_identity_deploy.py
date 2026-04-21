@@ -227,7 +227,13 @@ def check_cron_health() -> list[str]:
                     f.seek(-65536, 2)
                 except OSError:
                     f.seek(0)
-                tail = f.read().decode('utf-8', errors='replace').splitlines()[-40:]
+                # Last 5 lines only — the most recent cron invocation's
+                # output. Wider windows include historical failures
+                # from before a fix landed (e.g. the 2026-04-21 IMAP
+                # poll rename error that sat in the tail for hours
+                # after the crontab fix, because the log's tail is
+                # append-only).
+                tail = f.read().decode('utf-8', errors='replace').splitlines()[-5:]
         except Exception as exc:
             log(f'[SKIP] [cron.health] cannot read {path}: {exc}')
             continue
