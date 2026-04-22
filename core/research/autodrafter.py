@@ -44,7 +44,15 @@ PDF_FETCH_TIMEOUT = 45.0
 QWEN_DRAFT_TIMEOUT = 120.0     # drafts are long responses
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-BRIEFS_DIR = REPO_ROOT / 'briefs'
+# Drafted briefs land in the persistent data volume so they survive
+# container rebuilds. The git-tracked ``briefs/`` directory is for
+# HUMAN-authored briefs (curated, committed). When Toby reviews a
+# drafted brief and decides to act on it, he copies it into the
+# committed briefs/ path as a separate PR. The split is deliberate:
+# drafts are discard-friendly, committed briefs are part of the
+# audit trail.
+_DATA_DIR = Path(os.getenv('DEEK_DATA_DIR') or (REPO_ROOT / 'data'))
+BRIEFS_DIR = _DATA_DIR / 'research-briefs'
 
 
 @dataclass
