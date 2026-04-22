@@ -414,7 +414,7 @@ def generate_questions(user_email: str) -> QuestionSet:
         except Exception:
             pass
 
-    questions.append(_build_open_ended(templates))
+    questions.append(_build_open_ended(templates, _open_ended_override(user_email)))
 
     return QuestionSet(
         user_email=user_email,
