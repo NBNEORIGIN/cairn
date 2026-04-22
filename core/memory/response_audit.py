@@ -62,6 +62,11 @@ class ResponseAuditRow:
     model: str | None = None
     user_question: str | None = None
     latency_ms: int | None = None
+    # Validator observability — migration 0008. All optional; when
+    # missing the columns keep their defaults (empty array, 0, NULL).
+    validation_failures: list[str] | None = None
+    validation_retry_count: int = 0
+    validation_final_outcome: str | None = None
 
 
 def _sha256(text: str) -> str:
@@ -155,8 +160,11 @@ def _log_sync(row: ResponseAuditRow) -> None:
                      identity_hash, identity_prefix_present,
                      response_length_chars,
                      response_contains_non_answer, non_answer_pattern,
-                     user_question_sha, latency_ms)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                     user_question_sha, latency_ms,
+                     validation_failures, validation_retry_count,
+                     validation_final_outcome)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                           %s, %s, %s)""",
                 (
                     row.path, row.session_id, row.model,
                     system_hash,
@@ -165,6 +173,9 @@ def _log_sync(row: ResponseAuditRow) -> None:
                     len(row.response_text or ''),
                     is_non_answer, matched,
                     question_hash, row.latency_ms,
+                    row.validation_failures or [],
+                    int(row.validation_retry_count or 0),
+                    row.validation_final_outcome,
                 ),
             )
         conn.commit()

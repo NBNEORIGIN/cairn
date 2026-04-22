@@ -944,12 +944,14 @@ async def chat_stream(
         # with for the integrity hash.
         captured_response = ''
         captured_model = ''
+        captured_metadata: dict = {}
         try:
             async for event in agent.process_streaming(envelope):
                 if isinstance(event, dict):
                     if event.get('type') == 'complete':
                         captured_response = event.get('response') or ''
                         captured_model = event.get('model_used') or ''
+                        captured_metadata = event.get('metadata') or {}
                 yield f'data: {_json.dumps(event)}\n\n'
         except Exception as exc:
             yield f'data: {_json.dumps({"type": "error", "message": str(exc)})}\n\n'
@@ -966,6 +968,15 @@ async def chat_stream(
                         session_id=session_id,
                         model=captured_model,
                         user_question=message,
+                        validation_failures=(
+                            captured_metadata.get('validation_failures') or []
+                        ),
+                        validation_retry_count=int(
+                            captured_metadata.get('validation_retries') or 0
+                        ),
+                        validation_final_outcome=(
+                            captured_metadata.get('validation_final_outcome')
+                        ),
                     ))
             except Exception:
                 pass
@@ -1039,12 +1050,14 @@ async def chat_stream_post(
         # with for the integrity hash.
         captured_response = ''
         captured_model = ''
+        captured_metadata: dict = {}
         try:
             async for event in agent.process_streaming(envelope):
                 if isinstance(event, dict):
                     if event.get('type') == 'complete':
                         captured_response = event.get('response') or ''
                         captured_model = event.get('model_used') or ''
+                        captured_metadata = event.get('metadata') or {}
                 yield f'data: {_json.dumps(event)}\n\n'
         except Exception as exc:
             yield f'data: {_json.dumps({"type": "error", "message": str(exc)})}\n\n'
@@ -1061,6 +1074,15 @@ async def chat_stream_post(
                         session_id=session_id,
                         model=captured_model,
                         user_question=message,
+                        validation_failures=(
+                            captured_metadata.get('validation_failures') or []
+                        ),
+                        validation_retry_count=int(
+                            captured_metadata.get('validation_retries') or 0
+                        ),
+                        validation_final_outcome=(
+                            captured_metadata.get('validation_final_outcome')
+                        ),
                     ))
             except Exception:
                 pass
