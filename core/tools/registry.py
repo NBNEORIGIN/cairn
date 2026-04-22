@@ -26,6 +26,7 @@ DEFAULT_PERMISSIONS = {
         'get_module_snapshot', 'search_emails', 'search_wiki',
         'retrieve_similar_decisions', 'search_crm', 'analyze_enquiry',
         'write_crm_memory', 'mark_crm_actioned', 'set_crm_project_folder',
+        'get_quote_context', 'search_similar_quotes', 'review_quote_draft',
     ],
     'readonly': [
         'read_file', 'search_code', 'query_amazon_intel',
@@ -49,6 +50,7 @@ DEFAULT_PERMISSIONS = {
         'search_crm',
         'analyze_enquiry',
         'write_crm_memory', 'mark_crm_actioned', 'set_crm_project_folder',
+        'get_quote_context', 'search_similar_quotes', 'review_quote_draft',
     ],
 }
 
@@ -475,6 +477,42 @@ TOOL_SCHEMAS: dict[str, dict] = {
             },
         },
         'required': ['project_id', 'folder_path'],
+    },
+    'get_quote_context': {
+        'type': 'object',
+        'properties': {
+            'project_id': {'type': 'string'},
+            'query': {
+                'type': 'string',
+                'description': 'Optional override for the similarity search text.',
+            },
+        },
+        'required': ['project_id'],
+    },
+    'search_similar_quotes': {
+        'type': 'object',
+        'properties': {
+            'query': {'type': 'string'},
+            'limit': {
+                'type': 'integer',
+                'description': 'Max results (default 5, max 20).',
+                'default': 5,
+            },
+        },
+        'required': ['query'],
+    },
+    'review_quote_draft': {
+        'type': 'object',
+        'properties': {
+            'project_id': {'type': 'string'},
+            'total_inc_vat': {
+                'type': 'number',
+                'description': 'Drafted total (inc VAT) in GBP.',
+            },
+            'scope_summary': {'type': 'string'},
+            'line_items_summary': {'type': 'string'},
+        },
+        'required': ['project_id', 'total_inc_vat'],
     },
     'analyze_enquiry': {
         'type': 'object',

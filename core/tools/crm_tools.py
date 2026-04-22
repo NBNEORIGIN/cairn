@@ -406,6 +406,224 @@ set_crm_project_folder_tool = Tool(
 )
 
 
+# ── Quote intelligence tools ──────────────────────────────────────────
+#
+# Chat-tier wrappers around the /api/deek/quotes/* endpoints so the
+# user can ask "what have we quoted for jobs like this?" in chat
+# without opening the CRM.
+
+def _quote_context_tool(
+    project_root: str,
+    project_id: str,
+    query: str | None = None,
+    **kwargs,
+) -> str:
+    """Agent tool: composite quote context for a project.
+
+    Returns a compact formatted summary — client payment record,
+    similar past jobs, margin stats, relevant lessons. Caller can
+    quote numbers back to the user verbatim.
+    """
+    if not (project_id or '').strip():
+        return "quote_context error: 'project_id' is required."
+    try:
+        from core.intel.quote_context import get_quote_context
+        ctx = get_quote_context(project_id, query=query or None)
+    except Exception as exc:
+        return f'quote_context error: {exc.__class__.__name__}: {exc}'
+
+    lines: list[str] = []
+    lines.append(f"Quote context for project {ctx.get('project_id')}")
+    if ctx.get('project_name'):
+        lines.append(f"  project: {ctx['project_name']}")
+
+    client = ctx.get('client') or {}
+    if client.get('name'):
+        lines.append(f"  client:  {client['name']}")
+    pr = client.get('payment_record') or {}
+    if pr:
+        bits = [f'{k}={v}' for k, v in pr.items() if v is not None]
+        lines.append(f"  payment: {' · '.join(bits)}")
+    prior = client.get('prior_quotes') or []
+    if prior:
+        lines.append(f"  prior_quotes: {len(prior)} found")
+        for pq in prior[:3]:
+            amt = pq.get('total')
+            amt_s = f"£{amt:,.0f}" if amt else '?'
+            lines.append(
+                f"    - {pq.get('project_name') or '?'} "
+                f"[{pq.get('status') or '?'}] {amt_s}"
+            )
+
+    mr = ctx.get('margin_reference')
+    if mr:
+        lines.append(
+            f"  margin reference (n={mr['sample_size']}): "
+            f"low £{mr['quoted_range_low']:,.0f} · "
+            f"med £{mr['quoted_range_median']:,.0f} · "
+            f"high £{mr['quoted_range_high']:,.0f}"
+        )
+    else:
+        lines.append('  margin reference: (insufficient sample)')
+
+    sj = ctx.get('similar_jobs') or []
+    if sj:
+        lines.append(f"  similar jobs ({len(sj)}):")
+        for j in sj[:5]:
+            amt = j.get('quoted_amount')
+            amt_s = f"£{amt:,.0f}" if amt else '?'
+            lines.append(
+                f"    - {j.get('project_name') or '?'}  "
+                f"[{j.get('status') or '?'}]  {amt_s}  "
+                f"match {j.get('match_score', 0):.2f}"
+            )
+
+    lessons = ctx.get('lessons_learned') or []
+    if lessons:
+        lines.append(f"  lessons: {len(lessons)}")
+        for L in lessons[:3]:
+            lines.append(f"    - {L.get('title') or '?'}")
+
+    warnings = ctx.get('warnings') or []
+    for w in warnings:
+        lines.append(f"  ! {w}")
+
+    return '\n'.join(lines)
+
+
+def _similar_quotes_tool(
+    project_root: str,
+    query: str,
+    limit: int = 5,
+    **kwargs,
+) -> str:
+    if not (query or '').strip():
+        return "search_similar_quotes error: 'query' is required."
+    try:
+        limit = max(1, min(int(limit), 20))
+    except (TypeError, ValueError):
+        limit = 5
+    try:
+        from core.intel.quote_context import search_similar_quotes
+        rows = search_similar_quotes(query, limit=limit)
+    except Exception as exc:
+        return f'search_similar_quotes error: {exc.__class__.__name__}'
+    if not rows:
+        return 'No similar quotes found.'
+    out = [f'Top {len(rows)} similar projects/quotes:']
+    for r in rows:
+        amt = r.get('total')
+        amt_s = f"£{amt:,.0f}" if amt else '?'
+        out.append(
+            f"  - {r.get('project_name') or '?'} "
+            f"[{r.get('status') or '?'}] {amt_s}  "
+            f"(match {r.get('match_score', 0):.2f})  "
+            f"client: {r.get('client_name') or '?'}"
+        )
+        preview = (r.get('line_item_preview') or '').strip()
+        if preview:
+            out.append(f"    | {preview[:150]}")
+    return '\n'.join(out)
+
+
+def _review_quote_tool(
+    project_root: str,
+    project_id: str,
+    total_inc_vat: float,
+    scope_summary: str = '',
+    line_items_summary: str = '',
+    **kwargs,
+) -> str:
+    if not (project_id or '').strip():
+        return "review_quote error: 'project_id' is required."
+    try:
+        total_f = float(total_inc_vat)
+    except (TypeError, ValueError):
+        return "review_quote error: 'total_inc_vat' must be a number."
+    try:
+        from core.intel.quote_context import review_draft_quote
+        # Note: chat tool path does not pass a conn — shadow logs
+        # skipped from chat-initiated review calls. The CRM editor
+        # path through the HTTP endpoint does log, which is where
+        # the real signal comes from.
+        result = review_draft_quote(
+            project_id, total_f, scope_summary, line_items_summary,
+        )
+    except Exception as exc:
+        return f'review_quote error: {exc.__class__.__name__}: {exc}'
+
+    verdict = result.get('verdict', 'ok')
+    reasoning = result.get('reasoning') or '(no reasoning)'
+    signals = result.get('signals') or []
+    shadow = result.get('shadow_mode')
+    shadow_v = result.get('shadow_verdict')
+
+    out = [f'Verdict: {verdict.upper()}']
+    out.append(f'Reasoning: {reasoning}')
+    if signals:
+        out.append('Signals:')
+        for s in signals:
+            out.append(f'  - {s}')
+    if shadow:
+        out.append(
+            f"(Shadow mode; real verdict would be '{shadow_v}' — "
+            'review surface gated until 2026-05-13 cutover.)'
+        )
+    return '\n'.join(out)
+
+
+quote_context_tool = Tool(
+    name='get_quote_context',
+    description=(
+        'Return composite quote-drafting context for a CRM project: '
+        'the client\'s payment record + prior quotes, similar past '
+        'jobs with their quoted amounts and outcomes, a margin '
+        'reference (median + range) over comparable quotes, and any '
+        'relevant LessonLearned rows. Use this when the user asks '
+        '"what have we quoted for similar jobs?", or is about to '
+        'draft a quote and wants context. Arguments: project_id '
+        '(required), query (optional — overrides the auto-derived '
+        'search text).'
+    ),
+    risk_level=RiskLevel.SAFE,
+    fn=_quote_context_tool,
+    required_permission='get_quote_context',
+)
+
+
+similar_quotes_tool = Tool(
+    name='search_similar_quotes',
+    description=(
+        'Find CRM projects / quotes that look like a free-text '
+        'description. Thin hybrid-search wrapper scoped to project + '
+        'quote rows. Use for "show me 5 quotes that look like this" '
+        'style questions. Arguments: query (free text, required), '
+        'limit (default 5, max 20).'
+    ),
+    risk_level=RiskLevel.SAFE,
+    fn=_similar_quotes_tool,
+    required_permission='search_similar_quotes',
+)
+
+
+review_quote_tool = Tool(
+    name='review_quote_draft',
+    description=(
+        'Sanity-check a drafted quote against historical patterns. '
+        'Returns a verdict (ok / investigate / flag) with reasoning '
+        'and signals (margin delta vs median, client payment risk, '
+        'etc.). Shadow-mode-gated until 2026-05-13 — during shadow '
+        'the verdict returned is always "ok" and the real verdict '
+        'is noted in shadow_verdict. Arguments: project_id '
+        '(required), total_inc_vat (required, £), scope_summary '
+        '(optional), line_items_summary (optional).'
+    ),
+    risk_level=RiskLevel.SAFE,
+    fn=_review_quote_tool,
+    required_permission='review_quote_draft',
+)
+
+
 search_crm_tool = Tool(
     name='search_crm',
     description=(

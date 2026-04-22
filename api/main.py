@@ -3391,6 +3391,12 @@ app.include_router(admin_router)
 from api.routes.shadow_review import router as shadow_review_router
 app.include_router(shadow_review_router)
 
+# Register Quote Intelligence routes (context + similar + review)
+# mounted under /api/deek/quotes/* AND legacy /api/cairn/quotes/*
+from api.routes.quotes import router as quotes_router
+app.include_router(quotes_router, prefix='/api/deek')
+app.include_router(quotes_router, prefix='/api/cairn')  # legacy alias
+
 # Register Deek Social routes (drafting + proof-reading assistant for Jo)
 from api.routes.social import router as social_router
 app.include_router(social_router)
