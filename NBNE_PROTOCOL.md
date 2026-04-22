@@ -626,10 +626,15 @@ Claude Code session starting cold can execute it without ambiguity.
 
 This rule was codified on 2026-04-21 after a session transcript
 showed Deek attempting to implement the Memory Brief feature,
-hallucinating file paths (`core/memory/brief_questions.py`,
-`scripts/memory_brief/question_generator.py`) that didn't exist, and
-being blocked three times by the validator before the session
-handed back to Claude Code.
+hallucinating two invented module names that looked plausible but did
+not exist on disk, and being blocked three times by the validator
+before the session handed back to Claude Code.
+
+(Intentionally written without the specific fake filenames: citing
+them here in back-ticks would re-introduce the same contamination
+vector on the next wiki reindex — the paths would enter the chunk
+store shaped identically to real code citations. The lesson survives;
+the contamination source is removed.)
 
 ---
 

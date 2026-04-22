@@ -8,6 +8,13 @@ from .channels.envelope import MessageEnvelope, AgentResponse
 from .context.engine import ContextEngine
 from .models.router import route_decision, estimate_tokens, ModelChoice
 from .models.output_validator import validate
+from .models.validation_messages import (
+    retry_guidance_for_failures,
+    user_facing_fallback,
+    user_reason_for_error,
+    user_reason_for_failures,
+    user_reason_for_timeout,
+)
 from .models.ollama_client import OllamaClient
 from .models.claude_client import ClaudeClient
 from .models.openai_client import OpenAIClient
@@ -1160,12 +1167,13 @@ class DeekAgent:
             }
         except GenerationTimedOut as exc:
             logger.warning('[stream] request timed out for %s: %s', session_id, exc)
+            # Never leak the raw exception string to the user.
             yield {
                 'type': 'complete',
-                'response': str(exc),
+                'response': user_facing_fallback(user_reason_for_timeout()),
                 'cost_usd': 0.0,
                 'model_used': '',
-                'metadata': {'timed_out': True},
+                'metadata': {'timed_out': True, 'timeout_exc': str(exc)},
                 'executed_tool_calls': [],
                 'pending_tool_call': None,
             }
@@ -1729,13 +1737,16 @@ class DeekAgent:
             project_root=self._project_root,
         )
         if validation.passed:
+            metadata.setdefault('validation_final_outcome', 'passed')
             return response_text, current_client, current_model_used, current_cost, metadata
 
         metadata['validation_failures'] = validation.failures
 
         if validation.hard_fail:
-            failure_text = "Validation failed:\n" + '\n'.join(
-                f'- {failure}' for failure in validation.failures
+            # Never leak internal CHECK codes to the user.
+            metadata['validation_final_outcome'] = 'hard_fail'
+            failure_text = user_facing_fallback(
+                user_reason_for_failures(validation.failures),
             )
             return failure_text, current_client, current_model_used, current_cost, metadata
 
@@ -1788,6 +1799,7 @@ class DeekAgent:
             if retried_validation.passed:
                 metadata['validation_recovered'] = True
                 metadata['validation_retries'] = metadata.get('validation_retries', 0) + 1
+                metadata['validation_final_outcome'] = 'retry_succeeded'
                 return (
                     retried_text,
                     retry_client,
@@ -1796,6 +1808,7 @@ class DeekAgent:
                     metadata,
                 )
             metadata['validation_failures'] = retried_validation.failures
+            metadata['validation_retries'] = metadata.get('validation_retries', 0) + 1
             current_cost = retry_cost
 
         if any(failure.startswith('CHECK 5') for failure in metadata['validation_failures']) and executed_tool_calls:
@@ -1811,8 +1824,12 @@ class DeekAgent:
                 metadata,
             )
 
-        failure_text = "Validation failed:\n" + '\n'.join(
-            f'- {failure}' for failure in metadata['validation_failures']
+        # Retries exhausted. Return a user-safe fallback, not the raw
+        # CHECK strings. The full failure list is still in metadata
+        # for the audit writer.
+        metadata['validation_final_outcome'] = 'retry_exhausted_fallback'
+        failure_text = user_facing_fallback(
+            user_reason_for_failures(metadata['validation_failures']),
         )
         return failure_text, current_client, current_model_used, current_cost, metadata
 
@@ -1924,9 +1941,16 @@ class DeekAgent:
     ) -> str:
         failure_block = '\n'.join(f'- {failure}' for failure in failures)
         tool_summary = self._tool_results_summary(executed_tool_calls)
+        # Per-CHECK guidance — tells the model exactly what to avoid
+        # next time, not just "don't fail validation again".
+        guidance = retry_guidance_for_failures(failures)
         prompt = (
             "The previous draft failed validation.\n"
             f"Validation failures:\n{failure_block}\n\n"
+        )
+        if guidance:
+            prompt += f"{guidance}\n\n"
+        prompt += (
             f"Original request:\n{original_message}\n\n"
             "Write a corrected final answer. Do not mention tool names, "
             "simulated actions, or nonexistent files."
