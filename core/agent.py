@@ -2455,6 +2455,9 @@ class DeekAgent:
             write_crm_memory_tool,
             mark_crm_actioned_tool,
             set_crm_project_folder_tool,
+            quote_context_tool,
+            similar_quotes_tool,
+            review_quote_tool,
         )
         from .tools.enquiry_analyzer import analyze_enquiry_tool
         for tool in [
@@ -2487,6 +2490,10 @@ class DeekAgent:
             write_crm_memory_tool,
             mark_crm_actioned_tool,
             set_crm_project_folder_tool,
+            # Quote intelligence (context, similar, draft review)
+            quote_context_tool,
+            similar_quotes_tool,
+            review_quote_tool,
             # Structured enquiry analyzer — composite retrieval + Sonnet synthesis
             analyze_enquiry_tool,
         ]:
