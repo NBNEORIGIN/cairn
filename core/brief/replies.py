@@ -140,7 +140,21 @@ def _strip_quoted(text: str) -> str:
     escaping what would otherwise look like a new mbox message
     header. Treating it as a quote boundary loses legitimate content
     (see 2026-04-22 memory brief parse failure).
+
+    Special case — if the body already contains our structured
+    ``--- Q<n> (category) ---`` delimiters, we skip quote-stripping
+    entirely and trust the delimiters. Some email clients top-post
+    with the "On <date> wrote:" header AND leave the user's inline
+    answers below (IONOS webmail does this on Re: replies). In that
+    layout, a naive quote-strip would eat all the answers. The
+    delimiters are our ground truth; heuristics are secondary.
     """
+    # If our Q-delimiters are anywhere in the body, trust them — the
+    # whole text is signal to the parser. Quote-strip heuristics are
+    # only worth running when we don't have structural landmarks.
+    if _BLOCK_DELIM_RE.search(text or ''):
+        return (text or '').strip()
+
     lines: list[str] = []
     for line in text.splitlines():
         stripped = line.lstrip()
