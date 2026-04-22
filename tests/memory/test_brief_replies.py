@@ -112,6 +112,36 @@ class TestStripQuoted:
         body = 'My reply\n\n>> Very old quoted content'
         assert _strip_quoted(body) == 'My reply'
 
+    def test_top_posted_with_delimiters_preserves_everything(self):
+        """Regression: 2026-04-22 IONOS top-post reply.
+
+        Some clients render Re: replies as 'On <date> wrote:' at the
+        TOP with the quoted original and the user's inline answers
+        BELOW. If the body contains our Q-delimiters, they are
+        ground truth — skip heuristic stripping entirely.
+        """
+        body = (
+            'On 22/04/2026 11:18 BST cairn@nbnesigns.com wrote:\n\n'
+            'Deek morning brief — 2026-04-22\n\n'
+            '--- Q1 (belief_audit) ---\n'
+            'I currently believe: X\n'
+            'Reply: TRUE / FALSE / [correction]\n'
+            'TRUE\n\n'
+            '--- Q2 (salience_calibration) ---\n'
+            'Is this genuinely important?\n'
+            'Reply: YES / NO / [why or why not]\n'
+            'NO - outdated domain\n\n'
+            '--- Q3 (open_ended) ---\n'
+            'Reply: (free text)\n'
+            'Thorough QA on client designs.\n'
+        )
+        out = _strip_quoted(body)
+        assert 'TRUE' in out
+        assert 'outdated domain' in out
+        assert 'QA on client designs' in out
+        assert '--- Q1' in out
+        assert '--- Q3' in out
+
 
 # ── Answer classification ────────────────────────────────────────────
 

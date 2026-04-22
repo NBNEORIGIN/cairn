@@ -172,7 +172,14 @@ def strip_quoted(text: str) -> str:
     Requires '> ' (space) or '>>' for reply quoting. A bare '>' is
     mbox From-munging, not a quote — see core.brief.replies for the
     full note.
+
+    If our structured ``--- Q<n> (category) ---`` delimiters are
+    anywhere in the body, skip heuristic stripping entirely — the
+    delimiters are ground truth (handles top-post clients that
+    leave inline answers under an "On <date> wrote:" header).
     """
+    if _BLOCK_DELIM_RE.search(text or ''):
+        return (text or '').strip()
     lines: list[str] = []
     for line in (text or '').splitlines():
         stripped = line.lstrip()
