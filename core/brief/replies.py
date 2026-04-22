@@ -196,11 +196,100 @@ def _classify(answer_text: str) -> tuple[str, str]:
     first_tokens = re.split(r'[\s/,]+', first_line.lower())
     first_tokens = [t for t in first_tokens if t]
     if first_tokens:
-        if first_tokens[0] in _AFFIRMATIVE:
-            return 'affirm', ''
-        if first_tokens[0] in _NEGATIVE:
-            return 'deny', ''
+        if first_tokens[0] in _AFFIRMATIVE or first_tokens[0] in _NEGATIVE:
+            verdict = 'affirm' if first_tokens[0] in _AFFIRMATIVE else 'deny'
+            # Capture any context the user provided alongside the
+            # YES/NO/TRUE/FALSE — e.g. 'NO - we don't use X anymore'.
+            # Same-line context is kept; everything after the first
+            # line is also retained. An empty string is fine and
+            # means "just a verdict, no explanation".
+            remainder_same_line = re.sub(
+                r'^[A-Za-z]+', '', first_line, count=1
+            ).lstrip(' \t-–—:·.').strip()
+            rest_lines = cleaned.splitlines()[1:]
+            rest_text = '\n'.join(rest_lines).strip()
+            ctx_parts = [p for p in (remainder_same_line, rest_text) if p]
+            return verdict, '\n'.join(ctx_parts)
     return 'correct', cleaned
+
+
+_PREFIXED_DELIM_RE = re.compile(
+    r'^>\s*---\s*Q(\d+)\s*\(([a-z_]+)\)\s*---\s*$',
+    re.MULTILINE,
+)
+
+
+def _extract_inline_interleaved_answers(body: str) -> list['ParsedAnswer']:
+    """Handle the IONOS-webmail top-post + inline-answer style.
+
+    Shape: every line of the original brief is prefixed with ``> ``,
+    and the user has typed their answers on un-prefixed lines
+    interleaved between the quoted ones. Example:
+
+        > Reply: TRUE / FALSE / [correction]
+        TRUE
+        >
+        > (Expected reply format: TRUE / FALSE / [correction])
+        >
+        > --- Q2 (salience_calibration) ---
+        > Reply: YES / NO / [why or why not]
+        NO - we don't use that anymore
+
+    Returns a list of ParsedAnswer (possibly empty). Empty means
+    "this didn't look like the interleaved style" — caller falls
+    back to the standard path.
+    """
+    if not body:
+        return []
+    lines = body.splitlines()
+    prefixed = sum(
+        1 for l in lines
+        if l.lstrip().startswith('>') and not l.lstrip().startswith('>>')
+    )
+    # Require majority prefixed lines AND at least one prefixed Q
+    # delimiter — otherwise this isn't the interleaved style.
+    if prefixed < max(3, len(lines) // 2):
+        return []
+    if not _PREFIXED_DELIM_RE.search(body):
+        return []
+
+    answers_by_q: list[tuple[int, str, list[str]]] = []
+    current: tuple[int, str, list[str]] | None = None
+    for raw_line in lines:
+        stripped_line = raw_line.strip()
+        m = _PREFIXED_DELIM_RE.match(stripped_line)
+        if m:
+            if current is not None:
+                answers_by_q.append(current)
+            current = (int(m.group(1)), m.group(2), [])
+            continue
+        if stripped_line.startswith('>'):
+            # Quoted original content — prompt, not answer
+            continue
+        # Un-prefixed, non-empty line inside a Q block == user's answer
+        if current is not None and stripped_line:
+            current[2].append(stripped_line)
+    if current is not None:
+        answers_by_q.append(current)
+
+    out: list[ParsedAnswer] = []
+    _sig_markers = (
+        'Toby Fletcher', 'Email: toby', 'Landline:',
+        'Mobile:', 'Web: nbnesigns',
+    )
+    for q_num, category, buf in answers_by_q:
+        # Trim trailing signature lines from the LAST block only —
+        # they sit under the final Q and aren't part of the answer.
+        while buf and any(marker in buf[-1] for marker in _sig_markers):
+            buf.pop()
+        answer_text = '\n'.join(buf).strip()
+        verdict, correction = _classify(answer_text)
+        out.append(ParsedAnswer(
+            q_number=q_num, category=category,
+            raw_text=answer_text, verdict=verdict,
+            correction_text=correction,
+        ))
+    return out
 
 
 def parse_reply_body(body: str, user_email: str, run_date: date) -> ParsedReply:
@@ -210,8 +299,26 @@ def parse_reply_body(body: str, user_email: str, run_date: date) -> ParsedReply:
     answer block starts with `--- Q<n> (<category>) ---`. We split on
     that pattern, drop quoted content per _strip_quoted, and classify
     each block.
+
+    Handles two common shapes:
+
+      1. User's answers are at the top, quoted original at the bottom.
+         strip_quoted + delimiter split works.
+
+      2. Top-post: 'On <date> wrote:' header + quoted original below
+         with user's answers interleaved as un-prefixed lines between
+         `> ` prefixed quotes (IONOS webmail default). Detected and
+         parsed by _extract_inline_interleaved_answers before the
+         standard path.
     """
     reply = ParsedReply(run_date=run_date, user_email=user_email)
+
+    # Shape 2: IONOS top-post + interleaved answers
+    interleaved = _extract_inline_interleaved_answers(body or '')
+    if interleaved:
+        reply.answers = interleaved
+        return reply
+
     stripped = _strip_quoted(body)
     if not stripped:
         reply.parse_notes.append('body empty after quote stripping')

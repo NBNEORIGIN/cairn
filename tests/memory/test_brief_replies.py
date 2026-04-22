@@ -302,3 +302,77 @@ Both are the same customer — canonical name is "Clayport Jewellers Ltd".
         reply = parse_reply_body(body, 't@x', date(2026, 4, 21))
         assert reply.answers[0].verdict == 'correct'
         assert 'Clayport' in reply.answers[0].correction_text
+
+    def test_ionos_top_post_interleaved_answers(self):
+        """Regression: 2026-04-22 run_id 6262f0b6 parse failure.
+
+        IONOS webmail replies put 'On <date> wrote:' at the top and
+        the quoted original below with '> ' on every line. The user
+        types answers as UN-prefixed lines interleaved between the
+        quoted prompts. The parser must recover all three answers.
+        """
+        body = (
+            "> On 22/04/2026 11:18 BST cairn@nbnesigns.com wrote:\n"
+            "> \n"
+            ">  \n"
+            "> Deek morning brief — 2026-04-22\n"
+            "> ============================================================\n"
+            "> \n"
+            "> --- Q1 (belief_audit) ---\n"
+            "> BELIEF AUDIT — 2 days old, used 0 times\n"
+            "> \n"
+            "> I currently believe:\n"
+            ">   Follow up with budget concerns via email within two days.\n"
+            "> \n"
+            "> Is this still true?\n"
+            "> Reply: TRUE  /  FALSE  /  [correction]\n"
+            "TRUE\n"
+            "> \n"
+            "> (Expected reply format: TRUE / FALSE / [correction])\n"
+            "> \n"
+            "> --- Q2 (salience_calibration) ---\n"
+            "> SALIENCE CHECK — flagged yesterday with salience 7.0/10\n"
+            "> \n"
+            "> Dated 2026-04-22:\n"
+            ">   Toby open-ended reflection: Web: nbnesigns.com\n"
+            "> \n"
+            "> Signal breakdown: toby_flag 1.00\n"
+            "> \n"
+            "> Is this genuinely important long-term?\n"
+            "> Reply: YES  /  NO  /  [why or why not]\n"
+            "NO - we don't use nbnesigns.com anymore, we use nbnesigns.co.uk\n"
+            "> \n"
+            "> (Expected reply format: YES / NO / [why or why not])\n"
+            "> \n"
+            "> --- Q3 (open_ended) ---\n"
+            "> OPEN —\n"
+            "> \n"
+            "> One thing from yesterday worth remembering long-term.\n"
+            "> \n"
+            "> Reply: (free text — one or two sentences)\n"
+            "> \n"
+            "> (Expected reply format: Free text (one or two sentences))\n"
+            "We need to complete thorough qa checks on our client designs\n"
+            "> \n"
+            "> — Deek\n"
+            "\n"
+            "Toby Fletcher CEng MIMechE\n"
+            "\n"
+            "Email: toby@nbnesigns.com\n"
+            "Landline: 01665 606741\n"
+            "Mobile: 07747484353\n"
+            "Web: nbnesigns.com\n"
+        )
+        reply = parse_reply_body(body, 'toby@x', date(2026, 4, 22))
+        assert len(reply.answers) == 3
+        a1, a2, a3 = reply.answers
+        assert a1.q_number == 1 and a1.category == 'belief_audit'
+        assert a1.verdict == 'affirm'
+        assert a2.q_number == 2 and a2.category == 'salience_calibration'
+        assert a2.verdict == 'deny'
+        assert 'nbnesigns.co.uk' in a2.correction_text
+        assert a3.q_number == 3 and a3.category == 'open_ended'
+        assert 'qa' in a3.correction_text.lower() or 'QA' in a3.correction_text
+        # Signature stripped from last block
+        assert 'Toby Fletcher CEng' not in a3.correction_text
+        assert 'Landline' not in a3.correction_text
