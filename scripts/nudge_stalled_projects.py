@@ -61,7 +61,12 @@ def _fetch_stalled_projects(stale_days: int) -> list[dict]:
         with httpx.Client(timeout=15.0) as client:
             r = client.get(
                 f'{CRM_BASE_URL}/api/cairn/search',
-                params={'q': '*', 'types': 'project', 'limit': 50},
+                # CRM hybrid search requires a real query — no
+                # wildcards. Seed with broad terms so the top-50
+                # covers active projects; the LEAD/QUOTED filter
+                # below narrows to what we actually care about.
+                params={'q': 'project signage', 'types': 'project',
+                        'limit': 50},
                 headers={'Authorization': f'Bearer {token}'},
             )
     except Exception as exc:
