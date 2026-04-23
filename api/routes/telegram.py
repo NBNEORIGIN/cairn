@@ -158,11 +158,155 @@ async def _route_update(payload: dict) -> None:
         )
         return
 
+    # 3. Slash-commands for thread associations
+    if text.startswith('/'):
+        handled = await _handle_slash_command(
+            chat_id=int(chat_id), user_email=user_email, text=text,
+        )
+        if handled:
+            return
+
     await _route_chat_message(
         chat_id=int(chat_id),
         user_email=user_email,
         text=text,
     )
+
+
+async def _handle_slash_command(
+    *, chat_id: int, user_email: str, text: str,
+) -> bool:
+    """Parse and dispatch /tag, /nottag, /projects commands. Returns
+    True if the command was recognised (regardless of outcome), so
+    the caller skips chat-agent routing. False means 'not a
+    command I handle — treat as chat'."""
+    parts = text.split(maxsplit=1)
+    cmd = parts[0].lower()
+    arg = parts[1].strip() if len(parts) > 1 else ''
+
+    if cmd == '/tag':
+        _do_tag(chat_id=chat_id, user_email=user_email, project_id_arg=arg)
+        return True
+    if cmd == '/nottag':
+        _do_nottag(chat_id=chat_id, user_email=user_email, arg=arg)
+        return True
+    if cmd in ('/projects', '/p'):
+        _do_projects(chat_id=chat_id, user_email=user_email, query=arg)
+        return True
+    if cmd == '/help':
+        _send_telegram(chat_id, (
+            '*Thread-association commands:*\n'
+            '`/tag <project-id>` — bind the most recent open triage '
+            'digest to this project\n'
+            '`/nottag` — revoke the most recent association\n'
+            '`/projects [query]` — list recent projects with ids\n\n'
+            'Anything else you send is passed to the Deek chat agent.'
+        ))
+        return True
+    return False
+
+
+def _do_tag(*, chat_id: int, user_email: str, project_id_arg: str) -> None:
+    project_id = project_id_arg.strip()
+    if not project_id:
+        _send_telegram(chat_id, (
+            'Usage: `/tag <project-id>` — binds the most recent '
+            'open triage digest thread to that CRM project.'
+        ))
+        return
+    conn = _connect()
+    try:
+        from core.triage.thread_association import (
+            record_association, last_open_digest_thread_for_user,
+            CONFIDENCE_MANUAL_TAG, SOURCE_TELEGRAM_TAG,
+        )
+        target = last_open_digest_thread_for_user(conn, user_email)
+        if target is None:
+            _send_telegram(chat_id, (
+                'No recent open triage digest found to tag. Reply to '
+                'a digest email in its Q1 block instead.'
+            ))
+            return
+        row_id = record_association(
+            conn,
+            thread_id=target['thread_id'],
+            project_id=project_id,
+            source=SOURCE_TELEGRAM_TAG,
+            confidence=CONFIDENCE_MANUAL_TAG,
+            associated_by=user_email,
+        )
+        if row_id:
+            subj = (target['subject'] or '(no subject)')[:60]
+            _send_telegram(chat_id, (
+                f'✅ Tagged thread *{subj}* → project `{project_id}` '
+                f'(assoc id {row_id}). Future messages on this thread '
+                'will auto-attach.'
+            ))
+        else:
+            _send_telegram(chat_id, (
+                f'❌ Could not write association for `{project_id}`. '
+                'Check server logs.'
+            ))
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _do_nottag(*, chat_id: int, user_email: str, arg: str) -> None:
+    """Revoke the most recent association Toby (this user) created."""
+    conn = _connect()
+    try:
+        from core.triage.thread_association import (
+            recent_associations_for_user, revoke_association,
+        )
+        recent = recent_associations_for_user(
+            conn, user_email=user_email, limit=1,
+        )
+        if not recent:
+            _send_telegram(chat_id, (
+                'No recent associations to revoke. If you need to '
+                'undo an older one, use the admin UI or SQL.'
+            ))
+            return
+        a = recent[0]
+        count = revoke_association(
+            conn,
+            thread_id=a.thread_id,
+            project_id=a.project_id,
+            revoked_by=user_email,
+            reason=arg or 'telegram /nottag',
+        )
+        if count:
+            _send_telegram(chat_id, (
+                f'✅ Revoked association (thread_id `{a.thread_id[:40]}…`'
+                f' → `{a.project_id}`). Next message on that thread '
+                'will go back through triage.'
+            ))
+        else:
+            _send_telegram(chat_id, '(nothing to revoke)')
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _do_projects(*, chat_id: int, user_email: str, query: str) -> None:
+    """Quick project-id lookup for /tag. Uses search_crm."""
+    try:
+        from core.tools.crm_tools import _search_crm
+    except Exception:
+        _send_telegram(chat_id, 'CRM search tool unavailable.')
+        return
+    q = query.strip() or 'project'
+    try:
+        result = _search_crm('.', query=q, limit=5, types=['project'])
+    except Exception as exc:
+        _send_telegram(chat_id, f'Search failed: {type(exc).__name__}')
+        return
+    _send_telegram(chat_id, result[:3500])
 
 
 def _lookup_user_email(chat_id: int) -> str | None:
