@@ -513,6 +513,44 @@ def _connect():
     return psycopg2.connect(db_url, connect_timeout=5)
 
 
+def _persist_thread_association(
+    conn, triage_id: int | None, project_id: str | None,
+    user_email: str | None,
+    *, source: str, action_dict: dict,
+) -> None:
+    """On YES / select_candidate: write the thread→project binding
+    so subsequent messages on the same thread auto-attach.
+
+    Failures are annotated on the action_dict for audit but never
+    raise — the primary apply_reply flow must remain resilient.
+    """
+    if not (triage_id and project_id):
+        return
+    try:
+        from .thread_association import (
+            record_association, thread_id_for_triage,
+            CONFIDENCE_CONFIRMED,
+        )
+        tid = thread_id_for_triage(conn, int(triage_id))
+        if not tid:
+            action_dict['thread_assoc'] = 'no thread_id resolvable'
+            return
+        row_id = record_association(
+            conn,
+            thread_id=tid,
+            project_id=project_id,
+            source=source,
+            confidence=CONFIDENCE_CONFIRMED,
+            associated_by=user_email,
+        )
+        action_dict['thread_assoc'] = (
+            f'recorded thread_assoc id={row_id}' if row_id
+            else 'thread_assoc write failed'
+        )
+    except Exception as exc:
+        action_dict['thread_assoc'] = f'error: {type(exc).__name__}'
+
+
 def _body_hash(raw_body: str, triage_id: int) -> str:
     h = hashlib.sha256()
     h.update(str(triage_id).encode('utf-8'))
@@ -809,6 +847,15 @@ def apply_reply(conn, reply: ParsedReply, raw_body: str) -> dict:
                         if cands:
                             final_project_id = cands[0].get('project_id') or final_project_id
                     action['result'] = f'confirmed project_id={final_project_id}'
+                    # Phase A thread-association: persist this match
+                    # so the NEXT message on the same thread
+                    # auto-attaches without going through triage.
+                    _persist_thread_association(
+                        conn, reply.triage_id, final_project_id,
+                        reply.user_email,
+                        source='triage_reply_yes',
+                        action_dict=action,
+                    )
                 elif ans.verdict == 'select_candidate':
                     idx = ans.selected_candidate_index or 1
                     cands = row.get('match_candidates') or []
@@ -816,6 +863,12 @@ def apply_reply(conn, reply: ParsedReply, raw_body: str) -> dict:
                         final_project_id = cands[idx - 1].get('project_id') or final_project_id
                         action['result'] = (
                             f'selected candidate #{idx}: {final_project_id}'
+                        )
+                        _persist_thread_association(
+                            conn, reply.triage_id, final_project_id,
+                            reply.user_email,
+                            source='triage_reply_yes',
+                            action_dict=action,
                         )
                     else:
                         action['result'] = f'invalid candidate #{idx}'

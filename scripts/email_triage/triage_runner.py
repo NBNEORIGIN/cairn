@@ -125,6 +125,57 @@ def fetch_candidate_emails(
     return out[:max_emails]
 
 
+def _lookup_existing_thread_association(email: dict) -> dict | None:
+    """Phase A thread-association check. If this email's thread_id
+    is already bound to a project, return the association details
+    so the caller can skip heuristic matching.
+
+    `email` is the dict from load_unprocessed_emails — we need the
+    message_id to look up cairn_email_raw.thread_id, since the
+    runner doesn't receive thread_id directly.
+
+    Never raises; None on any failure (falls through to matcher).
+    """
+    msg_id = (email.get('message_id') or '').strip()
+    if not msg_id:
+        return None
+    db_url = os.getenv('DATABASE_URL', '')
+    if not db_url:
+        return None
+    try:
+        conn = psycopg2.connect(db_url, connect_timeout=5)
+    except Exception:
+        return None
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT thread_id FROM cairn_email_raw WHERE message_id = %s",
+                (msg_id,),
+            )
+            row = cur.fetchone()
+            thread_id = (row[0] if row else None) or msg_id
+        from core.triage.thread_association import lookup_project_for_thread
+        assoc = lookup_project_for_thread(conn, thread_id)
+        if assoc is None:
+            return None
+        return {
+            'project_id': assoc.project_id,
+            'confidence': assoc.confidence,
+            'thread_id': assoc.thread_id,
+        }
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).debug(
+            '[triage] thread-association lookup failed: %s', exc,
+        )
+        return None
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 def _daily_triage_count(db_url: str) -> int:
     """Count triage rows written today (UTC) to enforce daily budget."""
     conn = psycopg2.connect(db_url, connect_timeout=8)
@@ -295,13 +346,35 @@ def _process_one(email: dict, commit: bool) -> dict:
         return row
 
     if classification_name == 'existing_project_reply':
-        match = match_project(email, classification)
-        row['project_id'] = match.get('project_id') or None
-        row['project_match_score'] = match.get('match_score')
-        # Phase A (2026-04-21): the digest now shows top-N candidates
-        # instead of single-thresholded yes/no. Stash the full list
-        # so the digest sender can render alternatives.
-        row['match_candidates'] = match.get('candidates') or []
+        # Phase A thread-association (2026-04-23): before running the
+        # heuristic matcher, check if this thread has already been
+        # associated with a project — if so, skip the matcher and
+        # use the persisted mapping. This is how the loop compounds:
+        # every confirmed digest + /tag writes an association, so
+        # future messages in that thread route directly.
+        thread_assoc = _lookup_existing_thread_association(email)
+        if thread_assoc is not None:
+            row['project_id'] = thread_assoc['project_id']
+            row['project_match_score'] = 1.0
+            row['match_candidates'] = [{
+                'project_id': thread_assoc['project_id'],
+                'match_score': 1.0,
+                'project_name': '(from thread association)',
+                'source': 'thread_association',
+                'confidence': thread_assoc['confidence'],
+            }]
+            row['skip_reason'] = None
+            # Short-circuit drafter block below with a minimal match
+            match = {'project_id': thread_assoc['project_id'],
+                     'candidates': row['match_candidates'],
+                     'match_score': 1.0}
+        else:
+            match = match_project(email, classification)
+            row['project_id'] = match.get('project_id') or None
+            row['project_match_score'] = match.get('match_score')
+            # Phase A (2026-04-21): digest now shows top-N candidates.
+            # Stash the full list so the sender can render alternatives.
+            row['match_candidates'] = match.get('candidates') or []
         # Draft a reply using local Ollama, grounded on whatever
         # history we can pull for the top candidate. Best-effort —
         # failure to draft still delivers the digest with candidates.
