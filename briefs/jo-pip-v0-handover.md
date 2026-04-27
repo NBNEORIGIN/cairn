@@ -79,9 +79,23 @@ docker exec -w /app -e PYTHONPATH=/app jo-pip-api \
 
 If she gets an email titled "Deek morning brief — 2026-04-27" — outbound is working. **But she can't reply yet** until the PWA brief surface is built (Layer 2).
 
-### Layer 2: PWA brief surface (1-2 days engineering)
+### Layer 2: PWA brief surface ✅ (built 2026-04-27)
 
-This is the v0-launchable deliverable that hasn't been built yet. Per `jo-pip-mobile-design.md` §4.2, the v0 PWA needs:
+Layer 2 has shipped — the codebase additions are in master. What was built:
+
+- **Backend** ([api/routes/brief_pwa.py](api/routes/brief_pwa.py)) — three endpoints under `/api/deek/brief/`:
+  - `GET /api/deek/brief/today?user=<email>` — latest brief in last 36h
+  - `POST /api/deek/brief/reply` — converges on `core/brief/replies.apply_reply()`, the same path the email channel uses (no parallel parser). Stamps `applied_summary['channel']='pwa'` for provenance. Idempotent via the existing `already_applied()` SHA check.
+  - `GET /api/deek/brief/memory/recent?user=<email>` — last 20 chunks written via `memory/brief-reply/*` so the PWA's write feed stays scoped.
+- **Frontend** ([web/src/app/voice/brief/](web/src/app/voice/brief/)) — new route + four colocated components:
+  - `ConfidentialityBanner.tsx` — sticky `🔒 Rex — <host>` strip
+  - `BriefCard.tsx` — inline reply boxes per question; "Brief sent — replied" state with captured answers
+  - `MemorySearch.tsx` — debounced search hitting `/api/wiki/search` via proxy
+  - `MemoryWriteFeed.tsx` — chronological writes feed with manual refresh
+- **Proxies** under `web/src/app/api/deek/brief/{today,reply,memory/recent}` and `web/src/app/api/deek/wiki/search` — gate on `getServerSession()`, forward `session.email` so Toby and Jo each see only their own brief.
+- **Tests** — 18 in [tests/test_brief_pwa.py](tests/test_brief_pwa.py): helper unit tests + endpoint shape via TestClient with a fake DB connection. Existing brief-reply suites (49 tests) still pass.
+
+Original spec preserved below for reference. The v0 PWA needed (per `jo-pip-mobile-design.md` §4.2):
 
 1. **Today's brief at the top.** If unanswered, four questions inline with reply boxes per question.
 2. **Reply box per question.** Plain prose; conversational normaliser maps to right Q. Same backend as email replies.
@@ -97,6 +111,22 @@ Implementation note from the mobile-design doc: reuse existing `/voice` PWA comp
 **Where the work lands:** `web/src/app/voice/` — add a new route `/voice/brief` (or similar) that fetches the latest unanswered brief from `/api/deek/brief/today` (new endpoint), renders the question list, accepts inline replies, posts back to a new `/api/deek/brief/reply` endpoint that runs the same parser path Hetzner uses for email-channel replies.
 
 This is real work. **Best handed off as its own implementation brief**, not bundled into "v0 staging." Estimate ~2 days from a fresh CC session.
+
+**Layer 2 deploy on nbne1 (still to do):**
+
+The codebase is ready; what remains is rebuilding the jo-pip image so the new route + endpoints are live on `100.125.120.1`:
+
+```bash
+ssh toby@192.168.1.228
+cd /opt/nbne/jo-pip-src
+git pull origin master
+cd /opt/nbne/jo-pip
+docker compose build api
+docker compose up -d --force-recreate api
+docker compose logs -f --tail 50 api
+```
+
+Then smoke from a tailnet device: `http://jo.nbne.local/voice/brief`. The PWA will redirect to `/voice/login` if Jo's session cookie isn't set yet — Layer 3's "Add to Home Screen" step is what installs it.
 
 ### Layer 3: PWA installation on Jo's phone (5 min when Toby + Jo can sit together)
 

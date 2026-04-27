@@ -25,10 +25,10 @@ Then look at:
 A new route `/voice/brief` on the existing `/voice` PWA that gives Jo a single-screen daily surface:
 
 1. **Today's brief at the top.** If unanswered, render the four questions inline with one reply box per question. If already answered, show a "Brief sent — replied" state and the captured answers below.
-2. **One reply box per question.** Plain prose. On submit, post to a new `/api/deek/brief/reply` endpoint that runs the **same conversational normaliser path** Hetzner uses for email-channel replies (`core/brief/reply_normaliser.py` — local Qwen via Ollama, JSON output). Do NOT build a parallel parser.
+2. **One reply box per question.** Plain prose. On submit, post to a new `/api/deek/brief/reply` endpoint that converges on the **same `apply_reply()` path** the email channel uses (`core/brief/replies.py` — `apply_reply()` mutates schemas, writes new memory chunks, stores the response row). Each PWA answer is bound to a `question_id`, so the LLM normaliser (`core/brief/conversational.py`, local Qwen via Ollama) is **not** required — build a `ParsedAnswer` per submitted answer using the existing `_classify()` helper for verdict mapping (TRUE/YES/etc), then hand the `ParsedReply` to `apply_reply()`. Do NOT build a parallel parser.
 3. **Recent chat history** (read-only, last ~20 turns).
-4. **Memory search** (single search box → matching chunks, reuse existing `/retrieve` or `/api/wiki/search`).
-5. **Recent memory write events** (chronological list — last 20 writes from `cairn_memory_writes` or equivalent log).
+4. **Memory search** (single search box → matching chunks, proxy to `GET /api/wiki/search?q=...&top_k=10` — the canonical wiki/memory full-text + embedding hybrid endpoint per session-start ritual).
+5. **Recent memory write events** (chronological list — last 20 entries from `claw_code_chunks` filtered to `chunk_type IN ('memory', 'wiki')` AND `salience_signals->>'via' = 'memory_brief_reply'` OR `file_path LIKE 'memory/brief-reply/%'` ORDER BY `indexed_at DESC`. The `cairn_memory_writes` table does NOT exist — `claw_code_chunks` is the canonical store; see your auto-memory entry "Cairn embedding schema").
 6. **Persistent confidentiality banner** at the top: `🔒 Rex — jo.nbne.local`. Always visible.
 
 This is Jo's daily app. She taps the icon, sees today's brief, replies inline, done. Email is a notification only — never a reply channel for her.
@@ -59,11 +59,20 @@ Both under `/api/deek/brief/` (additive, no consumer breaks):
 
 ### `POST /api/deek/brief/reply`
 - Body: `{ "brief_id": "...", "answers": [{"question_id": "q1", "text": "..."}, ...] }`
-- Runs each answer through the existing reply normaliser (same code path as email replies — find it via `grep -r "reply_normaliser\|process_brief_reply" core/ api/`)
-- Writes to memory the same way email replies do. Provenance: `source="pwa_brief_reply"`, `channel="pwa"`.
-- Returns: `{ "ok": true, "memory_writes": [...], "normalised": {...} }`
+- For each `{question_id, text}` in the body:
+  - Look up the question in `memory_brief_runs.questions` to recover its `category` and `provenance` dict
+  - Build a `ParsedAnswer` via `from core.brief.replies import _classify, ParsedAnswer; verdict, correction = _classify(text)`
+  - Append to a single `ParsedReply(run_date, user_email)`
+- Call `apply_reply(conn, parsed_reply)` (same function the email path uses) — this mutates schemas, writes memory chunks, returns the audit summary
+- Call `store_response(conn, run_id, raw_body=json.dumps(answers), parsed_reply, applied_summary)` so the response is recorded idempotently in `memory_brief_responses`
+- Stamp `applied_summary['channel'] = 'pwa'` before storing so PWA-vs-email provenance is queryable later
+- Returns: `{ "ok": true, "applied_summary": {...} }`
 
-**Critical:** reuse the existing parser. The whole point is that PWA replies and email replies converge on one normalisation path. Do not duplicate logic.
+**Critical:** reuse `apply_reply()`. The whole point is that PWA replies and email replies converge on one apply path with identical memory-write semantics. Do not duplicate the schema-mutation or chunk-insertion logic.
+
+**Tenant scoping:** the auth session gives you `session.email`. Both `GET /today` and the memory search must filter `user_email = session.email` so Toby cannot see Jo's brief and vice versa (DEEK_USERS is a shared cookie env). On Jo's isolated jo-pip DB this is moot, but on Toby's shared instance it matters.
+
+**Project key for memory writes:** the existing `_write_toby_memory()` hardcodes `project_id='deek'` ([core/brief/replies.py:681](core/brief/replies.py:681)). On jo-pip's isolated DB that's fine — the DB itself provides the isolation. On a multi-tenant shared instance you'd want per-user scoping; out of scope for v0.
 
 ---
 
@@ -72,7 +81,8 @@ Both under `/api/deek/brief/` (additive, no consumer breaks):
 Land in `web/src/app/voice/`:
 
 - New route `web/src/app/voice/brief/page.tsx`
-- Reuse existing components from `web/src/components/voice/` (chat surface, message list, auth) — configuration + theming, not a new codebase
+- Note: existing `BriefingView.tsx` is a *different* concept (Deek's morning read = tasks + dream candidates + briefing markdown). It is NOT the memory-brief reply system. Build alongside, don't extend.
+- Reuse auth + general styling from existing voice components — but the brief-reply surface is its own component tree.
 - New components as needed:
   - `BriefCard.tsx` — renders the question list with inline reply boxes
   - `MemorySearch.tsx` — search box + result list

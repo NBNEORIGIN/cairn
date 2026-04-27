@@ -3397,6 +3397,11 @@ from api.routes.quotes import router as quotes_router
 app.include_router(quotes_router, prefix='/api/deek')
 app.include_router(quotes_router, prefix='/api/cairn')  # legacy alias
 
+# Register Memory Brief PWA routes (Jo's Pip v0 Layer 2)
+# /api/deek/brief/today + /api/deek/brief/reply + /api/deek/brief/memory/recent
+from api.routes.brief_pwa import router as brief_pwa_router
+app.include_router(brief_pwa_router, prefix='/api/deek')
+
 # Register Telegram webhook — inbound-only public endpoint,
 # secret-token-guarded (see core.channels.nudge + docs).
 from api.routes.telegram import router as telegram_router
