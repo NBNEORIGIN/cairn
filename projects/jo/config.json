@@ -1,0 +1,42 @@
+{
+  "name": "Rex",
+  "description": "Jo's personal AI — HR, finance, D2C, operations. Confidential to Jo. Hosted on nbne1, accessible via Tailscale.",
+  "codebase_path": "/app",
+  "project_type": "business",
+  "force_model": "api",
+
+  "permissions": [
+    "read_file",
+    "search_code",
+    "search_crm",
+    "write_crm_memory",
+    "mark_crm_actioned",
+    "set_crm_project_folder",
+    "get_quote_context",
+    "search_similar_quotes",
+    "review_quote_draft",
+    "write_wiki",
+    "search_wiki",
+    "search_emails",
+    "get_module_snapshot",
+    "retrieve_similar_decisions",
+    "analyze_enquiry",
+    "query_amazon_intel"
+  ],
+
+  "model_preferences": {
+    "force_model": "api",
+    "opus_keywords": [
+      "decision", "trade-off", "policy",
+      "HR", "compensation", "performance",
+      "finance", "cashflow", "budget",
+      "supplier", "contract"
+    ]
+  },
+
+  "indexing": {
+    "auto_reindex": false,
+    "exclude_paths": [".venv", "node_modules", ".next", "__pycache__", "data", "logs"],
+    "include_extensions": [".py", ".ts", ".tsx", ".json", ".md"]
+  }
+}
