@@ -162,7 +162,24 @@
       "Bash(ssh:*)",
       "Bash(xargs grep:*)",
       "Bash(find /d/nbne_business/nbne_production -name *.conf -o -name nginx*)",
-      "Bash(pip show:*)"
+      "Bash(pip show:*)",
+      "Bash(scp D:/claw/.tmp/comfy-simple.html deek1@192.168.1.127:/tmp/comfy-simple.html)",
+      "Bash(git -C /d/claw status --short)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/validate_brief_hook.py",
+            "timeout": 30,
+            "statusMessage": "Validating brief…"
+          }
+        ]
+      }
     ]
   }
 }
