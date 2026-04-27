@@ -24,6 +24,7 @@ import { ConfidentialityBanner } from './components/ConfidentialityBanner'
 import { BriefCard, type Brief } from './components/BriefCard'
 import { MemorySearch } from './components/MemorySearch'
 import { MemoryWriteFeed } from './components/MemoryWriteFeed'
+import { RecentChatHistory } from './components/RecentChatHistory'
 
 interface Me {
   authenticated: boolean
@@ -125,6 +126,9 @@ export default function BriefPage() {
 
           {brief && <BriefCard brief={brief} onSubmitted={onSubmitted} />}
         </section>
+
+        {/* Recent chat history */}
+        <RecentChatHistory />
 
         {/* Memory search */}
         <MemorySearch />
