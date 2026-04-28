@@ -2993,6 +2993,82 @@ class TestIndexerImprovements:
             with pytest.raises(IndexerError, match='Embedding model not available'):
                 indexer.index_project()
 
+    def test_ensure_schema_skips_alter_when_columns_present(self):
+        """Regression: when subproject_id + last_modified columns already
+        exist, _ensure_schema must NOT issue ALTER TABLE. Bare
+        ``ALTER TABLE ... ADD COLUMN IF NOT EXISTS`` still takes
+        AccessExclusive briefly even as a no-op, which queues behind
+        any stale AccessShareLock and cascades into the lock pile-up
+        that wedged Toby's brief on 2026-04-28.
+        """
+        import sys
+        import unittest.mock as mock
+        if 'pgvector' not in sys.modules:
+            sys.modules['pgvector'] = mock.MagicMock()
+        if 'pgvector.psycopg2' not in sys.modules:
+            sys.modules['pgvector.psycopg2'] = mock.MagicMock()
+        from core.context.indexer import CodeIndexer
+
+        executed: list[str] = []
+        with mock.patch('pgvector.psycopg2.register_vector'):
+            with mock.patch('psycopg2.connect') as mock_conn:
+                conn = mock.MagicMock()
+                cur = mock.MagicMock()
+
+                # Simulate steady-state: both defensive columns already
+                # present in information_schema
+                cur.fetchall.return_value = [
+                    ('id',), ('project_id',), ('file_path',),
+                    ('subproject_id',), ('last_modified',),
+                ]
+                cur.fetchone.return_value = (0,)
+                cur.__enter__ = mock.Mock(return_value=cur)
+                cur.__exit__ = mock.Mock(return_value=False)
+                cur.execute.side_effect = lambda sql, *a, **kw: executed.append(sql)
+                conn.cursor.return_value = cur
+                mock_conn.return_value = conn
+                CodeIndexer('test', '.', 'fake://url')
+
+        # _ensure_schema ran. None of the executed statements should
+        # be an ALTER TABLE, because the column-existence check
+        # short-circuited.
+        alter_stmts = [s for s in executed if 'ALTER TABLE' in s]
+        assert alter_stmts == [], (
+            f"Expected no ALTER TABLE when columns already exist, "
+            f"got: {alter_stmts}"
+        )
+
+    def test_ensure_schema_alters_when_columns_missing(self):
+        """When the columns are missing, _ensure_schema must issue
+        the matching ALTER TABLE for each one."""
+        import sys
+        import unittest.mock as mock
+        if 'pgvector' not in sys.modules:
+            sys.modules['pgvector'] = mock.MagicMock()
+        if 'pgvector.psycopg2' not in sys.modules:
+            sys.modules['pgvector.psycopg2'] = mock.MagicMock()
+        from core.context.indexer import CodeIndexer
+
+        executed: list[str] = []
+        with mock.patch('pgvector.psycopg2.register_vector'):
+            with mock.patch('psycopg2.connect') as mock_conn:
+                conn = mock.MagicMock()
+                cur = mock.MagicMock()
+                # Empty information_schema = no columns yet
+                cur.fetchall.return_value = []
+                cur.fetchone.return_value = (0,)
+                cur.__enter__ = mock.Mock(return_value=cur)
+                cur.__exit__ = mock.Mock(return_value=False)
+                cur.execute.side_effect = lambda sql, *a, **kw: executed.append(sql)
+                conn.cursor.return_value = cur
+                mock_conn.return_value = conn
+                CodeIndexer('test', '.', 'fake://url')
+
+        alter_stmts = [s for s in executed if 'ALTER TABLE' in s]
+        # Both columns should get an ALTER
+        assert any('subproject_id' in s for s in alter_stmts)
+        assert any('last_modified' in s for s in alter_stmts)
+
 
 class TestEmbeddingModelStatus:
     """Tests for embedding_model in /health and POST /admin/test-embedding."""

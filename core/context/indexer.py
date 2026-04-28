@@ -86,15 +86,30 @@ class CodeIndexer:
             """)
             self.conn.commit()
 
-            # Defensive migration — add columns if missing from existing table
-            cur.execute("""
-                ALTER TABLE claw_code_chunks
-                    ADD COLUMN IF NOT EXISTS subproject_id VARCHAR(200);
-            """)
-            cur.execute("""
-                ALTER TABLE claw_code_chunks
-                    ADD COLUMN IF NOT EXISTS last_modified TIMESTAMP;
-            """)
+            # Defensive migration — add columns if missing from existing
+            # table. Read information_schema first so the steady-state
+            # path (column already present) is a metadata SELECT
+            # (AccessShareLock) rather than an ALTER TABLE
+            # (AccessExclusive). Bare ``ADD COLUMN IF NOT EXISTS``
+            # still takes AccessExclusive even when it's a no-op,
+            # which queues behind any stale AccessShareLock from an
+            # abandoned transaction — the failure mode that wedged
+            # Toby's morning brief on 2026-04-28.
+            cur.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'claw_code_chunks'"
+            )
+            existing_cols = {row[0] for row in cur.fetchall()}
+            for col_name, ddl in (
+                ('subproject_id',
+                 'ALTER TABLE claw_code_chunks '
+                 'ADD COLUMN subproject_id VARCHAR(200)'),
+                ('last_modified',
+                 'ALTER TABLE claw_code_chunks '
+                 'ADD COLUMN last_modified TIMESTAMP'),
+            ):
+                if col_name not in existing_cols:
+                    cur.execute(ddl)
             self.conn.commit()
 
             cur.execute("""
