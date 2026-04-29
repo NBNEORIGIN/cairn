@@ -1,18 +1,21 @@
 """
-Ongoing cairn@ inbox processor.
+Ongoing inbox processor.
 
-Polls cairn@ every 15 minutes (via Windows Scheduled Task).
-Classifies incoming mail into two types:
+Polls a configured IMAP mailbox every 15 minutes (via cron / Scheduled
+Task). Classifies incoming mail into two types:
 
     Type 1 — Forwarded business email
         Sender is sales@ or toby@, or subject contains 'Fwd:'.
         Standard ingest + embed. Label: forwarded_business.
 
-    Type 2 — Direct notes to Deek
-        Sent directly to cairn@, not forwarded.
+    Type 2 — Direct notes
+        Sent directly to the mailbox, not forwarded.
         Ingest + embed immediately (higher priority).
         Labels: direct_note, wiki_candidate.
-        These are Toby's voice notes into the knowledge base.
+
+The mailbox is parameterised: cairn@ (NBNE-Deek), jo@ (Rex), etc. The
+processor is the same; the DB it writes to differs by container env
+(jo-pip's own Postgres for Rex, Hetzner's for cairn@).
 """
 import logging
 from datetime import datetime, timezone
@@ -29,7 +32,7 @@ from core.email_ingest.embedder import embed_email_batch
 
 logger = logging.getLogger(__name__)
 
-DEEK_INBOX = 'cairn'
+DEEK_INBOX = 'cairn'  # legacy default — kept for backwards compat
 
 # Senders whose forwarded mail should be treated as business email
 FORWARDING_SOURCES = {
@@ -55,12 +58,12 @@ def _classify_labels(parsed: dict) -> list[str]:
     return ['direct_note', 'wiki_candidate']
 
 
-def _load_known_ids() -> set[str]:
+def _load_known_ids(mailbox: str = DEEK_INBOX) -> set[str]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT message_id FROM cairn_email_raw WHERE mailbox=%s",
-                (DEEK_INBOX,),
+                (mailbox,),
             )
             return {row[0] for row in cur.fetchall()}
 
@@ -97,15 +100,29 @@ def _store_email(parsed: dict, labels: list[str]) -> bool:
     return inserted
 
 
-def process_deek_inbox(embed_immediately: bool = True) -> dict:
+def process_inbox(
+    mailbox: str = DEEK_INBOX,
+    embed_immediately: bool = True,
+) -> dict:
     """
-    Check cairn@ for new messages, ingest and embed them.
-    Called by the Windows Scheduled Task every 15 minutes.
+    Check the named mailbox for new messages, ingest and embed them.
 
-    Returns summary: {new_messages, forwarded, direct_notes, wiki_candidates, errors}
+    The mailbox name must exist in
+    ``core.email_ingest.imap_client.MAILBOX_CONFIG``. Cron entries call
+    one of:
+
+        * ``process_deek_inbox.py`` → mailbox='cairn' (NBNE-Deek)
+        * ``process_jo_inbox.py``   → mailbox='jo' (Rex / jo-pip)
+
+    Each writes to the DB in its own container's DATABASE_URL — Rex's
+    isolated Postgres for jo's mail, Hetzner's for cairn@.
+
+    Returns summary: {new_messages, forwarded, direct_notes,
+    wiki_candidates, errors}.
     """
-    logger.info('[cairn@] Processing inbox')
-    known_ids = _load_known_ids()
+    log_prefix = f'[{mailbox}@]'
+    logger.info('%s Processing inbox', log_prefix)
+    known_ids = _load_known_ids(mailbox)
 
     new_messages = 0
     forwarded = 0
@@ -114,14 +131,14 @@ def process_deek_inbox(embed_immediately: bool = True) -> dict:
     errors = 0
 
     try:
-        imap = connect_imap(DEEK_INBOX)
-    except EnvironmentError as exc:
-        logger.error('[cairn@] Cannot connect: %s', exc)
+        imap = connect_imap(mailbox)
+    except (EnvironmentError, KeyError) as exc:
+        logger.error('%s Cannot connect: %s', log_prefix, exc)
         return {'status': 'error', 'reason': str(exc)}
 
     try:
         uids = fetch_all_uids(imap, 'INBOX')
-        logger.info('[cairn@] %d messages in inbox', len(uids))
+        logger.info('%s %d messages in inbox', log_prefix, len(uids))
 
         for uid in uids:
             try:
@@ -130,13 +147,13 @@ def process_deek_inbox(embed_immediately: bool = True) -> dict:
                     errors += 1
                     continue
 
-                parsed = parse_message(msg, DEEK_INBOX)
+                parsed = parse_message(msg, mailbox)
 
                 if not parsed['message_id']:
                     import hashlib
                     parsed['message_id'] = (
-                        f'<synthetic-cairn-{uid.decode()}-'
-                        f'{hashlib.md5((parsed.get("subject") or "").encode()).hexdigest()[:8]}@cairn>'
+                        f'<synthetic-{mailbox}-{uid.decode()}-'
+                        f'{hashlib.md5((parsed.get("subject") or "").encode()).hexdigest()[:8]}@{mailbox}>'
                     )
 
                 if parsed['message_id'] in known_ids:
@@ -157,7 +174,7 @@ def process_deek_inbox(embed_immediately: bool = True) -> dict:
                                 ON CONFLICT (message_id) DO NOTHING
                                 """,
                                 (
-                                    parsed['message_id'], DEEK_INBOX,
+                                    parsed['message_id'], mailbox,
                                     parsed['sender'], parsed['subject'], skip_reason,
                                 ),
                             )
@@ -186,12 +203,12 @@ def process_deek_inbox(embed_immediately: bool = True) -> dict:
                         wiki_candidates += 1
 
                     logger.info(
-                        '[cairn@] New: %s | labels=%s',
-                        parsed['subject'], labels,
+                        '%s New: %s | labels=%s',
+                        log_prefix, parsed['subject'], labels,
                     )
 
             except Exception as exc:
-                logger.error('[cairn@] Error processing uid=%s: %s', uid, exc, exc_info=True)
+                logger.error('%s Error processing uid=%s: %s', log_prefix, uid, exc, exc_info=True)
                 errors += 1
 
     finally:
@@ -202,20 +219,31 @@ def process_deek_inbox(embed_immediately: bool = True) -> dict:
 
     # Embed newly ingested messages
     if embed_immediately and new_messages > 0:
-        logger.info('[cairn@] Embedding %d new messages', new_messages)
+        logger.info('%s Embedding %d new messages', log_prefix, new_messages)
         try:
             embed_result = embed_email_batch(batch_size=new_messages + 10)
-            logger.info('[cairn@] Embed result: %s', embed_result)
+            logger.info('%s Embed result: %s', log_prefix, embed_result)
         except Exception as exc:
-            logger.error('[cairn@] Embedding failed: %s', exc)
+            logger.error('%s Embedding failed: %s', log_prefix, exc)
 
     result = {
         'status': 'complete',
+        'mailbox': mailbox,
         'new_messages': new_messages,
         'forwarded': forwarded,
         'direct_notes': direct_notes,
         'wiki_candidates': wiki_candidates,
         'errors': errors,
     }
-    logger.info('[cairn@] Done: %s', result)
+    logger.info('%s Done: %s', log_prefix, result)
     return result
+
+
+def process_deek_inbox(embed_immediately: bool = True) -> dict:
+    """Backwards-compatible alias — processes the cairn@ mailbox.
+
+    Existing callers (scripts/process_deek_inbox.py + the Hetzner
+    cron) use this name. New mailboxes should call process_inbox()
+    directly with their mailbox name.
+    """
+    return process_inbox(mailbox=DEEK_INBOX, embed_immediately=embed_immediately)

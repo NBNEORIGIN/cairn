@@ -38,6 +38,15 @@ MAILBOX_CONFIG: dict[str, dict] = {
         'user': 'cairn@nbnesigns.com',
         'password_env': 'IMAP_PASSWORD_CAIRN',
     },
+    # Jo's personal mailbox — ingested into Rex (jo-pip) only.
+    # Lives in a separate Postgres from NBNE-Deek; her email content
+    # never crosses to the organisational instance. See identity.md
+    # in projects/jo/ for the confidentiality boundary.
+    'jo': {
+        'host': IONOS_IMAP_HOST,
+        'user': 'jo@nbnesigns.com',
+        'password_env': 'IMAP_PASSWORD_JO',
+    },
 }
 
 
