@@ -49,7 +49,9 @@ function LoginForm() {
     <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-slate-950 p-6 text-slate-100">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
-          <div className="text-3xl font-semibold">Deek</div>
+          <div className="text-3xl font-semibold">
+            {process.env.NEXT_PUBLIC_DEEK_BRAND_NAME || 'Deek'}
+          </div>
           <div className="mt-1 text-sm text-slate-400">
             Sign in to continue
           </div>

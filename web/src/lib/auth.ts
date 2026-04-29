@@ -153,7 +153,13 @@ export async function getServerSession(): Promise<DeekSession | null> {
 
 // Cookie options used by /api/voice/login and /api/voice/logout.
 export function sessionCookieOptions(maxAge = COOKIE_MAX_AGE_SEC) {
-  const secure = process.env.NODE_ENV === 'production'
+  // Default: Secure cookies in production (browsers drop them on HTTP).
+  // Opt-out via DEEK_COOKIE_SECURE=false for tailnet-only HTTP deployments
+  // like Rex on jo-pip — traffic is already encrypted by Tailscale, but
+  // the application layer is HTTP so Secure cookies would be dropped and
+  // login would silently fail on the redirect-back step.
+  const optOut = (process.env.DEEK_COOKIE_SECURE || '').toLowerCase() === 'false'
+  const secure = optOut ? false : process.env.NODE_ENV === 'production'
   return {
     name: COOKIE_NAME,
     httpOnly: true,

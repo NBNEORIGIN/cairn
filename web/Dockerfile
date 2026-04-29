@@ -38,6 +38,13 @@ ENV DEEK_API_KEY=${DEEK_API_KEY}
 ENV CLAW_API_URL=${DEEK_API_URL}
 ENV CLAW_API_KEY=${DEEK_API_KEY}
 
+# Optional brand override — Next.js inlines NEXT_PUBLIC_* into the
+# client bundle at build time, so this MUST be a build arg, not a
+# runtime env. Default 'Deek' when unset; pass --build-arg
+# NEXT_PUBLIC_DEEK_BRAND_NAME=Rex for jo-pip's PWA.
+ARG NEXT_PUBLIC_DEEK_BRAND_NAME=Deek
+ENV NEXT_PUBLIC_DEEK_BRAND_NAME=${NEXT_PUBLIC_DEEK_BRAND_NAME}
+
 RUN npm run build
 
 # ── Runner stage ──────────────────────────────────────────────────────
