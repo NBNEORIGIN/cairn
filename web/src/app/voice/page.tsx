@@ -1,342 +1,343 @@
 'use client'
 
 /**
- * /voice — top-level shell with:
- * - Chat | Voice mode toggle (state persisted in localStorage)
- * - Shared transcript across modes
- * - Location picker on first visit, cyclable from header
- * - ⋯ menu with Download / Commit / Sign out
+ * /voice — clean ChatGPT-shaped chat surface.
  *
- * Auth is handled by middleware (+/voice/login page).
+ * Single column. Scrollable thread. Text input at the bottom. Send.
+ * Anyone who has used ChatGPT or Claude.ai can sit down here and be
+ * productive in zero extra effort.
+ *
+ * Today's brief, if there's an unanswered one, surfaces as a small
+ * banner at the top with a link to /voice/brief. Outside of that, no
+ * mode toggles, no location picker, no Eye/Net/Face/Data — that earlier
+ * power-user mode UI was paring noise for users like Jo.
+ *
+ * Auth: 401 → /voice/login.
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { ChatView } from '@/components/voice/ChatView'
-import { VoiceView } from '@/components/voice/VoiceView'
-import { BriefingView } from '@/components/voice/BriefingView'
-import { TopMenu } from '@/components/voice/TopMenu'
-import type { Location, Mode, MeResponse } from '@/components/voice/types'
-import type { VoiceLoopTurn } from '@/hooks/useVoiceLoop'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+} from 'react'
+import Link from 'next/link'
+import { Send, LogOut, FileText } from 'lucide-react'
 import { BRAND } from '@/lib/brand'
 
-const MODE_KEY = 'deek.mode'
-const LOCATION_KEY = 'deek.location'
-const SESSION_KEY = 'deek.voice.session'
+interface Turn {
+  role: 'user' | 'assistant'
+  text: string
+  at: number
+}
+
+interface Me {
+  authenticated: boolean
+  user?: { email: string; name?: string | null; role: string }
+}
+
+interface BriefStatus {
+  brief_id: string
+  questions_count: number
+  answered: boolean
+}
 
 export default function VoicePage() {
-  const [me, setMe] = useState<MeResponse | null>(null)
-  const [mode, setMode] = useState<Mode>('voice')
-  const [location, setLocation] = useState<Location | null>(null)
-  const [transcript, setTranscript] = useState<VoiceLoopTurn[]>([])
+  const [me, setMe] = useState<Me | null>(null)
+  const [transcript, setTranscript] = useState<Turn[]>([])
+  const [input, setInput] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [partial, setPartial] = useState('')
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [brief, setBrief] = useState<BriefStatus | null>(null)
   const [sessionId, setSessionId] = useState<string | null>(null)
-  const [now, setNow] = useState(new Date())
-  const [unseenBriefings, setUnseenBriefings] = useState(0)
 
-  const sessionIdRef = useRef<string | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+  const bottomRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  // ── Clock tick ───────────────────────────────────────────────────
+  // ── Boot: auth + brief peek ─────────────────────────────────────────
   useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 30_000)
-    return () => clearInterval(id)
-  }, [])
-
-  // ── Unseen-briefing badge ────────────────────────────────────────
-  const refreshBadge = useCallback(async () => {
-    try {
-      const res = await fetch('/api/voice/briefings/pending', { cache: 'no-store' })
-      if (res.ok) {
-        const data = await res.json()
-        setUnseenBriefings(data.unseen_count || 0)
-      }
-    } catch {}
-  }, [])
-  useEffect(() => {
-    if (!me) return
-    refreshBadge()
-    const id = setInterval(refreshBadge, 120_000) // every 2 min
-    return () => clearInterval(id)
-  }, [me, refreshBadge])
-  // Clear badge when user opens the briefing tab
-  useEffect(() => {
-    if (mode === 'briefing') {
-      setUnseenBriefings(0)
-      // Server-side seen-marking happens inside BriefingView
-      setTimeout(refreshBadge, 2000)
-    }
-  }, [mode, refreshBadge])
-
-  // ── Boot: fetch session, restore mode + location, hydrate transcript ─
-  useEffect(() => {
-    const boot = async () => {
-      // Session / ACL
+    let alive = true
+    ;(async () => {
       try {
-        const res = await fetch('/api/voice/me', { cache: 'no-store' })
-        if (res.status === 401) {
-          window.location.href =
-            '/voice/login?callbackUrl=' + encodeURIComponent('/voice')
+        const meRes = await fetch('/api/voice/me', { cache: 'no-store' })
+        if (meRes.status === 401) {
+          window.location.href = '/voice/login?callbackUrl=/voice'
           return
         }
-        const json: MeResponse = await res.json()
-        setMe(json)
+        const meData = (await meRes.json()) as Me
+        if (alive) setMe(meData)
+      } catch {
+        // network — fall through
+      }
 
-        // Restore mode
-        const storedMode = localStorage.getItem(MODE_KEY) as Mode | null
-        if (storedMode === 'chat' || storedMode === 'voice') {
-          setMode(storedMode)
-        }
-
-        // Restore location if allowed
-        const stored = localStorage.getItem(LOCATION_KEY) as Location | null
-        if (stored && (json.allowed_locations || []).includes(stored)) {
-          setLocation(stored)
-        } else if (json.allowed_locations && json.allowed_locations.length > 0) {
-          // First allowed is the default
-          setLocation(json.allowed_locations[0])
-          localStorage.setItem(LOCATION_KEY, json.allowed_locations[0])
-        }
-
-        // Restore session id
-        const storedSid = localStorage.getItem(SESSION_KEY)
-        if (storedSid) {
-          sessionIdRef.current = storedSid
-          setSessionId(storedSid)
-
-          // Hydrate transcript (last 20 turns for this session)
-          try {
-            const sRes = await fetch(
-              `/api/voice/sessions?session_id=${encodeURIComponent(storedSid)}&limit=20`,
-              { cache: 'no-store' },
-            )
-            if (sRes.ok) {
-              const sData = await sRes.json()
-              const turns: VoiceLoopTurn[] = (sData.turns || []).map((t: any) => ({
-                role: t.role,
-                text: t.text,
-                at: new Date(t.at).getTime(),
-                outcome: t.outcome,
-              }))
-              if (turns.length > 0) setTranscript(turns)
-            }
-          } catch {}
+      // Peek today's brief — silent if 404
+      try {
+        const briefRes = await fetch('/api/deek/brief/today', { cache: 'no-store' })
+        if (briefRes.ok) {
+          const data = await briefRes.json()
+          if (alive && data && !data.answered) {
+            setBrief({
+              brief_id: data.brief_id,
+              questions_count: (data.questions || []).length,
+              answered: false,
+            })
+          }
         }
       } catch {
-        // Network — allow the user to try; proxies will 401 if session missing
+        // ignore
       }
+    })()
+    return () => {
+      alive = false
     }
-    boot()
   }, [])
 
-  const handleTurn = useCallback((turn: VoiceLoopTurn) => {
-    setTranscript(prev => [...prev, turn])
-  }, [])
+  // ── Auto-scroll to bottom on new messages ──────────────────────────
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [transcript.length, partial])
 
-  const handleSessionId = useCallback((id: string) => {
-    if (id !== sessionIdRef.current) {
-      sessionIdRef.current = id
-      setSessionId(id)
+  // ── Submit ─────────────────────────────────────────────────────────
+  const submit = useCallback(
+    async (text: string) => {
+      const trimmed = text.trim()
+      if (!trimmed || busy) return
+      setTranscript(t => [
+        ...t,
+        { role: 'user', text: trimmed, at: Date.now() },
+      ])
+      setInput('')
+      setBusy(true)
+      setPartial('')
+      setErrorMsg(null)
+
+      abortRef.current?.abort()
+      abortRef.current = new AbortController()
+
       try {
-        localStorage.setItem(SESSION_KEY, id)
-      } catch {}
+        const res = await fetch('/api/voice/chat/agent-stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            content: trimmed,
+            location: 'office',
+            session_id: sessionId,
+            project: 'deek',
+          }),
+          signal: abortRef.current.signal,
+        })
+
+        if (res.status === 401) {
+          window.location.href = '/voice/login?callbackUrl=/voice'
+          return
+        }
+        if (!res.ok || !res.body) {
+          setErrorMsg(`Couldn't reach ${BRAND}. HTTP ${res.status}.`)
+          setBusy(false)
+          return
+        }
+
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buf = ''
+        let full = ''
+
+        while (true) {
+          const { value, done } = await reader.read()
+          if (done) break
+          buf += decoder.decode(value, { stream: true })
+          const blocks = buf.split('\n\n')
+          buf = blocks.pop() || ''
+          for (const block of blocks) {
+            let eventType = 'message'
+            let dataStr = ''
+            for (const l of block.split('\n')) {
+              if (l.startsWith('event: ')) eventType = l.slice(7).trim()
+              else if (l.startsWith('data: ')) dataStr = l.slice(6).trim()
+            }
+            if (!dataStr) continue
+            let data: any
+            try {
+              data = JSON.parse(dataStr)
+            } catch {
+              continue
+            }
+            if (eventType === 'response_delta') {
+              full += data.text || ''
+              setPartial(full)
+            } else if (eventType === 'done') {
+              if (data.session_id) setSessionId(data.session_id)
+              setTranscript(t => [
+                ...t,
+                { role: 'assistant', text: full.trim(), at: Date.now() },
+              ])
+              setPartial('')
+            } else if (eventType === 'error') {
+              setErrorMsg(data.error || 'something went wrong')
+            }
+          }
+        }
+      } catch (err: any) {
+        if (err?.name !== 'AbortError') {
+          setErrorMsg(err?.message || String(err))
+        }
+      } finally {
+        setBusy(false)
+        textareaRef.current?.focus()
+      }
+    },
+    [busy, sessionId],
+  )
+
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault()
+    submit(input)
+  }
+
+  const handleKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      submit(input)
     }
-  }, [])
+  }
 
-  const pickMode = useCallback((m: Mode) => {
-    setMode(m)
+  const handleSignOut = async () => {
     try {
-      localStorage.setItem(MODE_KEY, m)
+      await fetch('/api/voice/logout', { method: 'POST' })
     } catch {}
-  }, [])
+    window.location.href = '/voice/login'
+  }
 
-  const pickLocation = useCallback((loc: Location) => {
-    setLocation(loc)
-    try {
-      localStorage.setItem(LOCATION_KEY, loc)
-    } catch {}
-  }, [])
-
-  // ── Render ─────────────────────────────────────────────────────
-
+  // ── Render ─────────────────────────────────────────────────────────
   if (!me) {
     return (
-      <div className="flex min-h-[100dvh] items-center justify-center bg-slate-950 text-slate-500">
-        Loading {BRAND}…
+      <div className="flex min-h-[100dvh] items-center justify-center bg-white text-gray-500">
+        Loading…
       </div>
     )
   }
 
-  const allowed = me.allowed_locations || []
-  if (allowed.length === 0) {
-    return (
-      <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-3 bg-slate-950 p-6 text-center text-slate-300">
-        <div className="text-lg font-semibold">Access restricted</div>
-        <div className="max-w-sm text-sm text-slate-500">
-          Your role ({me.user?.role || 'unknown'}) does not have access to any
-          {BRAND} voice location. Talk to Toby to adjust your permissions.
-        </div>
-      </div>
-    )
-  }
-
-  if (!location) {
-    return <LocationPicker allowed={allowed} onPick={pickLocation} />
-  }
+  const displayName = me.user?.name || BRAND
 
   return (
-    <div
-      className="flex h-[100dvh] flex-col bg-slate-950 text-slate-100"
-      style={{ height: '100dvh' }}
-    >
-      {/* ── Header ─────────────────────────────────────────── */}
-      <header className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-slate-800 bg-slate-900/70 px-3 py-2 backdrop-blur">
-        {/* Mode toggle */}
-        <div className="flex overflow-hidden rounded-full border border-slate-700 text-xs">
-          <button
-            onClick={() => pickMode('briefing')}
-            className={`relative px-3 py-1 ${mode === 'briefing' ? 'bg-slate-800 text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}
-          >
-            Brief
-            {unseenBriefings > 0 && mode !== 'briefing' && (
-              <span className="absolute -right-1 -top-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-emerald-500 px-1 text-[10px] font-semibold text-white">
-                {unseenBriefings}
-              </span>
-            )}
-          </button>
-          <button
-            onClick={() => pickMode('chat')}
-            className={`px-3 py-1 ${mode === 'chat' ? 'bg-slate-800 text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}
-          >
-            Chat
-          </button>
-          <button
-            onClick={() => pickMode('voice')}
-            className={`px-3 py-1 ${mode === 'voice' ? 'bg-slate-800 text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}
-          >
-            Voice
-          </button>
-        </div>
-
-        {/* Clock */}
-        <div className="text-xs text-slate-400 tabular-nums">
-          {now.toLocaleTimeString('en-GB', {
-            hour: '2-digit',
-            minute: '2-digit',
-          })}
-        </div>
-
-        {/* Location + menu */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => pickLocation(nextLocation(location, allowed))}
-            className="rounded-full border border-slate-700 px-3 py-1 text-xs uppercase tracking-wider text-slate-300 hover:border-slate-500"
-            title="Cycle location"
-          >
-            📍 {location}
-          </button>
-          <TopMenu
-            transcript={transcript}
-            sessionId={sessionId}
-            userEmail={me.user?.email}
-          />
-        </div>
+    <div className="flex h-[100dvh] flex-col bg-white text-gray-900">
+      {/* ── Top strip — brand on left, sign out on right ──────────── */}
+      <header className="flex flex-shrink-0 items-center justify-between border-b border-gray-200 px-4 py-2">
+        <div className="text-sm font-semibold tracking-tight">{BRAND}</div>
+        <button
+          onClick={handleSignOut}
+          className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+          title="Sign out"
+        >
+          <LogOut size={12} />
+          <span className="hidden sm:inline">Sign out</span>
+        </button>
       </header>
 
-      {/* ── Body ────────────────────────────────────────────── */}
-      <div className="flex min-h-0 flex-1 flex-col">
-        {mode === 'briefing' ? (
-          <BriefingView onTasksChanged={refreshBadge} />
-        ) : mode === 'chat' ? (
-          <ChatView
-            location={location}
-            transcript={transcript}
-            onTurn={handleTurn}
-            sessionId={sessionId}
-            onSessionId={handleSessionId}
-          />
-        ) : (
-          <VoiceView
-            location={location}
-            transcript={transcript}
-            onTurn={handleTurn}
-            sessionId={sessionId}
-            onSessionId={handleSessionId}
-          />
-        )}
-      </div>
-    </div>
-  )
-}
+      {/* ── Brief banner (when there's an unanswered brief) ─────────── */}
+      {brief && (
+        <Link
+          href="/voice/brief"
+          className="flex items-center justify-between gap-3 border-b border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-800 hover:bg-emerald-100"
+        >
+          <span className="flex items-center gap-2">
+            <FileText size={14} />
+            Today&apos;s brief — {brief.questions_count} question
+            {brief.questions_count === 1 ? '' : 's'} waiting
+          </span>
+          <span className="text-xs text-emerald-700">Open →</span>
+        </Link>
+      )}
 
-// ── Location picker (first visit) ────────────────────────────────────
+      {/* ── Thread ────────────────────────────────────────────────── */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-2xl space-y-4 px-4 py-6">
+          {transcript.length === 0 && !partial && (
+            <div className="py-16 text-center">
+              <div className="text-2xl font-semibold text-gray-900">
+                Hi {displayName}.
+              </div>
+              <div className="mt-2 text-sm text-gray-500">
+                Ask {BRAND} anything — type below.
+              </div>
+            </div>
+          )}
 
-function LocationPicker({
-  allowed,
-  onPick,
-}: {
-  allowed: Location[]
-  onPick: (loc: Location) => void
-}) {
-  return (
-    <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-6 bg-slate-950 p-6 text-slate-100">
-      <div className="text-center">
-        <div className="mb-2 text-2xl font-semibold">Where are you?</div>
-        <div className="text-sm text-slate-400">
-          {BRAND} prioritises information for this location.
+          {transcript.map((t, i) => (
+            <Bubble key={i} turn={t} />
+          ))}
+
+          {partial && (
+            <Bubble
+              turn={{ role: 'assistant', text: partial, at: Date.now() }}
+              streaming
+            />
+          )}
+
+          {errorMsg && (
+            <div className="rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-rose-200">
+              {errorMsg}
+            </div>
+          )}
+
+          <div ref={bottomRef} />
         </div>
       </div>
-      <div className="flex w-full max-w-sm flex-col gap-3">
-        {allowed.includes('workshop') && (
-          <LocButton onClick={() => onPick('workshop')} emoji="🔧">
-            Workshop
-            <span className="text-xs text-slate-400">
-              Machines · make list · stock
-            </span>
-          </LocButton>
-        )}
-        {allowed.includes('office') && (
-          <LocButton onClick={() => onPick('office')} emoji="💼">
-            Office
-            <span className="text-xs text-slate-400">
-              Email · CRM · follow-ups
-            </span>
-          </LocButton>
-        )}
-        {allowed.includes('home') && (
-          <LocButton onClick={() => onPick('home')} emoji="🏡">
-            Home
-            <span className="text-xs text-slate-400">
-              Cash · revenue · high-level
-            </span>
-          </LocButton>
-        )}
-      </div>
+
+      {/* ── Composer ──────────────────────────────────────────────── */}
+      <form
+        onSubmit={handleSubmit}
+        className="flex flex-shrink-0 items-end gap-2 border-t border-gray-200 px-3 py-3"
+      >
+        <textarea
+          ref={textareaRef}
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={handleKey}
+          rows={1}
+          autoFocus
+          disabled={busy}
+          placeholder={`Message ${BRAND}…`}
+          className="flex-1 resize-none rounded-2xl border border-gray-300 bg-white px-4 py-3 text-base text-gray-900 placeholder-gray-400 focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:opacity-50"
+          style={{ maxHeight: '10rem' }}
+        />
+        <button
+          type="submit"
+          disabled={busy || !input.trim()}
+          className="flex h-12 w-12 items-center justify-center rounded-full bg-gray-900 text-white transition hover:bg-gray-800 disabled:opacity-30"
+          title="Send"
+        >
+          <Send size={18} />
+        </button>
+      </form>
     </div>
   )
 }
 
-function LocButton({
-  onClick,
-  emoji,
-  children,
-}: {
-  onClick: () => void
-  emoji: string
-  children: React.ReactNode
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className="flex items-center gap-4 rounded-2xl border border-slate-700 bg-slate-900 px-5 py-4 text-left hover:border-emerald-600"
-    >
-      <span className="text-3xl">{emoji}</span>
-      <span className="flex flex-col gap-0.5 text-base font-medium">
-        {children}
-      </span>
-    </button>
-  )
-}
+// ── Speech bubble ─────────────────────────────────────────────────────
 
-function nextLocation(l: Location, allowed: Location[]): Location {
-  if (allowed.length === 0) return l
-  const idx = allowed.indexOf(l)
-  if (idx === -1) return allowed[0]
-  return allowed[(idx + 1) % allowed.length]
+function Bubble({
+  turn,
+  streaming = false,
+}: {
+  turn: Turn
+  streaming?: boolean
+}) {
+  const isUser = turn.role === 'user'
+  return (
+    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
+      <div
+        className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+          isUser
+            ? 'bg-gray-100 text-gray-900'
+            : 'bg-white text-gray-900'
+        } ${streaming ? 'animate-pulse' : ''}`}
+      >
+        {turn.text || (streaming ? '…' : '')}
+      </div>
+    </div>
+  )
 }
