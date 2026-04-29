@@ -131,15 +131,15 @@ export async function POST(req: NextRequest) {
                 send('response_delta', { text: evt.text })
               }
             } else if (t === 'tool_start') {
-              send('response_delta', {
-                text: `\n[🔧 ${evt.tool || 'tool'}…]\n`,
-              })
+              // Distinct event so the client can render a thinking pane
+              // (tool name + spinner) instead of inlining "[🔧 …]" text
+              // into the response body.
+              send('tool_start', { tool: evt.tool || 'tool' })
             } else if (t === 'tool_end') {
-              const secs = Math.max(
-                0.1,
-                Math.round((evt.duration_ms || 0) / 100) / 10,
-              )
-              send('response_delta', { text: `[done in ${secs}s]\n` })
+              send('tool_end', {
+                tool: evt.tool || 'tool',
+                duration_ms: evt.duration_ms || 0,
+              })
             } else if (t === 'complete') {
               finalModel = evt.model_used || ''
               finalLatencyMs = evt.latency_ms || 0
@@ -173,10 +173,13 @@ export async function POST(req: NextRequest) {
         finalOutcome = 'error'
         send('error', { error: err?.message || String(err) })
       } finally {
-        controller.close()
-
-        // Fire-and-forget log to deek_voice_sessions so the chat-history
-        // sidebar can find this turn. Don't block the close on success.
+        // Log to deek_voice_sessions BEFORE closing the response stream.
+        // Background async work after controller.close() gets dropped by
+        // the Next.js runtime when the connection ends — we lost Jo's
+        // entire chat history that way on 2026-04-29. Awaiting the log
+        // call before close adds <500ms to perceived response time
+        // (the user already saw the streamed answer; this is just the
+        // connection lingering). That's the right trade.
         try {
           await fetch(`${cfg.apiUrl}/api/deek/voice/sessions/log`, {
             method: 'POST',
@@ -200,6 +203,8 @@ export async function POST(req: NextRequest) {
         } catch {
           // logging failure must not bubble — chat already streamed.
         }
+
+        controller.close()
       }
     },
   })

@@ -21,13 +21,19 @@ import {
   type KeyboardEvent,
 } from 'react'
 import Link from 'next/link'
-import { Send, LogOut, FileText, Plus, Menu, X } from 'lucide-react'
+import { Send, LogOut, FileText, Plus, Menu, X, Loader2, Check } from 'lucide-react'
 import { BRAND } from '@/lib/brand'
 
 interface Turn {
   role: 'user' | 'assistant'
   text: string
   at: number
+}
+
+interface ToolEvent {
+  tool: string
+  startedAt: number
+  durationMs?: number
 }
 
 interface Me {
@@ -59,6 +65,7 @@ export default function VoicePage() {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [history, setHistory] = useState<SessionSummary[]>([])
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [tools, setTools] = useState<ToolEvent[]>([])
 
   const abortRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -183,6 +190,7 @@ export default function VoicePage() {
       setBusy(true)
       setPartial('')
       setErrorMsg(null)
+      setTools([])
 
       abortRef.current?.abort()
       abortRef.current = new AbortController()
@@ -239,6 +247,21 @@ export default function VoicePage() {
             if (eventType === 'response_delta') {
               full += data.text || ''
               setPartial(full)
+            } else if (eventType === 'tool_start') {
+              setTools(ts => [
+                ...ts,
+                { tool: String(data.tool || 'tool'), startedAt: Date.now() },
+              ])
+            } else if (eventType === 'tool_end') {
+              const t = String(data.tool || 'tool')
+              const dur = Number(data.duration_ms || 0)
+              setTools(ts =>
+                ts.map(x =>
+                  x.tool === t && x.durationMs === undefined
+                    ? { ...x, durationMs: dur }
+                    : x,
+                ),
+              )
             } else if (eventType === 'done') {
               if (data.session_id) {
                 newSid = data.session_id
@@ -249,6 +272,7 @@ export default function VoicePage() {
                 { role: 'assistant', text: full.trim(), at: Date.now() },
               ])
               setPartial('')
+              setTools([])
             } else if (eventType === 'error') {
               setErrorMsg(data.error || 'something went wrong')
             }
@@ -425,11 +449,28 @@ export default function VoicePage() {
               <Bubble key={i} turn={t} />
             ))}
 
+            {/* Thinking pane — shows tool activity while busy and no
+                response text has started streaming yet. Once Rex starts
+                writing the answer, the pane stays visible above the
+                streaming bubble so you can see what it consulted. */}
+            {busy && tools.length > 0 && (
+              <ThinkingPane tools={tools} />
+            )}
+
             {partial && (
               <Bubble
                 turn={{ role: 'assistant', text: partial, at: Date.now() }}
                 streaming
               />
+            )}
+
+            {/* Thinking-only state — busy, no tools yet, no partial yet.
+                Shows a subtle "Thinking…" so the user sees progress. */}
+            {busy && tools.length === 0 && !partial && (
+              <div className="flex items-center gap-2 px-4 py-2 text-sm text-gray-500">
+                <Loader2 size={14} className="animate-spin" />
+                <span>{BRAND} is thinking…</span>
+              </div>
             )}
 
             {errorMsg && (
@@ -494,6 +535,56 @@ function Bubble({
       >
         {turn.text || (streaming ? '…' : '')}
       </div>
+    </div>
+  )
+}
+
+// ── Thinking pane ─────────────────────────────────────────────────────
+
+const TOOL_LABEL: Record<string, string> = {
+  search_emails: 'Searching your email…',
+  search_crm: 'Looking in the CRM…',
+  search_wiki: 'Searching memory + wiki…',
+  query_amazon_intel: 'Querying Amazon intel…',
+  retrieve_codebase_context: 'Pulling code context…',
+  retrieve_chat_history: 'Recalling earlier chats…',
+  search_similar_quotes: 'Looking for similar quotes…',
+  get_quote_context: 'Loading quote context…',
+  get_module_snapshot: 'Reading module snapshot…',
+  retrieve_similar_decisions: 'Recalling similar decisions…',
+  analyze_enquiry: 'Analysing the enquiry…',
+}
+
+function ThinkingPane({ tools }: { tools: ToolEvent[] }) {
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm">
+      <ul className="space-y-1.5">
+        {tools.map((t, i) => {
+          const done = t.durationMs !== undefined
+          const label = TOOL_LABEL[t.tool] || t.tool
+          const secs =
+            done && (t.durationMs || 0) > 0
+              ? Math.max(0.1, Math.round((t.durationMs || 0) / 100) / 10)
+              : null
+          return (
+            <li key={`${t.tool}-${i}`} className="flex items-center gap-2">
+              {done ? (
+                <Check size={13} className="text-emerald-600" />
+              ) : (
+                <Loader2 size={13} className="animate-spin text-gray-500" />
+              )}
+              <span className={done ? 'text-gray-700' : 'text-gray-900'}>
+                {label}
+              </span>
+              {secs !== null && (
+                <span className="ml-auto text-xs text-gray-400">
+                  {secs}s
+                </span>
+              )}
+            </li>
+          )
+        })}
+      </ul>
     </div>
   )
 }
