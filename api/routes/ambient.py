@@ -1599,6 +1599,49 @@ async def voice_sessions_list(
     return VoiceSessionsListResponse(sessions=sessions)
 
 
+# ── Voice session log (for chat-history sidebar) ───────────────────────────
+
+
+class VoiceSessionLogRequest(BaseModel):
+    session_id: str
+    user: Optional[str] = None
+    location: Optional[str] = None
+    question: str
+    response: Optional[str] = None
+    model_used: Optional[str] = None
+    cost_usd: float = 0.0
+    latency_ms: int = 0
+    outcome: str = 'success'
+
+
+@router.post("/voice/sessions/log")
+async def voice_sessions_log(
+    body: VoiceSessionLogRequest,
+    _: bool = Depends(verify_api_key),
+) -> dict:
+    """Append a (user, session_id, question, response) row to
+    deek_voice_sessions.
+
+    Called by the Next.js /api/voice/chat/agent-stream proxy when a
+    streaming response completes. The agent backend at /chat/stream
+    doesn't write to this table on its own — it's an older code path
+    that pre-dates the voice-mode telemetry table — so the proxy logs
+    on its behalf so chat history is queryable across devices.
+    """
+    _log_voice_telemetry(
+        session_id=body.session_id,
+        user_label=body.user,
+        location=body.location,
+        question=body.question,
+        response=body.response,
+        model_used=body.model_used,
+        cost_usd=body.cost_usd,
+        latency_ms=body.latency_ms,
+        outcome=body.outcome,
+    )
+    return {'ok': True}
+
+
 # ── Voice metrics (telemetry dashboard) ────────────────────────────────────
 
 

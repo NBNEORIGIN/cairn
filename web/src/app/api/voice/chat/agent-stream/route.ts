@@ -94,6 +94,17 @@ export async function POST(req: NextRequest) {
       let buf = ''
       let completed = false
 
+      // Accumulate the assistant's response so we can log it to
+      // deek_voice_sessions after the stream closes — that's what the
+      // chat-history sidebar (left rail on /voice) reads from. The
+      // /chat/stream agent endpoint doesn't write to that table on its
+      // own, so the proxy logs on its behalf.
+      let assembledResponse = ''
+      let finalModel = ''
+      let finalLatencyMs = 0
+      let finalCostUsd = 0
+      let finalOutcome = 'success'
+
       try {
         while (true) {
           const { value, done } = await reader.read()
@@ -115,8 +126,10 @@ export async function POST(req: NextRequest) {
             }
             const t = evt?.type
             if (t === 'response_delta') {
-              // Agent already streams tokens in response_delta — pass through.
-              if (evt.text) send('response_delta', { text: evt.text })
+              if (evt.text) {
+                assembledResponse += evt.text
+                send('response_delta', { text: evt.text })
+              }
             } else if (t === 'tool_start') {
               send('response_delta', {
                 text: `\n[🔧 ${evt.tool || 'tool'}…]\n`,
@@ -128,35 +141,65 @@ export async function POST(req: NextRequest) {
               )
               send('response_delta', { text: `[done in ${secs}s]\n` })
             } else if (t === 'complete') {
-              // Agent already emitted the body via response_delta; just
-              // close the stream cleanly with session metadata.
+              finalModel = evt.model_used || ''
+              finalLatencyMs = evt.latency_ms || 0
+              finalCostUsd = evt.cost_usd || 0
               send('done', {
                 session_id: sessionId,
-                model_used: evt.model_used || '',
-                latency_ms: evt.latency_ms || 0,
-                outcome: 'success',
-                cost_usd: evt.cost_usd || 0,
+                model_used: finalModel,
+                latency_ms: finalLatencyMs,
+                outcome: finalOutcome,
+                cost_usd: finalCostUsd,
               })
               completed = true
             } else if (t === 'error') {
+              finalOutcome = 'error'
               send('error', { error: evt.message || 'agent error' })
             }
             // routing / tokens / status / tool_queued / done — ignore.
           }
         }
         if (!completed) {
+          finalOutcome = finalOutcome === 'success' ? 'stream_ended' : finalOutcome
           send('done', {
             session_id: sessionId,
-            model_used: '',
-            latency_ms: 0,
-            outcome: 'stream_ended',
-            cost_usd: 0,
+            model_used: finalModel,
+            latency_ms: finalLatencyMs,
+            outcome: finalOutcome,
+            cost_usd: finalCostUsd,
           })
         }
       } catch (err: any) {
+        finalOutcome = 'error'
         send('error', { error: err?.message || String(err) })
       } finally {
         controller.close()
+
+        // Fire-and-forget log to deek_voice_sessions so the chat-history
+        // sidebar can find this turn. Don't block the close on success.
+        try {
+          await fetch(`${cfg.apiUrl}/api/deek/voice/sessions/log`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-API-Key': cfg.apiKey,
+            },
+            body: JSON.stringify({
+              session_id: sessionId,
+              user: session.email,
+              location: String(body?.location || 'office'),
+              question: message,
+              response: assembledResponse,
+              model_used: finalModel,
+              latency_ms: finalLatencyMs,
+              cost_usd: finalCostUsd,
+              outcome: finalOutcome,
+            }),
+            signal: AbortSignal.timeout(4_000),
+          })
+        } catch {
+          // logging failure must not bubble — chat already streamed.
+        }
       }
     },
   })
