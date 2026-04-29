@@ -94,31 +94,31 @@ export default function BriefPage() {
   const displayName = me?.user?.name || 'Rex'
 
   return (
-    <div className="min-h-[100dvh] bg-slate-950 text-slate-100">
+    <div className="min-h-[100dvh] bg-white text-gray-900">
       <ConfidentialityBanner displayName={displayName} />
 
       <main className="mx-auto max-w-2xl space-y-6 px-4 py-6">
         {/* Today's brief */}
         <section className="space-y-3">
-          <div className="flex items-center justify-between text-xs uppercase tracking-wider text-slate-500">
+          <div className="flex items-center justify-between text-xs uppercase tracking-wider text-gray-500">
             <span>Today</span>
             <button
               onClick={loadBrief}
               disabled={loading}
-              className="rounded-full border border-slate-700 px-3 py-0.5 text-[11px] text-slate-400 hover:border-slate-500 disabled:opacity-50"
+              className="rounded-full border border-gray-300 px-3 py-0.5 text-[11px] text-gray-600 hover:border-gray-400 hover:text-gray-900 disabled:opacity-50"
             >
               {loading ? 'Loading…' : 'Refresh'}
             </button>
           </div>
 
           {error && (
-            <div className="rounded-md bg-rose-950/60 px-3 py-2 text-sm text-rose-200">
+            <div className="rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-rose-200">
               {error}
             </div>
           )}
 
           {!loading && noBrief && (
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-4 text-sm text-slate-400">
+            <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
               No brief yet today. The morning send will land it in your inbox
               and surface it here.
             </div>

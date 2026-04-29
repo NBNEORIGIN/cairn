@@ -65,37 +65,37 @@ export function MemorySearch() {
 
   return (
     <section className="space-y-3">
-      <div className="text-xs uppercase tracking-wider text-slate-500">
+      <div className="text-xs uppercase tracking-wider text-gray-500">
         Memory search
       </div>
       <div className="relative">
         <Search
           size={14}
-          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"
+          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
         />
         <input
           type="text"
           value={q}
           onChange={e => setQ(e.target.value)}
           placeholder="Search your memory…"
-          className="w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 pl-9 text-sm text-slate-100 placeholder:text-slate-600 focus:border-emerald-700 focus:outline-none"
+          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 pl-9 text-sm text-gray-900 placeholder:text-gray-400 focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-400"
         />
         {loading && (
           <Loader2
             size={14}
-            className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-slate-500"
+            className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-gray-400"
           />
         )}
       </div>
 
       {error && (
-        <div className="rounded-md bg-rose-950/60 px-3 py-2 text-xs text-rose-200">
+        <div className="rounded-md bg-rose-50 px-3 py-2 text-xs text-rose-700 ring-1 ring-rose-200">
           {error}
         </div>
       )}
 
       {!loading && q.trim() && results.length === 0 && !error && (
-        <div className="text-xs text-slate-600">No matches.</div>
+        <div className="text-xs text-gray-400">No matches.</div>
       )}
 
       {results.length > 0 && (
@@ -106,18 +106,18 @@ export function MemorySearch() {
             return (
               <li
                 key={`${r.id ?? title}-${i}`}
-                className="rounded-md bg-slate-900/60 px-3 py-2"
+                className="rounded-md bg-gray-50 px-3 py-2 ring-1 ring-gray-200"
               >
                 <div className="mb-1 flex items-center justify-between text-xs">
-                  <span className="font-mono text-slate-400">{title}</span>
+                  <span className="font-mono text-gray-600">{title}</span>
                   {typeof r.score === 'number' && (
-                    <span className="text-slate-600">
+                    <span className="text-gray-400">
                       {r.score.toFixed(2)}
                     </span>
                   )}
                 </div>
                 {body && (
-                  <div className="text-xs leading-relaxed text-slate-300">
+                  <div className="text-xs leading-relaxed text-gray-700">
                     {body.length > 280 ? body.slice(0, 277) + '…' : body}
                   </div>
                 )}

@@ -27,11 +27,11 @@ export default function LoginPage({
   const brand = process.env.NEXT_PUBLIC_DEEK_BRAND_NAME || 'Deek'
 
   return (
-    <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-slate-950 p-6 text-slate-100">
+    <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-white p-6 text-gray-900">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
           <div className="text-3xl font-semibold">{brand}</div>
-          <div className="mt-1 text-sm text-slate-400">Sign in to continue</div>
+          <div className="mt-1 text-sm text-gray-500">Sign in to continue</div>
         </div>
 
         <form
@@ -44,7 +44,7 @@ export default function LoginPage({
           <div>
             <label
               htmlFor="email"
-              className="mb-1 block text-xs uppercase tracking-wider text-slate-500"
+              className="mb-1 block text-xs uppercase tracking-wider text-gray-500"
             >
               Email
             </label>
@@ -54,14 +54,14 @@ export default function LoginPage({
               type="email"
               autoComplete="email"
               required
-              className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-base text-slate-100 placeholder-slate-500 focus:border-emerald-500 focus:outline-none"
+              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 placeholder-gray-400 focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-400"
             />
           </div>
 
           <div>
             <label
               htmlFor="password"
-              className="mb-1 block text-xs uppercase tracking-wider text-slate-500"
+              className="mb-1 block text-xs uppercase tracking-wider text-gray-500"
             >
               Password
             </label>
@@ -71,25 +71,25 @@ export default function LoginPage({
               type="password"
               autoComplete="current-password"
               required
-              className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-base text-slate-100 placeholder-slate-500 focus:border-emerald-500 focus:outline-none"
+              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 placeholder-gray-400 focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-400"
             />
           </div>
 
           {error && (
-            <div className="rounded-lg bg-rose-950/60 px-3 py-2 text-sm text-rose-200">
+            <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-rose-200">
               {error}
             </div>
           )}
 
           <button
             type="submit"
-            className="w-full rounded-lg bg-emerald-600 py-3 text-base font-semibold text-white transition hover:bg-emerald-500 disabled:opacity-50"
+            className="w-full rounded-lg bg-gray-900 py-3 text-base font-semibold text-white transition hover:bg-gray-800 disabled:opacity-50"
           >
             Sign in
           </button>
         </form>
 
-        <div className="mt-8 text-center text-xs text-slate-500">
+        <div className="mt-8 text-center text-xs text-gray-500">
           Access is limited. Speak to Toby if you need an account.
         </div>
       </div>

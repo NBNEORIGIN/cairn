@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * /voice/talk — minimal ChatGPT-like surface.
+ * /voice/talk — minimal ChatGPT-like surface (light theme).
  *
  * Single column. Scrollable thread. Text input at the bottom. Send.
  * Nothing else on screen. The point is that someone who has used
@@ -123,9 +123,6 @@ export default function TalkPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             content: trimmed,
-            // location is required by the backend but irrelevant for
-            // a clean text chat — pin to 'office' so the agent has
-            // sensible defaults without surfacing the toggle.
             location: 'office',
             session_id: sessionId,
             project: 'deek',
@@ -217,7 +214,7 @@ export default function TalkPage() {
   // ── Render ─────────────────────────────────────────────────────────
   if (!me) {
     return (
-      <div className="flex min-h-[100dvh] items-center justify-center bg-slate-950 text-slate-500">
+      <div className="flex min-h-[100dvh] items-center justify-center bg-white text-gray-500">
         Loading…
       </div>
     )
@@ -226,13 +223,13 @@ export default function TalkPage() {
   const displayName = me.user?.name || BRAND
 
   return (
-    <div className="flex h-[100dvh] flex-col bg-slate-950 text-slate-100">
-      {/* ── Top strip — brand on left, menu on right ─────────────────── */}
-      <header className="flex flex-shrink-0 items-center justify-between border-b border-slate-800 px-4 py-2">
+    <div className="flex h-[100dvh] flex-col bg-white text-gray-900">
+      {/* ── Top strip — brand on left, sign out on right ──────────── */}
+      <header className="flex flex-shrink-0 items-center justify-between border-b border-gray-200 px-4 py-2">
         <div className="text-sm font-semibold tracking-tight">{BRAND}</div>
         <button
           onClick={handleSignOut}
-          className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-400 hover:border-slate-500 hover:text-slate-200"
+          className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-gray-500 hover:bg-gray-100 hover:text-gray-900"
           title="Sign out"
         >
           <LogOut size={12} />
@@ -244,14 +241,14 @@ export default function TalkPage() {
       {brief && (
         <Link
           href="/voice/brief"
-          className="flex items-center justify-between gap-3 border-b border-emerald-900/40 bg-emerald-950/40 px-4 py-2 text-sm text-emerald-200 hover:bg-emerald-950/60"
+          className="flex items-center justify-between gap-3 border-b border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-800 hover:bg-emerald-100"
         >
           <span className="flex items-center gap-2">
             <FileText size={14} />
             Today&apos;s brief — {brief.questions_count} question
             {brief.questions_count === 1 ? '' : 's'} waiting
           </span>
-          <span className="text-xs text-emerald-400">Open →</span>
+          <span className="text-xs text-emerald-700">Open →</span>
         </Link>
       )}
 
@@ -259,11 +256,11 @@ export default function TalkPage() {
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-2xl space-y-4 px-4 py-6">
           {transcript.length === 0 && !partial && (
-            <div className="py-16 text-center text-slate-500">
-              <div className="text-2xl font-semibold text-slate-300">
+            <div className="py-16 text-center">
+              <div className="text-2xl font-semibold text-gray-900">
                 Hi {displayName}.
               </div>
-              <div className="mt-2 text-sm">
+              <div className="mt-2 text-sm text-gray-500">
                 Ask {BRAND} anything — type below.
               </div>
             </div>
@@ -281,7 +278,7 @@ export default function TalkPage() {
           )}
 
           {errorMsg && (
-            <div className="rounded-md bg-rose-950/60 px-3 py-2 text-sm text-rose-200">
+            <div className="rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-rose-200">
               {errorMsg}
             </div>
           )}
@@ -293,7 +290,7 @@ export default function TalkPage() {
       {/* ── Composer ──────────────────────────────────────────────── */}
       <form
         onSubmit={handleSubmit}
-        className="flex flex-shrink-0 items-end gap-2 border-t border-slate-800 px-3 py-3"
+        className="flex flex-shrink-0 items-end gap-2 border-t border-gray-200 px-3 py-3"
       >
         <textarea
           ref={textareaRef}
@@ -304,13 +301,13 @@ export default function TalkPage() {
           autoFocus
           disabled={busy}
           placeholder={`Message ${BRAND}…`}
-          className="flex-1 resize-none rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-base placeholder-slate-500 focus:border-emerald-600 focus:outline-none disabled:opacity-50"
+          className="flex-1 resize-none rounded-2xl border border-gray-300 bg-white px-4 py-3 text-base text-gray-900 placeholder-gray-400 focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:opacity-50"
           style={{ maxHeight: '10rem' }}
         />
         <button
           type="submit"
           disabled={busy || !input.trim()}
-          className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-600 text-white transition hover:bg-emerald-500 disabled:opacity-40"
+          className="flex h-12 w-12 items-center justify-center rounded-full bg-gray-900 text-white transition hover:bg-gray-800 disabled:opacity-30"
           title="Send"
         >
           <Send size={18} />
@@ -335,8 +332,8 @@ function Bubble({
       <div
         className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-relaxed ${
           isUser
-            ? 'bg-emerald-700/80 text-white'
-            : 'bg-slate-900/80 text-slate-100'
+            ? 'bg-gray-100 text-gray-900'
+            : 'bg-white text-gray-900'
         } ${streaming ? 'animate-pulse' : ''}`}
       >
         {turn.text || (streaming ? '…' : '')}

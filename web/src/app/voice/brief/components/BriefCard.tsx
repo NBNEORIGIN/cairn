@@ -103,31 +103,31 @@ export function BriefCard({ brief, onSubmitted }: Props) {
 
   if (brief.answered) {
     return (
-      <div className="rounded-2xl border border-emerald-900/60 bg-emerald-950/20 p-4">
-        <div className="mb-3 flex items-center gap-2 text-xs text-emerald-300">
+      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+        <div className="mb-3 flex items-center gap-2 text-xs text-emerald-800">
           <Check size={14} />
           <span className="font-medium">Brief sent — replied</span>
-          {brief.date && <span className="text-emerald-700">· {brief.date}</span>}
+          {brief.date && <span className="text-emerald-600">· {brief.date}</span>}
         </div>
         <div className="space-y-3">
           {brief.questions.map(q => {
             const a = brief.answers.find(x => x.question_id === q.id)
             return (
-              <div key={q.id} className="rounded-lg bg-slate-900/40 px-3 py-2">
-                <div className="mb-1 text-xs uppercase tracking-wider text-slate-500">
+              <div key={q.id} className="rounded-lg bg-white px-3 py-2 ring-1 ring-gray-200">
+                <div className="mb-1 text-xs uppercase tracking-wider text-gray-500">
                   {CATEGORY_LABEL[q.category] || q.category}
                 </div>
-                <div className="mb-2 text-sm text-slate-300">{q.text}</div>
+                <div className="mb-2 text-sm text-gray-700">{q.text}</div>
                 {a && a.correction_text ? (
-                  <div className="rounded-md bg-slate-900 px-3 py-2 text-sm text-slate-100">
+                  <div className="rounded-md bg-gray-50 px-3 py-2 text-sm text-gray-900 ring-1 ring-gray-200">
                     {a.correction_text}
                   </div>
                 ) : a && a.verdict ? (
-                  <div className="text-xs text-emerald-400">
+                  <div className="text-xs font-medium text-emerald-700">
                     {a.verdict.toUpperCase()}
                   </div>
                 ) : (
-                  <div className="text-xs text-slate-600">(no answer)</div>
+                  <div className="text-xs text-gray-400">(no answer)</div>
                 )}
               </div>
             )
@@ -139,11 +139,11 @@ export function BriefCard({ brief, onSubmitted }: Props) {
 
   if (sentSummary) {
     return (
-      <div className="rounded-2xl border border-emerald-900/60 bg-emerald-950/20 p-4 text-sm text-emerald-200">
+      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
         <div className="flex items-center gap-2">
           <Check size={14} /> {sentSummary}
         </div>
-        <div className="mt-2 text-xs text-emerald-700">
+        <div className="mt-2 text-xs text-emerald-600">
           Refreshing in a moment will show the captured answers.
         </div>
       </div>
@@ -151,8 +151,8 @@ export function BriefCard({ brief, onSubmitted }: Props) {
   }
 
   return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-      <div className="mb-3 flex items-center justify-between text-xs text-slate-500">
+    <div className="rounded-2xl border border-gray-200 bg-white p-4">
+      <div className="mb-3 flex items-center justify-between text-xs text-gray-500">
         <span>{brief.subject || `Brief — ${brief.date || ''}`}</span>
         <span>
           {brief.questions.length} question
@@ -162,16 +162,16 @@ export function BriefCard({ brief, onSubmitted }: Props) {
 
       <div className="space-y-4">
         {brief.questions.map(q => (
-          <div key={q.id} className="rounded-lg bg-slate-900 px-3 py-3">
+          <div key={q.id} className="rounded-lg bg-gray-50 px-3 py-3 ring-1 ring-gray-200">
             <div className="mb-1 flex items-center justify-between text-xs">
-              <span className="uppercase tracking-wider text-slate-500">
+              <span className="uppercase tracking-wider text-gray-500">
                 {CATEGORY_LABEL[q.category] || q.category}
               </span>
               {q.reply_format && (
-                <span className="text-slate-600">{q.reply_format}</span>
+                <span className="text-gray-400">{q.reply_format}</span>
               )}
             </div>
-            <div className="mb-2 whitespace-pre-wrap text-sm text-slate-200">
+            <div className="mb-2 whitespace-pre-wrap text-sm text-gray-800">
               {q.text}
             </div>
             <textarea
@@ -179,7 +179,7 @@ export function BriefCard({ brief, onSubmitted }: Props) {
               onChange={e => update(q.id, e.target.value)}
               placeholder="Plain English — I'll figure out the rest."
               rows={2}
-              className="w-full resize-y rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:border-emerald-700 focus:outline-none"
+              className="w-full resize-y rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-400"
               disabled={submitting}
             />
           </div>
@@ -187,7 +187,7 @@ export function BriefCard({ brief, onSubmitted }: Props) {
       </div>
 
       {error && (
-        <div className="mt-3 flex items-center gap-2 rounded-md bg-rose-950/60 px-3 py-2 text-sm text-rose-200">
+        <div className="mt-3 flex items-center gap-2 rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-rose-200">
           <AlertCircle size={14} />
           {error}
         </div>
@@ -197,7 +197,7 @@ export function BriefCard({ brief, onSubmitted }: Props) {
         <button
           onClick={submit}
           disabled={submitting}
-          className="flex items-center gap-2 rounded-md bg-emerald-700 px-4 py-2 text-sm text-white hover:bg-emerald-600 disabled:opacity-50"
+          className="flex items-center gap-2 rounded-md bg-gray-900 px-4 py-2 text-sm text-white hover:bg-gray-800 disabled:opacity-50"
         >
           <Send size={14} />
           {submitting ? 'Sending…' : 'Send replies'}

@@ -25,13 +25,13 @@ export function ConfidentialityBanner({ displayName = 'Rex' }: Props) {
   }, [])
 
   return (
-    <div className="sticky top-0 z-40 flex items-center justify-center gap-2 border-b border-emerald-900/40 bg-emerald-950/60 px-3 py-1.5 text-xs text-emerald-200 backdrop-blur">
+    <div className="sticky top-0 z-40 flex items-center justify-center gap-2 border-b border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs text-emerald-800 backdrop-blur">
       <Lock size={12} />
       <span className="font-medium">{displayName}</span>
       {host && (
         <>
-          <span className="text-emerald-700">—</span>
-          <span className="font-mono text-emerald-300">{host}</span>
+          <span className="text-emerald-400">—</span>
+          <span className="font-mono text-emerald-700">{host}</span>
         </>
       )}
     </div>

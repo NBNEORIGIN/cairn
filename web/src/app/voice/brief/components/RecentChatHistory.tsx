@@ -50,14 +50,14 @@ export function RecentChatHistory() {
   return (
     <section className="space-y-3">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-slate-500">
+        <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-gray-500">
           <MessageSquare size={12} />
           Recent chat
         </div>
         <button
           onClick={load}
           disabled={loading}
-          className="flex items-center gap-1 rounded-full border border-slate-700 px-2 py-0.5 text-[11px] text-slate-400 hover:border-slate-500 disabled:opacity-50"
+          className="flex items-center gap-1 rounded-full border border-gray-300 px-2 py-0.5 text-[11px] text-gray-600 hover:border-gray-400 hover:text-gray-900 disabled:opacity-50"
         >
           <RefreshCw size={11} className={loading ? 'animate-spin' : ''} />
           Refresh
@@ -65,13 +65,13 @@ export function RecentChatHistory() {
       </div>
 
       {error && (
-        <div className="rounded-md bg-rose-950/60 px-3 py-2 text-xs text-rose-200">
+        <div className="rounded-md bg-rose-50 px-3 py-2 text-xs text-rose-700 ring-1 ring-rose-200">
           {error}
         </div>
       )}
 
       {!loading && turns.length === 0 && !error && (
-        <div className="rounded-md bg-slate-900/40 px-3 py-2 text-xs text-slate-600">
+        <div className="rounded-md bg-gray-50 px-3 py-2 text-xs text-gray-500 ring-1 ring-gray-200">
           No recent conversation.
         </div>
       )}
@@ -81,13 +81,13 @@ export function RecentChatHistory() {
           {turns.map((t, i) => (
             <li
               key={`${t.at}-${i}`}
-              className={`rounded-md px-3 py-2 text-xs leading-relaxed ${
+              className={`rounded-md px-3 py-2 text-xs leading-relaxed ring-1 ring-gray-200 ${
                 t.role === 'user'
-                  ? 'bg-slate-900/80 text-slate-100'
-                  : 'bg-slate-900/40 text-slate-300'
+                  ? 'bg-gray-100 text-gray-900'
+                  : 'bg-gray-50 text-gray-700'
               }`}
             >
-              <div className="mb-0.5 flex items-center justify-between text-[10px] uppercase tracking-wider text-slate-500">
+              <div className="mb-0.5 flex items-center justify-between text-[10px] uppercase tracking-wider text-gray-500">
                 <span>{t.role}</span>
                 <span>
                   {(() => {
