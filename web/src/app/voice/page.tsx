@@ -25,7 +25,7 @@ import {
   Send, LogOut, FileText, Plus, Menu, X, Loader2, Check,
   Paperclip, FileCheck, AlertCircle, MoreHorizontal, Folder,
   Archive, Pencil, ChevronDown, ChevronRight, FolderPlus,
-  Key, Users,
+  Key, Users, Wrench,
 } from 'lucide-react'
 import { BRAND } from '@/lib/brand'
 import { ChangePasswordModal } from './components/ChangePasswordModal'
@@ -837,6 +837,16 @@ export default function VoicePage() {
                     >
                       <Users size={11} />
                       Manage users
+                    </Link>
+                  )}
+                  {me.user?.role === 'ADMIN' && (
+                    <Link
+                      href="/admin/manuals"
+                      onClick={() => setUserMenuOpen(false)}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-gray-700 hover:bg-gray-50"
+                    >
+                      <Wrench size={11} />
+                      Manage manuals
                     </Link>
                   )}
                   <div className="my-1 border-t border-gray-100" />
