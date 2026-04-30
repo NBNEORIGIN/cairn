@@ -156,6 +156,9 @@ class DeekAgent:
             "projects, quotes, emails, materials, lessons. Use this for ANY question "
             "about a client, project, or business enquiry.\n"
             "- query_amazon_intel(sql) — SQL against Amazon data.\n"
+            "- get_sku_costs(m_numbers) — Manufacture cost / COGS / margin data per "
+            "SKU. The ONLY way you can see cost data — wiki and source grep will "
+            "NOT have COGS.\n"
             "- get_module_snapshot(module) — live state from Manufacture, CRM, etc.\n"
             "- search_wiki(query) — search NBNE knowledge base.\n\n"
             "Rules:\n"
@@ -177,7 +180,28 @@ class DeekAgent:
             "search_code greps source files; search_crm queries LIVE business data "
             "(clients, projects, emails, quotes, materials, lessons learned).\n"
             "7. If a module is UNREACHABLE per the Modules section above, do not "
-            "claim live data from it — say it's unreachable and stop.\n\n"
+            "claim live data from it — say it's unreachable and stop.\n"
+            "8. What you can and cannot see — important for profit / margin / "
+            "cost questions:\n"
+            "   - REVENUE: query_amazon_intel() (Amazon orders), search_crm() "
+            "(B2B / CRM jobs), get_module_snapshot('phloe') (bookings).\n"
+            "   - COSTS: get_sku_costs(m_numbers=[...]) is the ONLY tool that "
+            "returns COGS / material / labour / overhead. The wiki does NOT "
+            "have cost numbers. Source code does NOT have cost numbers. If you "
+            "find yourself wiki-searching for cost data, STOP and call "
+            "get_sku_costs() instead.\n"
+            "   - AD SPEND per SKU: not currently a tool — point the user to "
+            "the CLI `python scripts/ad_spend_per_sku.py --start ... --end ...` "
+            "which writes a CSV from ami_advertising_data.\n"
+            "   - LABOUR / OVERHEAD beyond what get_sku_costs returns: not "
+            "currently exposed. Tell the user you can't see it and suggest "
+            "the Ledger module if precision matters.\n"
+            "   For 'estimate profit/margin' questions: get the relevant "
+            "M-numbers from the user (or from a CRM/Amazon query first), call "
+            "get_sku_costs() once with the full list, then combine with "
+            "revenue from the appropriate tool. If the user asks a profit "
+            "question without M-numbers, ask which products they mean — "
+            "don't fish.\n\n"
         )
         return identity_prefix + tool_rules
 
@@ -2461,6 +2485,7 @@ class DeekAgent:
         )
         from .tools.wiki_tools import write_wiki_tool
         from .tools.enquiry_analyzer import analyze_enquiry_tool
+        from .tools.manufacture_tools import get_sku_costs_tool
         for tool in [
             # File
             read_file_tool, edit_file_tool, create_file_tool,
@@ -2499,5 +2524,9 @@ class DeekAgent:
             write_wiki_tool,
             # Structured enquiry analyzer — composite retrieval + Sonnet synthesis
             analyze_enquiry_tool,
+            # Manufacture cost data — bridges the COGS / margin gap so
+            # profit questions don't burn the tool-round budget fishing
+            # in the wiki (regression seen 2026-04-30).
+            get_sku_costs_tool,
         ]:
             self.tools.register(tool)

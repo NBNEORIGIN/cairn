@@ -27,16 +27,18 @@ DEFAULT_PERMISSIONS = {
         'retrieve_similar_decisions', 'search_crm', 'analyze_enquiry',
         'write_crm_memory', 'mark_crm_actioned', 'set_crm_project_folder',
         'get_quote_context', 'search_similar_quotes', 'review_quote_draft',
-        'write_wiki',
+        'write_wiki', 'get_sku_costs',
     ],
     'readonly': [
         'read_file', 'search_code', 'query_amazon_intel',
         'get_module_snapshot', 'search_emails', 'search_wiki',
+        'get_sku_costs',
     ],
     'ops': [
         'read_file', 'search_code', 'run_command',
         'edit_file', 'create_file',
         'get_module_snapshot', 'search_emails', 'search_wiki',
+        'get_sku_costs',
     ],
     'creative': [
         'read_file', 'search_code', 'edit_file', 'create_file',
@@ -53,6 +55,7 @@ DEFAULT_PERMISSIONS = {
         'write_crm_memory', 'mark_crm_actioned', 'set_crm_project_folder',
         'get_quote_context', 'search_similar_quotes', 'review_quote_draft',
         'write_wiki',
+        'get_sku_costs',
     ],
 }
 
@@ -608,6 +611,26 @@ TOOL_SCHEMAS: dict[str, dict] = {
             },
         },
         'required': ['prompt'],
+    },
+    'get_sku_costs': {
+        'type': 'object',
+        'properties': {
+            'm_numbers': {
+                # Accept either format — the agent loop sometimes passes
+                # the field as a list and sometimes as a CSV string
+                # depending on the model. The tool's _normalise_m_numbers
+                # handles both, so don't lock the schema to one shape.
+                'type': ['array', 'string'],
+                'items': {'type': 'string'},
+                'description': (
+                    'Optional list (or comma-separated string) of NBNE '
+                    'M-numbers to fetch costs for, e.g. ["M3089","M3090"] '
+                    'or "M3089,M3090". Omit to fetch the full catalogue '
+                    '(capped server-side).'
+                ),
+            },
+        },
+        'required': [],
     },
 }
 
