@@ -22,6 +22,11 @@ dependencies = [
     "pydantic>=2.7.0",
     "pystray>=0.19.5",
     "pillow>=10.3.0",
+    # HEIC/HEIF support for iPhone-captured manual photos. Pillow alone
+    # can't open HEIC without this plugin; the voice_upload route uses
+    # it on .heic uploads then converts to JPEG before base64-encoding
+    # for Anthropic vision (which doesn't accept HEIC natively).
+    "pillow-heif>=0.18.0",
     # video generation (GPU)
     "diffusers>=0.30.0",
     "accelerate>=0.33.0",

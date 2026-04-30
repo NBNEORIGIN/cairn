@@ -1009,7 +1009,15 @@ async def chat_stream(
 
 
 class ChatStreamRequest(BaseModel):
-    """POST body for /chat/stream — avoids URL length limits."""
+    """POST body for /chat/stream — avoids URL length limits.
+
+    image_base64 / image_media_type were added 2026-04-30 so the /voice
+    paperclip can forward image attachments through to Claude/OpenAI
+    vision. The GET variant has these as query params but in practice
+    can never be used (a typical 100KB image base64-encodes to ~133KB,
+    well over typical 8KB URL limits enforced by nginx/Cloudflare).
+    POST is the only viable path for vision.
+    """
     model_config = ConfigDict(protected_namespaces=())
 
     project: str
@@ -1020,6 +1028,8 @@ class ChatStreamRequest(BaseModel):
     skill_ids: Optional[str] = None
     model_override: Optional[str] = None
     subproject_id: Optional[str] = None
+    image_base64: Optional[str] = None
+    image_media_type: str = 'image/png'
 
 
 @app.post("/chat/stream")
@@ -1056,6 +1066,8 @@ async def chat_stream_post(
         mentions=parsed_mentions,
         skill_ids=parsed_skill_ids,
         model_override=body.model_override,
+        image_base64=body.image_base64,
+        image_media_type=body.image_media_type,
     )
 
     async def event_generator():

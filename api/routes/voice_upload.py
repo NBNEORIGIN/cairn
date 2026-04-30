@@ -17,13 +17,18 @@ Supported formats:
     .csv / .tsv     — stdlib csv (capped at 1k rows + summary)
     .xlsx / .xlsm   — openpyxl (first sheet, capped at 1k rows)
     .txt / .md      — plain decode
-    .png/.jpg/.heic — accepted but flagged as not-yet-supported
+    .png/.jpg/.gif/.webp — base64-encoded for the chat path's
+                          image_base64 field (Claude/OpenAI vision)
+    .heic / .bmp    — accepted, converted to JPEG via Pillow before
+                      base64 encoding (Anthropic's vision API doesn't
+                      accept HEIC/BMP natively)
 
 Per-file size cap: 10 MB. Per-request: 5 files. Hard caps so the
 agent's context isn't drowned by a stray 50MB report.
 """
 from __future__ import annotations
 
+import base64
 import csv
 import hashlib
 import io
@@ -155,6 +160,53 @@ _EXTRACTORS: dict[str, Any] = {
 
 _IMAGE_EXTS = {'.png', '.jpg', '.jpeg', '.heic', '.gif', '.webp', '.bmp'}
 
+# Anthropic vision API media types — anything else needs conversion via Pillow.
+# https://docs.anthropic.com/claude/docs/vision
+_NATIVE_IMAGE_MEDIA_TYPES: dict[str, str] = {
+    '.png':  'image/png',
+    '.jpg':  'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif':  'image/gif',
+    '.webp': 'image/webp',
+}
+_NEEDS_CONVERSION = {'.heic', '.bmp'}
+
+
+def _encode_image(blob: bytes, ext: str) -> tuple[str, str]:
+    """Return (base64_str, media_type). Converts HEIC/BMP to JPEG via Pillow.
+
+    Raises on unsupported extensions or conversion failure — caller maps
+    that to an error chip on the UI.
+    """
+    if ext in _NATIVE_IMAGE_MEDIA_TYPES:
+        return base64.b64encode(blob).decode('ascii'), _NATIVE_IMAGE_MEDIA_TYPES[ext]
+    if ext in _NEEDS_CONVERSION:
+        # HEIC needs pillow-heif registered before PIL.Image.open() will
+        # recognise it. BMP is handled by base Pillow but Anthropic's API
+        # doesn't accept image/bmp — convert to JPEG either way.
+        from PIL import Image
+        if ext == '.heic':
+            try:
+                from pillow_heif import register_heif_opener
+                register_heif_opener()
+            except ImportError as exc:
+                raise RuntimeError(
+                    'HEIC support requires pillow-heif (pip install pillow-heif)'
+                ) from exc
+        img = Image.open(io.BytesIO(blob))
+        # Anthropic JPEG: drop alpha, convert RGBA → RGB on white.
+        if img.mode in ('RGBA', 'LA', 'P'):
+            from PIL import Image as PILImage
+            bg = PILImage.new('RGB', img.size, (255, 255, 255))
+            bg.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+            img = bg
+        elif img.mode != 'RGB':
+            img = img.convert('RGB')
+        out_buf = io.BytesIO()
+        img.save(out_buf, format='JPEG', quality=85, optimize=True)
+        return base64.b64encode(out_buf.getvalue()).decode('ascii'), 'image/jpeg'
+    raise ValueError(f'unsupported image extension: {ext}')
+
 
 @router.post('/upload')
 async def voice_upload(
@@ -197,6 +249,9 @@ async def voice_upload(
         truncated = False
         supported = ext in _EXTRACTORS or ext in _IMAGE_EXTS
         error: str | None = None
+        # Vision payload — populated only for image attachments.
+        image_base64: str | None = None
+        image_media_type: str | None = None
 
         try:
             blob = await upload.read()
@@ -205,13 +260,14 @@ async def voice_upload(
                 error = f'file exceeds {MAX_FILE_BYTES // (1024 * 1024)} MB limit'
                 supported = False
             elif ext in _IMAGE_EXTS:
-                # Phase 2 — vision model integration not wired yet.
-                error = (
-                    'image upload received but vision support is not yet '
-                    'wired into the chat path; this attachment will be '
-                    'acknowledged but not analysed'
-                )
-                supported = False
+                try:
+                    image_base64, image_media_type = _encode_image(blob, ext)
+                    # Tell the chat path the model should look at the image.
+                    text = f'[Image attachment: {name} ({image_media_type})]'
+                except Exception as exc:
+                    error = f'image encode failed: {type(exc).__name__}: {exc}'
+                    supported = False
+                    log.warning('[voice/upload] %s image encode failed: %s', name, exc)
             elif ext in _EXTRACTORS:
                 extractor = _EXTRACTORS[ext]
                 raw = extractor(blob)
@@ -237,6 +293,12 @@ async def voice_upload(
             'truncated': truncated,
             'supported': supported,
             'error': error,
+            # Vision: only set on image uploads, otherwise null. The
+            # /voice page collects these and forwards them on the chat
+            # payload so the agent's MessageEnvelope.image_base64 is
+            # populated and Claude/OpenAI vision can see them.
+            'image_base64': image_base64,
+            'image_media_type': image_media_type,
         })
 
     return JSONResponse({'files': results})

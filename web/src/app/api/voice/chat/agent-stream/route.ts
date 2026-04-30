@@ -48,21 +48,31 @@ export async function POST(req: NextRequest) {
   }
   const sessionId = String(body?.session_id || `voice-chat-${Date.now()}`)
   const project = String(body?.project || 'deek')
-
-  // /chat/stream is a GET endpoint with query params.
-  const qs = new URLSearchParams({
-    project,
-    session_id: sessionId,
-    message,
-  })
+  // Vision attachments — forwarded straight through. POST path only;
+  // a base64-encoded image is too large for the GET query string.
+  const imageBase64: string | undefined = body?.image_base64 || undefined
+  const imageMediaType: string =
+    body?.image_media_type || 'image/png'
 
   const cfg = deekConfig()
-  const upstream = await fetch(`${cfg.apiUrl}/chat/stream?${qs.toString()}`, {
-    method: 'GET',
+  // Use POST /chat/stream — same SSE response shape as the GET variant
+  // but accepts the message + (optional) image_base64 in JSON body so
+  // we don't blow URL length limits on image attachments.
+  const upstream = await fetch(`${cfg.apiUrl}/chat/stream`, {
+    method: 'POST',
     headers: {
       'X-API-Key': cfg.apiKey,
+      'Content-Type': 'application/json',
       Accept: 'text/event-stream',
     },
+    body: JSON.stringify({
+      project,
+      session_id: sessionId,
+      message,
+      ...(imageBase64
+        ? { image_base64: imageBase64, image_media_type: imageMediaType }
+        : {}),
+    }),
   })
 
   if (!upstream.ok || !upstream.body) {

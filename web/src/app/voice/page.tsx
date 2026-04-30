@@ -50,6 +50,11 @@ interface StagedFile {
   error?: string
   truncated?: boolean
   supported?: boolean
+  // Vision payload — populated by the upload route for image
+  // attachments only. Forwarded to the chat endpoint so the agent
+  // sees the image via Claude/OpenAI vision.
+  image_base64?: string
+  image_media_type?: string
 }
 
 const MAX_FILES = 5
@@ -400,11 +405,20 @@ export default function VoicePage() {
     }
   }, [stageFiles])
 
-  const uploadStaged = useCallback(async (): Promise<string> => {
+  const uploadStaged = useCallback(async (): Promise<{
+    text: string
+    image_base64?: string
+    image_media_type?: string
+  }> => {
     const toUpload = stagedFiles.filter(f => f.status === 'pending')
     if (toUpload.length === 0) {
       // Build context text from already-ready files (re-send case)
-      return _buildAttachmentText(stagedFiles)
+      const firstImg = stagedFiles.find(f => f.image_base64)
+      return {
+        text: _buildAttachmentText(stagedFiles),
+        image_base64: firstImg?.image_base64,
+        image_media_type: firstImg?.image_media_type,
+      }
     }
 
     setStagedFiles(cur =>
@@ -420,7 +434,7 @@ export default function VoicePage() {
       const res = await fetch('/api/voice/upload', { method: 'POST', body: fd })
       if (res.status === 401) {
         window.location.href = '/voice/login?callbackUrl=/voice'
-        return ''
+        return { text: '' }
       }
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -432,7 +446,7 @@ export default function VoicePage() {
               : f,
           ),
         )
-        return ''
+        return { text: '' }
       }
       const out: any[] = data.files || []
       // Match returned items to staged files in order (one-to-one)
@@ -457,6 +471,8 @@ export default function VoicePage() {
               text: r.text || '',
               truncated: !!r.truncated,
               supported: true,
+              image_base64: r.image_base64 || undefined,
+              image_media_type: r.image_media_type || undefined,
             }
           }
         }
@@ -471,9 +487,24 @@ export default function VoicePage() {
         if (r?.error || !r?.supported) {
           return { ...sf, status: 'error', error: r?.error || 'unsupported', supported: !!r?.supported }
         }
-        return { ...sf, status: 'ready', text: r.text || '', truncated: !!r.truncated, supported: true }
+        return {
+          ...sf, status: 'ready', text: r.text || '', truncated: !!r.truncated, supported: true,
+          image_base64: r.image_base64 || undefined,
+          image_media_type: r.image_media_type || undefined,
+        }
       })
-      return _buildAttachmentText(combined)
+      // Vision: pass the FIRST image attachment through. Multi-image
+      // support would need an envelope schema change (image_base64 is
+      // a single string today). If the user attaches multiple images,
+      // the rest are ignored for vision purposes — text extraction
+      // (the `[Image attachment: ...]` placeholder) still appears in
+      // the prompt so the model knows others were provided.
+      const firstImg = combined.find(f => f.image_base64)
+      return {
+        text: _buildAttachmentText(combined),
+        image_base64: firstImg?.image_base64,
+        image_media_type: firstImg?.image_media_type,
+      }
     } catch (err: any) {
       setStagedFiles(cur =>
         cur.map(f =>
@@ -482,7 +513,7 @@ export default function VoicePage() {
             : f,
         ),
       )
-      return ''
+      return { text: '' }
     }
   }, [stagedFiles])
 
@@ -501,11 +532,16 @@ export default function VoicePage() {
 
       // 1) If there are staged files, upload + extract first.
       let attachmentText = ''
+      let imageBase64: string | undefined = undefined
+      let imageMediaType: string | undefined = undefined
       if (hasFiles) {
-        attachmentText = await uploadStaged()
+        const result = await uploadStaged()
+        attachmentText = result.text
+        imageBase64 = result.image_base64
+        imageMediaType = result.image_media_type
         // If every file errored, abort the send.
         const allErrored = stagedFiles.every(f => f.status === 'error')
-        if (!attachmentText && allErrored) {
+        if (!attachmentText && !imageBase64 && allErrored) {
           setBusy(false)
           setErrorMsg('Couldn\'t process any of the attached files.')
           return
@@ -540,6 +576,12 @@ export default function VoicePage() {
             location: 'office',
             session_id: sessionId,
             project: 'deek',
+            // Vision attachment — populated when the user attached an
+            // image. The agent-stream proxy forwards into the upstream
+            // POST /chat/stream which sets envelope.image_base64.
+            ...(imageBase64
+              ? { image_base64: imageBase64, image_media_type: imageMediaType }
+              : {}),
           }),
           signal: abortRef.current.signal,
         })
