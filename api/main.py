@@ -3423,6 +3423,12 @@ app.include_router(brief_pwa_router, prefix='/api/deek')
 from api.routes.voice_upload import router as voice_upload_router
 app.include_router(voice_upload_router, prefix='/api/deek')
 
+# Register Users router — DB-backed credential store + password mgmt.
+# /api/deek/users/verify (login), /me/password (self-service),
+# /admin/reset (admin reset), /list (admin user list).
+from api.routes.users import router as users_router
+app.include_router(users_router, prefix='/api/deek')
+
 # Register Telegram webhook — inbound-only public endpoint,
 # secret-token-guarded (see core.channels.nudge + docs).
 from api.routes.telegram import router as telegram_router

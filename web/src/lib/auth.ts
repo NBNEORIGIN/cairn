@@ -2,25 +2,21 @@
  * Deek web — self-contained authentication.
  *
  * Design choices:
- * - Tiny user list from env (DEEK_USERS) rather than a database. Current
- *   user count is 2 (Toby + Jo); a DB is overkill.
+ * - Credentials live in the deek_users table on the API side
+ *   (migrated from DEEK_USERS env on 2026-04-30 so password changes
+ *   + admin resets can mutate state at runtime). The Next.js layer
+ *   POSTs to /api/deek/users/verify and trusts the response — the
+ *   API's bcrypt check is the source of truth.
+ * - DEEK_USERS env still exists as a SEED fallback: on the API's first
+ *   boot after the migration, if deek_users is empty the env is
+ *   parsed and the table populated. Subsequent boots ignore the env.
  * - Session cookie `deek.session` is a HS256 JWT signed with DEEK_JWT_SECRET.
  *   30-day sliding expiry.
- * - Passwords stored as bcrypt hashes in env (not plaintext).
- * - Role-based Location ACL reuses the same shape the earlier CRM-auth
- *   prototype used — ADMIN/PM see everything, STAFF/READONLY/CLIENT have
- *   progressively less access.
- *
- * DEEK_USERS format (semicolon-separated records, pipe-separated fields):
- *
- *   email|bcrypt_hash|NAME|ROLE
- *
- * Example (with a fake hash):
- *   DEEK_USERS='toby@nbnesigns.com|$2a$10$AbC...|Toby|ADMIN;jo@nbnesigns.com|$2a$10$XyZ...|Jo|ADMIN'
+ * - Role-based Location ACL stays here unchanged — ADMIN/PM see
+ *   everything, STAFF/READONLY/CLIENT have progressively less access.
  */
 import { cookies } from 'next/headers'
 import { SignJWT, jwtVerify } from 'jose'
-import bcrypt from 'bcryptjs'
 
 const COOKIE_NAME = 'deek.session'
 const COOKIE_MAX_AGE_SEC = 60 * 60 * 24 * 30 // 30 days
@@ -37,9 +33,8 @@ export interface DeekSession {
   exp?: number
 }
 
-interface UserRecord {
+interface VerifiedUser {
   email: string
-  passwordHash: string
   name: string
   role: Role
 }
@@ -57,47 +52,63 @@ function jwtKey(): Uint8Array {
   return new TextEncoder().encode(s)
 }
 
-function loadUsers(): UserRecord[] {
-  const raw = process.env.DEEK_USERS || ''
-  if (!raw.trim()) return []
-  return raw
-    .split(';')
-    .map(r => r.trim())
-    .filter(Boolean)
-    .map(record => {
-      const parts = record.split('|')
-      if (parts.length < 4) {
-        console.warn('[deek-auth] skipping malformed DEEK_USERS record')
-        return null
-      }
-      const [email, passwordHash, name, role] = parts
-      return {
-        email: email.trim().toLowerCase(),
-        passwordHash: passwordHash.trim(),
-        name: name.trim(),
-        role: role.trim().toUpperCase() as Role,
-      }
-    })
-    .filter((u): u is UserRecord => u !== null)
+function deekApiUrl(): string {
+  return (
+    process.env.DEEK_API_URL ||
+    process.env.CLAW_API_URL ||
+    'http://localhost:8765'
+  )
+}
+
+function deekApiKey(): string {
+  return process.env.DEEK_API_KEY || process.env.CLAW_API_KEY || ''
 }
 
 // ── Login / credentials check ───────────────────────────────────────────────
+//
+// Credentials live in the API's deek_users table. We POST to
+// /api/deek/users/verify and trust the API's bcrypt result. The API
+// also seeds itself from DEEK_USERS env on first boot so the migration
+// from env-as-source to DB-as-source is invisible to operators.
 
 export async function verifyCredentials(
   email: string,
   password: string,
-): Promise<Omit<UserRecord, 'passwordHash'> | null> {
+): Promise<VerifiedUser | null> {
   const lookup = email.trim().toLowerCase()
-  const users = loadUsers()
-  const user = users.find(u => u.email === lookup)
-  if (!user) {
-    // Constant-time-ish: still run a bcrypt compare to avoid timing oracle
-    await bcrypt.compare(password, '$2a$10$' + '.'.repeat(53))
+  if (!lookup || !password) return null
+  try {
+    const res = await fetch(`${deekApiUrl()}/api/deek/users/verify`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': deekApiKey(),
+      },
+      body: JSON.stringify({ email: lookup, password }),
+      cache: 'no-store',
+      signal: AbortSignal.timeout(10_000),
+    })
+    if (res.status === 401) return null
+    if (!res.ok) {
+      console.warn('[deek-auth] verify upstream HTTP', res.status)
+      return null
+    }
+    const data = (await res.json()) as {
+      ok?: boolean
+      email?: string
+      name?: string
+      role?: string
+    }
+    if (!data?.ok || !data.email) return null
+    return {
+      email: data.email,
+      name: data.name || data.email,
+      role: ((data.role || 'READONLY').toUpperCase() as Role),
+    }
+  } catch (err) {
+    console.warn('[deek-auth] verify call failed:', err)
     return null
   }
-  const ok = await bcrypt.compare(password, user.passwordHash)
-  if (!ok) return null
-  return { email: user.email, name: user.name, role: user.role }
 }
 
 export async function issueSessionToken(user: {

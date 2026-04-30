@@ -25,8 +25,10 @@ import {
   Send, LogOut, FileText, Plus, Menu, X, Loader2, Check,
   Paperclip, FileCheck, AlertCircle, MoreHorizontal, Folder,
   Archive, Pencil, ChevronDown, ChevronRight, FolderPlus,
+  Key, Users,
 } from 'lucide-react'
 import { BRAND } from '@/lib/brand'
+import { ChangePasswordModal } from './components/ChangePasswordModal'
 
 interface Turn {
   role: 'user' | 'assistant'
@@ -119,6 +121,8 @@ export default function VoicePage() {
   const [tools, setTools] = useState<ToolEvent[]>([])
   const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([])
   const [dragActive, setDragActive] = useState(false)
+  const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const [showChangePassword, setShowChangePassword] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const abortRef = useRef<AbortController | null>(null)
@@ -754,15 +758,65 @@ export default function VoicePage() {
             </button>
             <div className="text-sm font-semibold tracking-tight">{BRAND}</div>
           </div>
-          <button
-            onClick={handleSignOut}
-            className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-gray-500 hover:bg-gray-100 hover:text-gray-900"
-            title="Sign out"
-          >
-            <LogOut size={12} />
-            <span className="hidden sm:inline">Sign out</span>
-          </button>
+          <div className="relative">
+            <button
+              onClick={() => setUserMenuOpen(v => !v)}
+              className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+              title={me.user?.email || 'Account'}
+            >
+              <span className="hidden sm:inline">{me.user?.name || me.user?.email}</span>
+              <ChevronDown size={12} />
+            </button>
+            {userMenuOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-30"
+                  onClick={() => setUserMenuOpen(false)}
+                />
+                <div className="absolute right-0 top-full z-40 mt-1 w-56 rounded-md border border-gray-200 bg-white py-1 text-xs shadow-lg">
+                  <div className="border-b border-gray-100 px-3 py-2 text-[11px] text-gray-500">
+                    {me.user?.email}
+                  </div>
+                  <button
+                    onClick={() => {
+                      setShowChangePassword(true)
+                      setUserMenuOpen(false)
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-gray-700 hover:bg-gray-50"
+                  >
+                    <Key size={11} />
+                    Change password
+                  </button>
+                  {me.user?.role === 'ADMIN' && (
+                    <Link
+                      href="/admin/users"
+                      onClick={() => setUserMenuOpen(false)}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-gray-700 hover:bg-gray-50"
+                    >
+                      <Users size={11} />
+                      Manage users
+                    </Link>
+                  )}
+                  <div className="my-1 border-t border-gray-100" />
+                  <button
+                    onClick={() => {
+                      setUserMenuOpen(false)
+                      handleSignOut()
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-gray-700 hover:bg-gray-50"
+                  >
+                    <LogOut size={11} />
+                    Sign out
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </header>
+
+        {showChangePassword && (
+          <ChangePasswordModal onClose={() => setShowChangePassword(false)} />
+        )}
 
         {/* Brief banner */}
         {brief && (
