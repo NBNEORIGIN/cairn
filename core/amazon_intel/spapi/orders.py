@@ -210,7 +210,13 @@ def _map_row(raw: dict, region: str) -> Optional[dict]:
             continue
         raw_val = raw.get(tsv_col, '').strip()
         if not raw_val:
-            mapped[db_col] = None
+            # is_b2b is NOT NULL in the schema — Amazon marks B2B orders
+            # explicitly with TRUE/YES/1; an empty / missing value means
+            # "consumer order, not B2B". Storing None here triggers a
+            # NotNullViolation during upsert (seen on FE region orders
+            # 2026-04-14 onwards where the SP-API report omits the
+            # is-business-order column entirely for some rows).
+            mapped[db_col] = False if db_col == 'is_b2b' else None
             continue
 
         if db_col in ('item_price_amount', 'item_tax_amount',
