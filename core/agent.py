@@ -231,7 +231,22 @@ class DeekAgent:
             "   - Never guess or extrapolate machine identities. ROLF in a "
             "snapshot is Rolf the Refine Color 6090; not 'likely the Roland'. "
             "If the snapshot's name doesn't map cleanly to the canonical "
-            "list, say so explicitly rather than inventing a guess.\n\n"
+            "list, say so explicitly rather than inventing a guess.\n"
+            "10. Wiki promotion (canonical knowledge): write_wiki saves to "
+            "drafts (data/wiki-drafts/) — these are searchable but NOT "
+            "git-tracked, so they don't survive a fresh deploy. The "
+            "canonical, durable corpus lives at wiki/modules/. After EVERY "
+            "successful write_wiki call you MUST follow up with the exact "
+            "question: \"Do you want me to write this to canon?\" — phrased "
+            "as a question, in plain English, on its own. Wait for the "
+            "user's reply. If they answer YES (or 'approve', 'go ahead', "
+            "'do it', etc.), call promote_wiki_to_canon with the "
+            "DRAFT_SLUG that write_wiki returned in its response. If they "
+            "answer NO (or 'leave it', 'keep as draft', 'not yet'), do "
+            "NOTHING — the draft stays where it is and is still searchable. "
+            "Never call promote_wiki_to_canon without first asking and "
+            "receiving an affirmative reply in chat. Never promote a draft "
+            "the user didn't author or didn't review.\n\n"
         )
         return identity_prefix + tool_rules
 
@@ -2531,7 +2546,7 @@ class DeekAgent:
             similar_quotes_tool,
             review_quote_tool,
         )
-        from .tools.wiki_tools import write_wiki_tool
+        from .tools.wiki_tools import write_wiki_tool, promote_wiki_to_canon_tool
         from .tools.enquiry_analyzer import analyze_enquiry_tool
         from .tools.manufacture_tools import get_sku_costs_tool
         from .tools.manuals_tools import search_manuals_tool
@@ -2571,6 +2586,10 @@ class DeekAgent:
             review_quote_tool,
             # Wiki write (Deek-drafted long-form knowledge)
             write_wiki_tool,
+            # Wiki promotion (draft → canonical git-tracked corpus,
+            # gated on Toby's explicit chat approval — see system
+            # prompt rule "ASK BEFORE PROMOTING TO CANON").
+            promote_wiki_to_canon_tool,
             # Structured enquiry analyzer — composite retrieval + Sonnet synthesis
             analyze_enquiry_tool,
             # Manufacture cost data — bridges the COGS / margin gap so
