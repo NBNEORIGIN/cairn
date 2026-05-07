@@ -38,26 +38,10 @@ export function ChatView({
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [transcript.length, partial])
-
-  // Auto-grow the textarea as the user types, up to a cap. The cap
-  // is generous (50vh) so long messages have room; the user can also
-  // drag the resize handle (resize-y on the className) to override
-  // either way. Reset to auto on empty so the box collapses back to
-  // its natural one-row height after submit.
-  useEffect(() => {
-    const el = textareaRef.current
-    if (!el) return
-    el.style.height = 'auto'
-    if (input) {
-      const cap = Math.floor(window.innerHeight * 0.5)
-      el.style.height = Math.min(el.scrollHeight, cap) + 'px'
-    }
-  }, [input])
 
   const submit = useCallback(
     async (text: string) => {
@@ -193,11 +177,10 @@ export function ChatView({
         className="flex items-end gap-2 border-t border-slate-800 p-3"
       >
         <textarea
-          ref={textareaRef}
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={handleKey}
-          rows={1}
+          rows={3}
           disabled={busy}
           placeholder={`Message ${BRAND}…`}
           className="flex-1 resize-y rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-base placeholder-slate-500 focus:border-emerald-500 focus:outline-none disabled:opacity-50"

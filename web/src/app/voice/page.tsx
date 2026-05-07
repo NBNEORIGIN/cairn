@@ -323,7 +323,6 @@ export default function VoicePage() {
     setErrorMsg(null)
     setInput('')
     setStagedFiles([])
-    if (textareaRef.current) textareaRef.current.style.height = 'auto'
     textareaRef.current?.focus()
   }, [])
 
@@ -562,7 +561,6 @@ export default function VoicePage() {
         { role: 'user', text: userVisible, at: Date.now() },
       ])
       setInput('')
-      if (textareaRef.current) textareaRef.current.style.height = 'auto'
       // Files are now consumed — clear the chips so they don't re-attach.
       setStagedFiles([])
 
@@ -1020,18 +1018,9 @@ export default function VoicePage() {
             <textarea
               ref={textareaRef}
               value={input}
-              onChange={e => {
-                setInput(e.target.value)
-                // Auto-grow to fit content, up to 50vh cap. Manual
-                // resize handle (resize-y) lets the user override
-                // either direction.
-                const el = e.currentTarget
-                el.style.height = 'auto'
-                const cap = Math.floor(window.innerHeight * 0.5)
-                el.style.height = Math.min(el.scrollHeight, cap) + 'px'
-              }}
+              onChange={e => setInput(e.target.value)}
               onKeyDown={handleKey}
-              rows={1}
+              rows={3}
               autoFocus
               disabled={busy}
               placeholder={
