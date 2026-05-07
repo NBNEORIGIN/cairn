@@ -789,12 +789,30 @@ class DeekAgent:
                     logger.warning(f'[stream] mention resolution failed: {exc}')
 
             # ── Context ───────────────────────────────────────────────────────
-            raw_context_prompt, context_meta = self.context.build_context_prompt(
-                task=envelope.content,
-                embedding_fn=self._embed,
-                subproject_id=effective_subproject_id,
-                resolved_mentions=resolved_mentions or None,
-                include_metadata=True,
+            # `build_context_prompt` is synchronous — it does BM25
+            # (rank_bm25, pure-Python, CPU-heavy on ~10k chunks) +
+            # pgvector cosine + an embedding HTTP call to Ollama. All
+            # blocking. Calling it directly on the event loop wedges
+            # the loop for 5-15s during heavy queries, which kills
+            # streaming responsiveness AND can silently close the SSE
+            # connection if it runs longer than the client timeout —
+            # the "questions not being answered" symptom diagnosed
+            # 2026-05-07 from a watchdog stack trace pointing here.
+            #
+            # Offloading to the default executor lets the event loop
+            # keep flushing yielded events to the client and handling
+            # health probes while retrieval runs.
+            yield {'type': 'status', 'message': 'Retrieving context…'}
+            loop = asyncio.get_running_loop()
+            raw_context_prompt, context_meta = await loop.run_in_executor(
+                None,
+                lambda: self.context.build_context_prompt(
+                    task=envelope.content,
+                    embedding_fn=self._embed,
+                    subproject_id=effective_subproject_id,
+                    resolved_mentions=resolved_mentions or None,
+                    include_metadata=True,
+                ),
             )
             self._check_request_active(envelope, 'building context')
 
