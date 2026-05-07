@@ -145,9 +145,19 @@ def _build_candidates_block(row: dict) -> list[str]:
         score = float(c.get('match_score') or 0.0)
         last = c.get('last_activity_at') or ''
         status = c.get('status') or ''
+        source_type = c.get('source_type') or ''
         lines.append(f'  {marker} {i}. {name}')
         lines.append(f'       id:       {pid}')
-        lines.append(f'       score:    {score:.3f}')
+        # Surface the matching method so Toby sees WHY this ranked
+        # where it did. Exact sender-email matches are high-confidence
+        # — the score is synthetic (1.000), so the source tag is the
+        # honest signal. Keyword/fuzzy matches just show the score.
+        if source_type == 'client_email_exact':
+            matched_email = c.get('matched_email') or ''
+            tag = f'matched by sender email ({matched_email})' if matched_email else 'matched by sender email'
+            lines.append(f'       match:    EXACT — {tag}')
+        else:
+            lines.append(f'       score:    {score:.3f}')
         if last:
             lines.append(f'       last:     {last[:19]}')
         if status:
@@ -230,7 +240,14 @@ def _build_reply_back_block(row: dict, include_q5: bool = False) -> list[str]:
         '',
         '--- Q1 (match_confirm) ---',
         '  Is the #1 candidate the correct project?',
-        '  Reply: YES / NO / [candidate number 1-3]',
+        '  Reply with ONE of:',
+        '    YES                  — accept candidate #1',
+        '    NO                   — none of the candidates fit',
+        '    1 / 2 / 3            — pick a different listed candidate',
+        '    PROJECT: <name>      — override; type the project name (or part',
+        '                          of it, or the client name). Deek will',
+        '                          search the CRM for the closest match and',
+        '                          re-route the email to that project.',
         '',
         '--- Q2 (reply_approval) ---',
         '  Use the drafted reply above?',

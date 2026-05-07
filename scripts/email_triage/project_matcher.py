@@ -1,21 +1,33 @@
 """
 Match an incoming email to an existing CRM project.
 
-Uses the CRM's ``/api/cairn/search`` endpoint (live pgvector + BM25
-hybrid retrieval) with the email's sender + subject + client name
-guess as the search text, filtered to ``types=['project', 'client']``.
-If the top match scores above ``MIN_MATCH_SCORE``, returns the
-project_id; otherwise returns None.
+Two-phase matcher (2026-05-07):
+
+  Phase 1 — Exact sender-email lookup. If the sender's email is stored
+  on a CRM project's ``clientEmail`` field, that project wins outright
+  and becomes candidate #1 with synthetic score 1.0. This is the
+  signal Toby asked for explicitly: "should be straightforward — a
+  check between sender email and client email in the CRM". Beats
+  the fuzzy search every time when applicable.
+
+  Phase 2 — Hybrid retrieval. Falls back to the CRM's
+  ``/api/cairn/search`` endpoint (live pgvector + BM25) with
+  email subject + client name guess + sender local-part as the query.
+  Used when the exact email lookup misses (new senders, forwarded
+  emails, etc.) and to populate alternatives #2 and #3.
 
 The match is deliberately conservative — false positives mean the
-triage runner misroutes an email to the wrong project, which
-confuses the audit trail. Better to return None than to guess wrong.
+triage runner misroutes an email to the wrong project, which confuses
+the audit trail. Better to return None than to guess wrong, which is
+why the user-facing digest always shows the top 3 with a "PROJECT:
+<name>" override affordance.
 """
 from __future__ import annotations
 
 import json
 import logging
 import os
+import re
 from typing import Any
 
 import httpx
@@ -40,6 +52,114 @@ MIN_MATCH_SCORE = 0.015
 # two alternatives.
 TOP_CANDIDATES = 3
 
+# Synthetic score returned when an exact sender-email match is found.
+# Set well above any RRF score the fuzzy search ever produces so the
+# match always sorts to the top and clears MIN_MATCH_SCORE trivially.
+EXACT_EMAIL_MATCH_SCORE = 1.0
+
+# Sentinel ``source_type`` for an exact sender-email match. The digest
+# email checks this to render a "matched by exact sender-email lookup"
+# tag next to the candidate so Toby sees why it ranked #1.
+SOURCE_TYPE_EMAIL_EXACT = 'client_email_exact'
+
+# Match an email address out of a sender string. Handles both bare
+# ``foo@bar.com`` and the common ``"Display Name" <foo@bar.com>`` form.
+_EMAIL_BRACKET_RE = re.compile(r'<([^>]+@[^>]+)>')
+_EMAIL_BARE_RE = re.compile(r'([\w.+\-]+@[\w.\-]+\.[\w.\-]+)')
+
+
+def _bare_email(sender: str) -> str:
+    """Return the lowercase bare email from a sender string, or ''."""
+    if not sender:
+        return ''
+    m = _EMAIL_BRACKET_RE.search(sender)
+    if m:
+        return m.group(1).strip().lower()
+    m = _EMAIL_BARE_RE.search(sender)
+    if m:
+        return m.group(1).strip().lower()
+    return sender.strip().lower()
+
+
+def _exact_email_match(
+    sender_email: str,
+    base_url: str,
+    token: str,
+) -> dict | None:
+    """Look up a CRM project whose ``clientEmail`` equals ``sender_email``.
+
+    Returns a candidate dict with ``source_type=SOURCE_TYPE_EMAIL_EXACT``
+    on hit, or None if no exact match was found.
+
+    Strategy: query ``/api/cairn/search`` with the full sender email as
+    the search text (BM25 will rank rows containing that exact token
+    very high), then filter results client-side for those whose
+    ``metadata.clientEmail`` (or analogues) equal the sender exactly,
+    case-insensitive. If the CRM later exposes a dedicated
+    ``/api/cairn/clients/by-email`` endpoint this can be swapped in;
+    until then the search-with-filter approach works against the
+    schema we have today.
+
+    Returns None on any of: missing sender email, network failure,
+    non-200 response, malformed JSON, no matching row in results. The
+    caller (``match_project``) gracefully degrades to fuzzy search.
+    """
+    sender_norm = (sender_email or '').strip().lower()
+    if '@' not in sender_norm:
+        return None
+
+    try:
+        with httpx.Client(timeout=CRM_REQUEST_TIMEOUT) as client:
+            response = client.get(
+                f'{base_url}{CRM_SEARCH_PATH}',
+                params={
+                    'q': sender_norm,
+                    'types': 'project,client',
+                    'limit': 20,
+                },
+                headers={'Authorization': f'Bearer {token}'},
+            )
+    except Exception as exc:
+        log.warning('exact_email_match: CRM lookup failed: %s', exc)
+        return None
+
+    if response.status_code != 200:
+        return None
+
+    try:
+        results = response.json().get('results') or []
+    except Exception:
+        return None
+
+    for r in results:
+        md = r.get('metadata') or {}
+        # Schema variants: clientEmail (Prisma), client_email (snake),
+        # email (denormalised). Compare all three lowercased.
+        candidate_emails = {
+            (md.get('clientEmail') or '').strip().lower(),
+            (md.get('client_email') or '').strip().lower(),
+            (md.get('email') or '').strip().lower(),
+        }
+        if sender_norm in candidate_emails:
+            return {
+                'project_id': r.get('source_id', ''),
+                'match_score': EXACT_EMAIL_MATCH_SCORE,
+                'project_name': (
+                    md.get('project_name')
+                    or md.get('title')
+                    or r.get('title')
+                    or ''
+                ),
+                'source_type': SOURCE_TYPE_EMAIL_EXACT,
+                'last_activity_at': (
+                    md.get('last_activity_at') or md.get('updated_at') or ''
+                ),
+                'status': md.get('status', ''),
+                'excerpt': (r.get('excerpt') or '')[:280],
+                'matched_email': sender_norm,
+            }
+    return None
+
 
 def match_project(
     email: dict,
@@ -61,12 +181,22 @@ def match_project(
     if not token:
         return {'project_id': '', 'match_score': 0.0, 'project_name': '', 'candidates': []}
 
+    # ── Phase 1: exact sender-email lookup ──────────────────────────────
+    # If the sender is a known CRM client (their email is on the
+    # project's ``clientEmail`` field), that's the right project full
+    # stop. Bypasses fuzzy search entirely for the common case Toby
+    # called out: "should be straightforward — sender email vs CRM
+    # client email". 2026-05-07.
+    sender_raw = (email.get('sender') or '').strip()
+    sender_email = _bare_email(sender_raw)
+    exact_match = _exact_email_match(sender_email, base, token) if sender_email else None
+
     # Build the best query we can from the signals available
     query_parts: list[str] = []
     project_hint = (classifier_result.get('project_hint') or '').strip()
     client_name = (classifier_result.get('client_name_guess') or '').strip()
     subject = (email.get('subject') or '').strip()
-    sender = (email.get('sender') or '').strip()
+    sender = sender_raw
 
     if project_hint:
         query_parts.append(project_hint)
@@ -147,6 +277,27 @@ def match_project(
             'excerpt': (r.get('excerpt') or '')[:280],
         })
 
+    # ── Merge exact-email match (Phase 1) into the fuzzy results ────────
+    # If we found an exact email match, it goes to the top with its
+    # synthetic high score. The fuzzy results stay underneath as
+    # alternatives in case the same sender has multiple CRM projects
+    # — e.g. an enquiry from a recurring client that's actually
+    # about a new job, not the one we matched to. The user picks via
+    # 1/2/3 or PROJECT: <name> in the digest reply.
+    if exact_match:
+        already = next(
+            (i for i, c in enumerate(candidates)
+             if c.get('project_id') == exact_match['project_id']),
+            None,
+        )
+        if already is not None:
+            # Already in the fuzzy list — replace with the exact-match
+            # version (carries the SOURCE_TYPE_EMAIL_EXACT tag) and
+            # move to the top.
+            candidates.pop(already)
+        candidates.insert(0, exact_match)
+        candidates = candidates[:TOP_CANDIDATES]
+
     if not candidates:
         return {
             'project_id': '', 'match_score': 0.0,
@@ -155,8 +306,9 @@ def match_project(
 
     top = candidates[0]
     # project_id on the return is set only when the top match clears
-    # the confidence bar. Callers wanting the unconditional top can
-    # read candidates[0]. Backwards compatible with the pre-Phase-A
+    # the confidence bar. An exact email match always clears it
+    # (synthetic score = 1.0). Callers wanting the unconditional top
+    # can read candidates[0]. Backwards compatible with the pre-Phase-A
     # dict shape.
     return {
         'project_id': top['project_id'] if top['match_score'] >= MIN_MATCH_SCORE else '',

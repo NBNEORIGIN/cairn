@@ -78,6 +78,10 @@ _NEGATIVE = frozenset({
 })
 _CANDIDATE_NUMBER_RE = re.compile(r'^\s*([1-3])\s*$')
 _EDIT_PREFIX_RE = re.compile(r'^\s*edit\s*:\s*', re.IGNORECASE)
+# `PROJECT: <name>` override on Q1 — Toby types this when none of the
+# 3 candidates fit. The name (or part of it, or the client name)
+# resolves via CRM search in apply_reply. Added 2026-05-07.
+_PROJECT_OVERRIDE_RE = re.compile(r'^\s*project\s*:\s*(.+?)\s*$', re.IGNORECASE)
 
 
 # ── Data types ───────────────────────────────────────────────────────
@@ -87,10 +91,12 @@ class ParsedAnswer:
     q_number: int
     category: str
     raw_text: str
-    verdict: str                  # affirm | deny | select_candidate | edit | text | empty
+    verdict: str                  # affirm | deny | select_candidate | select_project | edit | text | empty
     selected_candidate_index: int | None = None   # 1-based when verdict='select_candidate'
     edited_text: str = ''         # populated when verdict='edit'
-    free_text: str = ''           # populated when verdict='text' or 'edit'
+    free_text: str = ''           # populated when verdict='text', 'edit', or 'select_project'
+    # When verdict='select_project': the typed project name/hint that
+    # apply_reply will resolve against CRM. Stored on free_text.
 
 
 @dataclass
@@ -199,6 +205,16 @@ def _classify_match_confirm(text: str) -> ParsedAnswer:
         return ParsedAnswer(q_number=1, category='match_confirm',
                             raw_text=text, verdict='empty')
     first = cleaned.splitlines()[0].strip()
+    # `PROJECT: <name>` override beats everything else — Toby is
+    # explicitly correcting Deek's match. Resolved against CRM in
+    # apply_reply().
+    m = _PROJECT_OVERRIDE_RE.match(first)
+    if m:
+        return ParsedAnswer(
+            q_number=1, category='match_confirm', raw_text=text,
+            verdict='select_project',
+            free_text=m.group(1).strip(),
+        )
     # Candidate number wins over YES/NO
     m = _CANDIDATE_NUMBER_RE.match(first)
     if m:
@@ -609,6 +625,75 @@ def load_triage_row(conn, triage_id: int) -> dict | None:
     }
 
 
+def _resolve_project_by_name(typed_name: str) -> dict:
+    """Resolve a free-text ``PROJECT: <name>`` override to a CRM project.
+
+    Toby types something like ``PROJECT: Smith windows`` or
+    ``PROJECT: M1234`` or ``PROJECT: Acme Ltd``. We hit
+    ``/api/cairn/search?q=<name>&types=project&limit=5`` and take the
+    top scoring project.
+
+    Returns ``{'project_id': str, 'project_name': str, 'match_score':
+    float, 'note': str}``. ``project_id`` is empty when nothing
+    plausible came back; the note explains why.
+
+    Mirrors ``project_matcher._exact_email_match`` in shape so callers
+    can treat the two as the same kind of result. No exceptions are
+    raised — network/HTTP failures degrade to an empty result.
+
+    Added 2026-05-07 alongside the ``PROJECT:`` Q1 override.
+    """
+    import httpx
+    out = {'project_id': '', 'project_name': '', 'match_score': 0.0, 'note': ''}
+    name = (typed_name or '').strip()
+    if not name:
+        out['note'] = 'empty name'
+        return out
+    base = (os.getenv('CRM_BASE_URL') or 'https://crm.nbnesigns.co.uk').rstrip('/')
+    token = (
+        os.getenv('DEEK_API_KEY')
+        or os.getenv('CAIRN_API_KEY')
+        or os.getenv('CLAW_API_KEY', '')
+    ).strip()
+    if not token:
+        out['note'] = 'no auth token'
+        return out
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            r = client.get(
+                f'{base}/api/cairn/search',
+                params={'q': name[:200], 'types': 'project', 'limit': 5},
+                headers={'Authorization': f'Bearer {token}'},
+            )
+    except Exception as exc:
+        out['note'] = f'CRM search failed: {exc}'
+        return out
+    if r.status_code != 200:
+        out['note'] = f'HTTP {r.status_code}'
+        return out
+    try:
+        results = (r.json() or {}).get('results') or []
+    except Exception:
+        out['note'] = 'malformed JSON'
+        return out
+    project_rows = [x for x in results if x.get('source_type') == 'project']
+    if not project_rows:
+        out['note'] = 'no project results'
+        return out
+    top = project_rows[0]
+    md = top.get('metadata') or {}
+    out['project_id'] = top.get('source_id', '')
+    out['project_name'] = (
+        md.get('project_name')
+        or md.get('title')
+        or top.get('title')
+        or ''
+    )
+    out['match_score'] = float(top.get('score') or 0.0)
+    out['note'] = f'resolved "{name[:60]}" -> {out["project_name"][:60]}'
+    return out
+
+
 def _post_crm_note(
     project_id: str, message: str, source: str = 'triage_reply',
 ) -> str | None:
@@ -872,6 +957,50 @@ def apply_reply(conn, reply: ParsedReply, raw_body: str) -> dict:
                         )
                     else:
                         action['result'] = f'invalid candidate #{idx}'
+                elif ans.verdict == 'select_project':
+                    # `PROJECT: <name>` override — Toby is correcting
+                    # the match because none of the 3 candidates fit.
+                    # Resolve via CRM search; on hit, set as the new
+                    # project_id and persist the thread association so
+                    # future emails on the same thread auto-route here.
+                    typed = ans.free_text or ''
+                    resolved = _resolve_project_by_name(typed)
+                    if resolved.get('project_id'):
+                        final_project_id = resolved['project_id']
+                        action['result'] = (
+                            f'PROJECT override: "{typed[:60]}" -> '
+                            f'{resolved.get("project_name", "?")[:60]} '
+                            f'(id={final_project_id}, '
+                            f'score={resolved.get("match_score", 0.0):.3f})'
+                        )
+                        _persist_thread_association(
+                            conn, reply.triage_id, final_project_id,
+                            reply.user_email,
+                            source='triage_reply_project_override',
+                            action_dict=action,
+                        )
+                        # Memory chunk so the corrected mapping is
+                        # searchable as a learning signal.
+                        _write_toby_memory(
+                            conn,
+                            f'PROJECT override on triage {reply.triage_id}: '
+                            f'"{typed}" -> {resolved.get("project_name", "?")}',
+                            reference_triage_id=reply.triage_id,
+                            tag='triage_project_override',
+                        )
+                    else:
+                        action['result'] = (
+                            f'PROJECT: "{typed[:60]}" — could not resolve '
+                            f'({resolved.get("note", "?")})'
+                        )
+                        _write_toby_memory(
+                            conn,
+                            f'PROJECT override on triage {reply.triage_id} '
+                            f'failed to resolve "{typed}". CRM note: '
+                            f'{resolved.get("note", "?")}.',
+                            reference_triage_id=reply.triage_id,
+                            tag='triage_project_override_unresolved',
+                        )
                 elif ans.verdict == 'deny':
                     # Toby rejected the match — clear confirmed project
                     final_project_id = None
