@@ -323,6 +323,7 @@ export default function VoicePage() {
     setErrorMsg(null)
     setInput('')
     setStagedFiles([])
+    if (textareaRef.current) textareaRef.current.style.height = 'auto'
     textareaRef.current?.focus()
   }, [])
 
@@ -561,6 +562,7 @@ export default function VoicePage() {
         { role: 'user', text: userVisible, at: Date.now() },
       ])
       setInput('')
+      if (textareaRef.current) textareaRef.current.style.height = 'auto'
       // Files are now consumed — clear the chips so they don't re-attach.
       setStagedFiles([])
 
@@ -1018,7 +1020,16 @@ export default function VoicePage() {
             <textarea
               ref={textareaRef}
               value={input}
-              onChange={e => setInput(e.target.value)}
+              onChange={e => {
+                setInput(e.target.value)
+                // Auto-grow to fit content, up to 50vh cap. Manual
+                // resize handle (resize-y) lets the user override
+                // either direction.
+                const el = e.currentTarget
+                el.style.height = 'auto'
+                const cap = Math.floor(window.innerHeight * 0.5)
+                el.style.height = Math.min(el.scrollHeight, cap) + 'px'
+              }}
               onKeyDown={handleKey}
               rows={1}
               autoFocus
@@ -1028,8 +1039,8 @@ export default function VoicePage() {
                   ? `Ask about ${stagedFiles.length === 1 ? 'this file' : 'these files'}…`
                   : `Message ${BRAND}…`
               }
-              className="flex-1 resize-none rounded-2xl border border-gray-300 bg-white px-4 py-3 text-base text-gray-900 placeholder-gray-400 focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:opacity-50"
-              style={{ maxHeight: '10rem' }}
+              className="flex-1 resize-y rounded-2xl border border-gray-300 bg-white px-4 py-3 text-base text-gray-900 placeholder-gray-400 focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:opacity-50"
+              style={{ minHeight: '3rem', maxHeight: '70vh' }}
             />
 
             <button

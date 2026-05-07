@@ -547,8 +547,11 @@ export function ChatWindow() {
   const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value
     setInput(val)
+    // Auto-grow up to 50vh; user can also drag the resize handle
+    // (resize-y on the className) to override either direction.
     e.target.style.height = 'auto'
-    e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'
+    const cap = Math.floor(window.innerHeight * 0.5)
+    e.target.style.height = Math.min(e.target.scrollHeight, cap) + 'px'
     const cursor = e.target.selectionStart ?? val.length
     const atMatch = val.slice(0, cursor).match(/@(\S*)$/)
     if (atMatch) setMentionQuery(atMatch[1])
@@ -1281,7 +1284,7 @@ export function ChatWindow() {
               placeholder={projectId === 'general' ? `Ask ${BRAND} anything…` : (activeSubproject ? `Ask about ${activeSubproject.display_name}…` : `Ask about ${projectId}…`)}
               disabled={loading}
               rows={1}
-              className="min-h-[36px] max-h-[120px] flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 disabled:opacity-50"
+              className="min-h-[36px] max-h-[50vh] flex-1 resize-y bg-transparent px-2 py-1.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 disabled:opacity-50"
             />
 
             {/* Model selector */}
