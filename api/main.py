@@ -202,6 +202,15 @@ async def lifespan(app: FastAPI):
             for pid, agent in _agents.items():
                 await _auto_index_if_empty(pid, agent, db_url)
 
+    # ── Event-loop stall watchdog ───────────────────────────────────────
+    # Detects future wedges and dumps thread/task stacks to stderr so we
+    # can find the cause in logs instead of guessing. See module-level
+    # docstring on `_start_loop_stall_watchdog`.
+    try:
+        _start_loop_stall_watchdog()
+    except Exception as wd_err:
+        print(f'[DEEK startup] Loop watchdog disabled: {wd_err}')
+
     # ── Scheduled reindex background task ───────────────────────────────
     reindex_hours = int(os.getenv('DEEK_REINDEX_INTERVAL_HOURS') or os.getenv('CAIRN_REINDEX_INTERVAL_HOURS', '24'))
     _reindex_task = None
@@ -513,11 +522,32 @@ async def _scheduled_reindex_loop(
                 print(f'[Deek] Scheduled reindex failed {project_id}: {e}')
 
         # ── Wiki freshness check ────────────────────────────────────
-        await _check_wiki_freshness()
+        # MUST run in executor: the body is blocking psycopg2 + file
+        # I/O + sync embedding HTTP calls. Running it directly in the
+        # event loop wedged the API for 90+ seconds at a time and
+        # was the root cause of the recurring "unhealthy" lockups
+        # diagnosed on 2026-05-07. See `_check_wiki_freshness_sync`.
+        try:
+            await asyncio.get_event_loop().run_in_executor(
+                None, _check_wiki_freshness_sync,
+            )
+        except Exception as wfe:
+            print(f'[Deek] Wiki freshness check failed: {wfe}')
 
 
-async def _check_wiki_freshness() -> None:
-    """Re-embed any wiki articles whose file mtime is newer than their DB entry."""
+def _check_wiki_freshness_sync() -> None:
+    """Re-embed any wiki articles whose file mtime is newer than their DB entry.
+
+    Synchronous body — MUST be invoked via `loop.run_in_executor(...)`,
+    never `await`-ed directly. The body holds blocking psycopg2 calls,
+    blocking file I/O, and blocking embedding HTTP requests. With ~200
+    stale wiki articles this can run for 60-120s; running it on the
+    event loop blocks every other request including the healthcheck,
+    which then trips Docker into marking the container `unhealthy`.
+
+    Renamed from `_check_wiki_freshness` (was `async def` with a fully
+    sync body — silent wedge) on 2026-05-07.
+    """
     wiki_root = _CLAW_ROOT / 'wiki'
     if not wiki_root.exists():
         return
@@ -608,6 +638,67 @@ async def _check_wiki_freshness() -> None:
 
 # In-memory index run registry — tracks manual and auto index operations
 _index_runs: dict[str, dict] = {}
+
+
+# ── Event-loop stall watchdog ──────────────────────────────────────────────
+# Background daemon thread that detects when the asyncio event loop stops
+# making progress. Writes a stall warning + stack traces of all running
+# threads + active tasks to stdout when a stall ≥ DEEK_LOOP_STALL_THRESHOLD_S
+# seconds is detected. Required because asyncio-based watchdogs are also
+# blocked when the loop wedges — only a separate thread can detect this.
+#
+# Added 2026-05-07 after the `_check_wiki_freshness` wedge made it clear
+# that we needed visibility into future wedges, not just a safety-net
+# autoheal restart. The threshold defaults to 5s (well above legitimate
+# brief stalls during startup) and can be tuned via env var.
+def _start_loop_stall_watchdog() -> None:
+    import threading, sys as _sys, faulthandler, io
+    threshold = float(os.getenv('DEEK_LOOP_STALL_THRESHOLD_S', '5.0'))
+    if threshold <= 0:
+        print('[Deek watchdog] Disabled (threshold <= 0)')
+        return
+
+    main_loop = asyncio.get_running_loop()
+    last_tick = {'t': time.monotonic()}
+
+    async def _heartbeat():
+        # Runs on the event loop. While the loop is healthy, this fires
+        # every 1s and updates last_tick. When the loop wedges, ticks
+        # stop arriving — the watcher thread sees the gap.
+        while True:
+            last_tick['t'] = time.monotonic()
+            await asyncio.sleep(1.0)
+
+    asyncio.create_task(_heartbeat())
+
+    def _watcher():
+        warned = False
+        while True:
+            time.sleep(1.0)
+            gap = time.monotonic() - last_tick['t']
+            if gap > threshold and not warned:
+                buf = io.StringIO()
+                buf.write(f'\n[Deek watchdog] EVENT LOOP STALLED for {gap:.1f}s '
+                          f'(threshold {threshold}s)\n')
+                buf.write('[Deek watchdog] Dumping all thread stacks:\n')
+                # faulthandler dumps to a file descriptor; use stderr
+                _sys.stderr.flush()
+                _sys.stderr.write(buf.getvalue())
+                _sys.stderr.flush()
+                try:
+                    faulthandler.dump_traceback(_sys.stderr)
+                except Exception as fe:
+                    _sys.stderr.write(f'[Deek watchdog] dump failed: {fe}\n')
+                _sys.stderr.flush()
+                warned = True
+            elif gap < threshold:
+                if warned:
+                    print(f'[Deek watchdog] Loop recovered after stall')
+                warned = False
+
+    t = threading.Thread(target=_watcher, name='deek-loop-watchdog', daemon=True)
+    t.start()
+    print(f'[Deek watchdog] Started (threshold {threshold}s)')
 
 
 app = FastAPI(

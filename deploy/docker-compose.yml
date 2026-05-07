@@ -38,6 +38,14 @@ services:
         # to $(git rev-parse HEAD) so every pull → build cycle
         # invalidates the code layers correctly.
         GIT_COMMIT: ${GIT_COMMIT:-dev}
+    # autoheal label — willfarrell/autoheal sidecar restarts this
+    # container whenever its healthcheck flips to `unhealthy`.
+    # Without this, a wedged event loop (e.g. mid-reindex) leaves
+    # the container marked unhealthy indefinitely; restart:
+    # unless-stopped only reacts to actual exits, not health flips.
+    # See deploy/AUTOHEAL.md for the operational pattern.
+    labels:
+      autoheal: "true"
     restart: unless-stopped
     depends_on:
       deek-db:
@@ -100,6 +108,23 @@ services:
       - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:3020:3000"
+
+  # Watches every container labelled `autoheal=true` and restarts it
+  # the moment its healthcheck flips to `unhealthy`. This is the
+  # safety net for event-loop wedges — without it, a hung deek-api
+  # stays hung until someone notices. Deployed 2026-05-07 after Rex
+  # (jo-pip on nbne1) wedged twice in 26h with the same pattern.
+  deek-autoheal:
+    image: willfarrell/autoheal:latest
+    container_name: deek-autoheal
+    restart: unless-stopped
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+      AUTOHEAL_INTERVAL: "10"
+      AUTOHEAL_START_PERIOD: "60"
+      AUTOHEAL_DEFAULT_STOP_TIMEOUT: "10"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
 
 volumes:
   cairn-pgdata:
