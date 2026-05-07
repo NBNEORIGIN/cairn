@@ -154,6 +154,23 @@ export async function POST(req: NextRequest) {
               finalModel = evt.model_used || ''
               finalLatencyMs = evt.latency_ms || 0
               finalCostUsd = evt.cost_usd || 0
+              // Defensive: the agent's `complete` event carries a
+              // `response` field. Most paths (normal final answer)
+              // also stream that text via preceding `response_delta`
+              // chunks, but several paths skip the stream and put
+              // the text only in `complete.response` —
+              //   - tool approvals (agent.py:781)
+              //   - tool-queued REVIEW/DESTRUCTIVE (agent.py:1065)
+              //   - GenerationStopped (agent.py:1247)
+              //   - GenerationTimedOut (agent.py:1259)
+              // Without this fallback the user sees a blank response.
+              // Diagnosed 2026-05-07 from deek_voice_sessions rows
+              // with response_len=0.
+              if (!assembledResponse && evt.response) {
+                const responseText = String(evt.response)
+                assembledResponse = responseText
+                send('response_delta', { text: responseText })
+              }
               send('done', {
                 session_id: sessionId,
                 model_used: finalModel,
