@@ -184,18 +184,97 @@ def _backfill_m_numbers() -> int:
 
 async def sync_orders(days_back: int = 30) -> dict:
     """Pull orders created in the last ``days_back`` days, flatten into
-    line-item rows, upsert into ebay_sales."""
+    line-item rows, upsert into ebay_sales.
+
+    Side effect: stub-creates ebay_listings rows for any item_id we
+    don't already have, using the title/sku from the sale itself. eBay
+    has two listing-management APIs (modern Inventory, legacy Trading)
+    and the listings sync only sees Inventory-API listings; Trading-API
+    listings still produce sales though, and we need the join target
+    on ebay_listings for the margin engine. Stub-creating from sale
+    data is the cheapest way to close that gap without authenticating
+    against a second API. The m_number backfill that follows resolves
+    the new stubs from ami_sku_mapping.
+    """
     since = datetime.now(timezone.utc) - timedelta(days=days_back)
     async with EbayClient() as client:
         orders = await client.get_orders(creation_date_from=since)
 
     line_rows = list(_flatten_orders(orders))
     upserted = _upsert_sales(line_rows)
+    stubs_created = _stub_listings_from_sales(line_rows, orders)
+    backfilled_total = _backfill_m_numbers() if stubs_created else 0
     return {
-        'orders_pulled': len(orders),
-        'lines_upserted': upserted,
-        'window_start':  since.isoformat(),
+        'orders_pulled':           len(orders),
+        'lines_upserted':          upserted,
+        'listing_stubs_created':   stubs_created,
+        'm_number_backfilled':     backfilled_total,
+        'window_start':            since.isoformat(),
     }
+
+
+def _stub_listings_from_sales(line_rows: list[dict], orders: list[dict]) -> int:
+    """For each unique item_id in the sale rows that doesn't already
+    have an ebay_listings row, insert a stub from the sale data.
+
+    The order line items carry ``title`` (eBay's order response includes
+    the listing title per line). We pull that out of the original orders
+    payload — line_rows already lost it because _flatten_orders only
+    keeps PII-safe + margin-relevant fields. Walk orders[*]['lineItems']
+    again to extract titles.
+    """
+    # Build {item_id: title} from the original order payloads
+    title_by_item: dict[int, str] = {}
+    sku_by_item: dict[int, str] = {}
+    for o in orders:
+        for li in (o.get('lineItems') or []):
+            raw = li.get('legacyItemId') or li.get('itemId')
+            try:
+                lid = int(raw) if raw else None
+            except (ValueError, TypeError):
+                lid = None
+            if not lid:
+                continue
+            title = li.get('title') or li.get('lineItemName') or ''
+            sku = (li.get('sku') or '').strip() or None
+            if title and lid not in title_by_item:
+                title_by_item[lid] = title
+            if sku and lid not in sku_by_item:
+                sku_by_item[lid] = sku
+
+    if not sku_by_item:
+        return 0
+
+    # Filter to item_ids not already in ebay_listings
+    item_ids = list(sku_by_item.keys())
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                'SELECT item_id FROM ebay_listings WHERE item_id = ANY(%s)',
+                (item_ids,),
+            )
+            existing = {row[0] for row in cur.fetchall()}
+    missing = [lid for lid in item_ids if lid not in existing]
+    if not missing:
+        return 0
+
+    n = 0
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for lid in missing:
+                cur.execute(
+                    """
+                    INSERT INTO ebay_listings
+                        (item_id, sku, title, state, last_synced)
+                    VALUES (%s, %s, %s, 'active', NOW())
+                    ON CONFLICT (item_id) DO NOTHING
+                    """,
+                    (lid, sku_by_item.get(lid), title_by_item.get(lid)),
+                )
+                if cur.rowcount > 0:
+                    n += 1
+        conn.commit()
+    return n
 
 
 def _flatten_orders(orders: list[dict]):
