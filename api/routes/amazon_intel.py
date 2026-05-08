@@ -338,6 +338,64 @@ async def spapi_advertising_profiles_db(
     return {'region': region, 'count': len(profiles), 'profiles': profiles}
 
 
+@router.get("/advertising/spend")
+async def advertising_spend(days: int = Query(30, ge=1, le=180)):
+    """Daily Amazon Ads spend per marketplace for downstream consumers (Ledger).
+
+    Aggregates ami_advertising_data over the last N days, joined to
+    ami_advertising_profiles to map profile_id → country_code. Country codes
+    are normalised to ISO codes (UK → GB) so the response matches the
+    marketplace convention used elsewhere (ami_orders.marketplace).
+
+    Returns one row per (date, marketplace) with summed spend, impressions,
+    clicks, sales_7d, orders_7d. Only rows with report_date set are included
+    (legacy bulk uploads without per-day segmentation are excluded).
+    """
+    from core.amazon_intel.db import get_conn
+
+    sql = """
+        SELECT
+            d.report_date,
+            COALESCE(p.country_code, 'UNKNOWN') AS country_code,
+            COALESCE(p.currency_code, '') AS currency_code,
+            SUM(d.spend)::numeric(12,2) AS spend,
+            SUM(d.impressions)::bigint AS impressions,
+            SUM(d.clicks)::bigint AS clicks,
+            SUM(d.sales_7d)::numeric(12,2) AS sales_7d,
+            SUM(d.orders_7d)::bigint AS orders_7d
+        FROM ami_advertising_data d
+        LEFT JOIN ami_advertising_profiles p ON p.profile_id = d.profile_id
+        WHERE d.report_date IS NOT NULL
+          AND d.report_date >= CURRENT_DATE - make_interval(days => %s)
+        GROUP BY d.report_date, p.country_code, p.currency_code
+        ORDER BY d.report_date DESC, country_code
+    """
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (days,))
+            rows = cur.fetchall()
+
+    # UK → GB normalisation so consumers receive a single canonical marketplace
+    # code matching ami_orders.marketplace.
+    def _normalise(code: str) -> str:
+        return "GB" if code == "UK" else code
+
+    return [
+        {
+            "date": r[0].isoformat() if r[0] else None,
+            "marketplace": _normalise(r[1]),
+            "currency": r[2] or None,
+            "spend": float(r[3] or 0),
+            "impressions": int(r[4] or 0),
+            "clicks": int(r[5] or 0),
+            "sales_7d": float(r[6] or 0),
+            "orders_7d": int(r[7] or 0),
+        }
+        for r in rows
+    ]
+
+
 # ── Margin intelligence ───────────────────────────────────────────────────────
 
 
