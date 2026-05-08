@@ -164,6 +164,16 @@ export function TopMenu({
             hint={currentVoice || 'auto — best available'}
           />
           <div className="border-t border-slate-800" />
+          {/* Social — Jo's drafting/proofreading surface for Facebook,
+              Instagram, LinkedIn. Re-added 2026-05-08 after the /voice
+              UX simplification removed the global NavBar (which carried
+              the Social link) on /voice pages. */}
+          <MenuItem
+            onClick={() => { window.location.href = '/social' }}
+            label="Social"
+            hint="draft & proofread posts"
+          />
+          <div className="border-t border-slate-800" />
           <MenuItem onClick={handleLogout} label="Sign out" />
         </div>
       )}
