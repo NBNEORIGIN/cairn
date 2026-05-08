@@ -27,7 +27,8 @@ DEFAULT_PERMISSIONS = {
         'retrieve_similar_decisions', 'search_crm', 'analyze_enquiry',
         'write_crm_memory', 'mark_crm_actioned', 'set_crm_project_folder',
         'get_quote_context', 'search_similar_quotes', 'review_quote_draft',
-        'write_wiki', 'get_sku_costs', 'search_manuals',
+        'write_wiki', 'promote_wiki_to_canon',
+        'get_sku_costs', 'search_manuals',
     ],
     'readonly': [
         'read_file', 'search_code', 'query_amazon_intel',
@@ -54,7 +55,7 @@ DEFAULT_PERMISSIONS = {
         'analyze_enquiry',
         'write_crm_memory', 'mark_crm_actioned', 'set_crm_project_folder',
         'get_quote_context', 'search_similar_quotes', 'review_quote_draft',
-        'write_wiki',
+        'write_wiki', 'promote_wiki_to_canon',
         'get_sku_costs', 'search_manuals',
     ],
 }
@@ -537,6 +538,22 @@ TOOL_SCHEMAS: dict[str, dict] = {
             },
         },
         'required': ['title', 'content'],
+    },
+    'promote_wiki_to_canon': {
+        'type': 'object',
+        'properties': {
+            'draft': {
+                'type': 'string',
+                'description': (
+                    'The slug or filename of the draft to promote — '
+                    'use the DRAFT_SLUG returned by write_wiki '
+                    '(e.g. "brass-relief-plaque" or '
+                    '"brass-relief-plaque.md"). Must be a file in '
+                    'data/wiki-drafts/.'
+                ),
+            },
+        },
+        'required': ['draft'],
     },
     'analyze_enquiry': {
         'type': 'object',

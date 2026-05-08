@@ -16,6 +16,7 @@
     "search_similar_quotes",
     "review_quote_draft",
     "write_wiki",
+    "promote_wiki_to_canon",
     "search_wiki",
     "search_emails",
     "get_module_snapshot",
