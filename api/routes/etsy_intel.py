@@ -466,3 +466,90 @@ async def deek_context():
     """Module context endpoint per DEEK_MODULES.md spec."""
     from core.etsy_intel.reports import build_deek_context
     return build_deek_context()
+
+
+# ── Margin (per-listing profitability — mirrors /ami/margin/per-sku) ────────
+
+@router.get("/margin/per-sku", dependencies=[Depends(verify_api_key)])
+async def margin_per_sku(
+    lookback_days: int = Query(30, ge=1, le=365),
+    shop_id: Optional[int] = Query(
+        None,
+        description=(
+            "Optional shop_id filter — NBNE has a single Etsy shop "
+            "today (NorthByNorthEastSign), so omitting is the normal "
+            "case. Reserved for future per-shop breakdown."
+        ),
+    ),
+    min_units: int = Query(0, ge=0),
+):
+    """
+    Per-listing margin breakdown for Etsy. One row per listing_id.
+
+    **Currency contract:** every monetary field is GBP, regardless of
+    buyer country. Etsy is GBP-native for NBNE today; non-GBP receipts
+    aren't currently captured (etsy_sales has no currency column),
+    treated as GBP at face value. ``fx_rate_used`` is included for
+    parity with /ami/margin/per-sku — all rates are 1.0 since Etsy
+    runs single-currency for now.
+
+    **Fee model — Etsy rate card v1:**
+      - Transaction fee: 6.5% of (price + shipping)
+      - Payment processing: 4% of total + £0.20 per transaction
+      - Listing fee: 0 (cannot be amortised correctly per-unit; v2)
+      - Off-site Ads: 0 — see ``off_site_ads_excluded`` below
+
+    **VAT:** 20% UK rate applied uniformly across all sales (UK
+    dominant; per-order country is a v2 follow-up). The Amazon engine
+    uses the same convention.
+
+    **Confidence:** HIGH if cost_source=override AND m_number resolved;
+    MEDIUM if exactly one missing; LOW if both.
+
+    **Known under-statements (declared in response):**
+      - ``off_site_ads_excluded: true`` — shops auto-enrolled in Etsy
+        Off-site Ads pay an additional 12-15% on those orders. v1
+        treats every order as direct.
+      - ``listing_fee_excluded: true`` — $0.20 per listing per 4 months
+        amortisation is a v2 follow-up.
+    """
+    from core.etsy_intel.margin.per_sku import (
+        compute_margins, margin_to_dict, bucket_margins,
+    )
+    margins = await compute_margins(
+        lookback_days=lookback_days, shop_id=shop_id,
+    )
+    if min_units:
+        margins = [m for m in margins if m.units >= min_units]
+    return {
+        'marketplace': 'ETSY',
+        'lookback_days': lookback_days,
+        'currency': 'GBP',
+        'fx_rate_used': {'GBP': 1.0},
+        'off_site_ads_excluded': True,
+        'listing_fee_excluded': True,
+        'fee_source': 'etsy_rate_card_v1',
+        'summary': bucket_margins(margins),
+        'results': [margin_to_dict(m) for m in margins],
+    }
+
+
+@router.get("/margin/buckets", dependencies=[Depends(verify_api_key)])
+async def margin_buckets(
+    lookback_days: int = Query(30, ge=1, le=365),
+    shop_id: Optional[int] = Query(None),
+):
+    """Summary-only — cheap to poll for the combined-view top-line."""
+    from core.etsy_intel.margin.per_sku import (
+        compute_margins, bucket_margins,
+    )
+    margins = await compute_margins(
+        lookback_days=lookback_days, shop_id=shop_id,
+    )
+    return {
+        'marketplace': 'ETSY',
+        'lookback_days': lookback_days,
+        'currency': 'GBP',
+        'fx_rate_used': {'GBP': 1.0},
+        'summary': bucket_margins(margins),
+    }
