@@ -923,14 +923,32 @@ async def margin_per_sku(
     """
     Compute margin per SKU for a marketplace. Joins orders + fee snapshots +
     Manufacture costs + ad spend. Returns one row per ASIN.
+
+    **Currency contract (fixed 2026-05-08):** every monetary field in this
+    response is **GBP**, regardless of the ``marketplace`` query param.
+    Revenue / fees / ad spend / profit / margin% are converted from
+    marketplace-native currency (USD / EUR / CAD / AUD) using a daily FX
+    snapshot (``ami_fx_rates``); UK passes through at rate=1.0 so its
+    numbers are byte-identical to the pre-fix behaviour. Manufacture's
+    COGS is already GBP. The response surfaces:
+
+      ``currency``       always "GBP" — the contract.
+      ``fx_rate_used``   {"USD": 1.27, "EUR": 1.17, ...} — rates that
+                         applied for spot-checks against a known reference.
+
+    The frontend's CURRENCY map should display "£" regardless of the
+    marketplace tab.
     """
     from core.amazon_intel.margin.per_sku import compute_margins, margin_to_dict, bucket_margins
+    from core.amazon_intel.fx import bulk_rates
     margins = await compute_margins(marketplace, lookback_days=lookback_days)
     if min_units:
         margins = [m for m in margins if m.units >= min_units]
     return {
         'marketplace': marketplace.upper(),
         'lookback_days': lookback_days,
+        'currency': 'GBP',
+        'fx_rate_used': bulk_rates(),
         'summary': bucket_margins(margins),
         'results': [margin_to_dict(m) for m in margins],
     }
@@ -941,12 +959,20 @@ async def margin_buckets(
     marketplace: str = Query(...),
     lookback_days: int = Query(30, ge=1, le=180),
 ):
-    """Summary-only version of /margin/per-sku — cheap to poll from the UI."""
+    """Summary-only version of /margin/per-sku — cheap to poll from the UI.
+
+    Same currency contract: ``summary.total_net_revenue`` and
+    ``summary.total_net_profit`` are GBP. ``fx_rate_used`` is included so
+    the UI can show "FX rate as of ..." somewhere if it wants.
+    """
     from core.amazon_intel.margin.per_sku import compute_margins, bucket_margins
+    from core.amazon_intel.fx import bulk_rates
     margins = await compute_margins(marketplace, lookback_days=lookback_days)
     return {
         'marketplace': marketplace.upper(),
         'lookback_days': lookback_days,
+        'currency': 'GBP',
+        'fx_rate_used': bulk_rates(),
         'summary': bucket_margins(margins),
     }
 

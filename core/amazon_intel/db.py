@@ -504,6 +504,34 @@ CREATE TABLE IF NOT EXISTS ami_fee_snapshots (
 );
 CREATE INDEX IF NOT EXISTS ami_fee_snapshots_asin_idx ON ami_fee_snapshots (asin);
 CREATE INDEX IF NOT EXISTS ami_fee_snapshots_mp_idx ON ami_fee_snapshots (marketplace, estimated_at DESC);
+
+-- Daily FX rates — used by /ami/margin/per-sku to convert USD/EUR/CAD/AUD
+-- revenue, fees, and ad spend to GBP so the response is currency-uniform.
+-- Without this, /ami/margin/per-sku subtracts GBP COGS from USD revenue
+-- and over-states non-UK profit by 25-50% depending on the rate
+-- (diagnosed 2026-05-08 from a US worked example: $87.44 - £12.72 = $32.18,
+-- truth in GBP was £22.63, page showed £25.34-equivalent).
+--
+-- ``unit_per_gbp`` is the natural way to read FX rates ("1 GBP = 1.27 USD"),
+-- and to convert: gbp_amount = native_amount / unit_per_gbp. UK / GBP rows
+-- carry unit_per_gbp = 1.0 so the same code path handles every marketplace
+-- without special-casing.
+--
+-- One row per (as_of_date, currency_code). The daily ingest script
+-- (scripts/run_fx_sync.py) UPSERTs today's rate; the lookup helper falls
+-- back to the most recent within 7 days and then to a configured default
+-- if the daily fetch is unreachable.
+CREATE TABLE IF NOT EXISTS ami_fx_rates (
+    id              SERIAL PRIMARY KEY,
+    as_of_date      DATE            NOT NULL,
+    currency_code   VARCHAR(5)      NOT NULL,    -- USD | EUR | CAD | AUD | GBP | ...
+    unit_per_gbp    NUMERIC(12,6)   NOT NULL,    -- 1 GBP = N <currency>; GBP=1.0
+    source          VARCHAR(40),                 -- e.g. 'frankfurter.app' or 'manual'
+    fetched_at      TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+    CONSTRAINT ami_fx_rates_unique UNIQUE (as_of_date, currency_code)
+);
+CREATE INDEX IF NOT EXISTS ami_fx_rates_currency_date_idx
+    ON ami_fx_rates (currency_code, as_of_date DESC);
 """
 
 

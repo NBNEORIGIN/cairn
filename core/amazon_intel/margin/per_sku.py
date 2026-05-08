@@ -28,6 +28,7 @@ from decimal import Decimal
 from typing import Optional
 
 from ..db import get_conn
+from ..fx import convert_to_gbp, marketplace_currency
 from ..manufacture_client import get_costs_bulk
 from ..vat import net_revenue
 from .quartile_brief import MARKETPLACE_ALIASES
@@ -177,9 +178,12 @@ def _fetch_channel_revenue_summary(lookback_days: int = 30) -> dict[str, Decimal
     """
     Aggregate net revenue across all channels for overhead allocation.
     Returns dict with keys: 'amazon_total', 'etsy', per-marketplace totals.
-    All values in GBP (Amazon marketplaces converted via VAT rate).
+    All values in GBP — Amazon marketplaces converted via VAT rate AND
+    FX (the docstring used to claim GBP-uniform but only VAT was applied,
+    silently leaving USD/EUR/CAD/AUD mixed in. Fixed 2026-05-08).
     """
     from ..vat import net_revenue as nr
+    from ..fx import convert_to_gbp, marketplace_currency
 
     out: dict[str, Decimal] = {}
 
@@ -197,7 +201,10 @@ def _fetch_channel_revenue_summary(lookback_days: int = 30) -> dict[str, Decimal
             cur.execute(sql, {'days': lookback_days})
             for mkt, gross in cur.fetchall():
                 if gross:
-                    net = nr(Decimal(str(gross)), mkt)
+                    gross_gbp = convert_to_gbp(
+                        Decimal(str(gross)), marketplace_currency(mkt),
+                    )
+                    net = nr(gross_gbp, mkt)
                     out[f'amazon_{mkt}'] = net
                     amazon_total += net
     out['amazon_total'] = amazon_total
@@ -296,17 +303,37 @@ async def compute_margins(
         total_rev, mkt_units, overhead_per_unit, flat_overhead,
     )
 
+    # ── Currency normalisation ──────────────────────────────────────────
+    # Everything in this function operates in GBP from this point on.
+    # ami_orders revenue, ami_fee_snapshots fees, and ami_advertising_data
+    # spend are all in marketplace-native currency (USD/EUR/CAD/AUD).
+    # Manufacture's COGS is already GBP. Mixing the two over-states
+    # non-UK profit by 25-50% — fixed 2026-05-08 by converting native
+    # values to GBP at the row level using a daily FX snapshot
+    # (ami_fx_rates). UK passes through at rate=1.0 so its numbers are
+    # byte-identical to the pre-FX behaviour.
+    native_currency = marketplace_currency(canonical)
+
     results: list[SkuMargin] = []
     for (asin, mkt), agg in orders.items():
         units = agg['units']
-        gross = agg['gross_revenue']
+        # Convert revenue native → GBP up front; net_revenue (VAT) is then
+        # applied to the GBP amount. The VAT rate logic doesn't care about
+        # currency — it's a multiplicative percentage off gross.
+        gross_native = agg['gross_revenue']
+        gross = convert_to_gbp(gross_native, native_currency)
         net = net_revenue(gross, mkt)
         m_number = agg.get('m_number')
 
         fee_row = fees.get(asin)
         if fee_row and fee_row.get('total_fees') is not None and fee_row.get('api_status') == 'Success':
-            fees_per_unit = Decimal(str(fee_row['total_fees']))
+            # Fees from getMyFeesEstimate are in the marketplace currency
+            # too — convert to GBP at the same rate so subtraction is
+            # currency-consistent.
+            fees_per_unit_native = Decimal(str(fee_row['total_fees']))
+            fees_per_unit = convert_to_gbp(fees_per_unit_native, native_currency)
             fees_total = (fees_per_unit * units).quantize(TWO_PLACES)
+            fees_per_unit = fees_per_unit.quantize(TWO_PLACES)
             fee_source = 'snapshot'
         else:
             fees_per_unit = None
@@ -336,7 +363,10 @@ async def compute_margins(
             blank_raw = None
             blank_normalized = None
 
-        ad_spend = ads.get(asin, ZERO)
+        # Ad spend native → GBP. Amazon Ads reports spend in marketplace
+        # currency; this is the third leg of the conversion.
+        ad_spend_native = ads.get(asin, ZERO)
+        ad_spend = convert_to_gbp(ad_spend_native, native_currency).quantize(TWO_PLACES)
 
         if fees_total is not None and cogs_total is not None:
             gross_profit = (net - fees_total - cogs_total).quantize(TWO_PLACES)
@@ -360,7 +390,7 @@ async def compute_margins(
             fees_total=fees_total,
             cogs_per_unit=cogs_per_unit,
             cogs_total=cogs_total,
-            ad_spend=ad_spend.quantize(TWO_PLACES),
+            ad_spend=ad_spend,
             gross_profit=gross_profit,
             gross_margin_pct=gross_margin_pct,
             net_profit=net_profit,
