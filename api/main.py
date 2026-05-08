@@ -168,6 +168,14 @@ async def lifespan(app: FastAPI):
     except Exception as etsy_err:
         print(f'[DEEK startup] Etsy Intel schema failed: {etsy_err}')
 
+    # ── eBay Intelligence schema ───────────────────────────────────────
+    try:
+        from core.ebay_intel.db import ensure_schema as ebay_ensure_schema
+        ebay_ensure_schema()
+        print('[DEEK startup] eBay Intel schema ready')
+    except Exception as ebay_err:
+        print(f'[DEEK startup] eBay Intel schema failed: {ebay_err}')
+
     # ── Email Ingestion schema ─────────────────────────────────────────
     try:
         from core.email_ingest.db import ensure_schema as email_ensure_schema
@@ -3484,6 +3492,10 @@ app.include_router(ami_analytics_router)
 # Register Etsy Intelligence routes
 from api.routes.etsy_intel import router as etsy_router
 app.include_router(etsy_router)
+
+# Register eBay Intelligence routes
+from api.routes.ebay_intel import router as ebay_router
+app.include_router(ebay_router)
 
 # Register Wiki Layer routes
 from api.routes.wiki import router as wiki_router
