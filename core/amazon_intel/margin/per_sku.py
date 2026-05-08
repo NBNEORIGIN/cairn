@@ -418,6 +418,12 @@ def bucket_margins(margins: list[SkuMargin]) -> dict:
     """
     Summary buckets for the top-line margin panel. Uses net_margin_pct
     quartiles, but drops SKUs without a computed margin.
+
+    The summary also surfaces loss-makers directly so a consumer can
+    answer "what's bleeding cash?" without iterating the full results
+    list. Toby's framing 2026-05-08: the per-SKU endpoints exist to
+    spot loss-making vs profitable products; the summary now makes
+    that visible at the top-line level alongside the bucket counts.
     """
     scored = [m for m in margins if m.net_margin_pct is not None]
     all_net_rev = round(sum((float(m.net_revenue) for m in margins), 0.0), 2)
@@ -428,6 +434,8 @@ def bucket_margins(margins: list[SkuMargin]) -> dict:
             'buckets': {'healthy': 0, 'thin': 0, 'unprofitable': 0, 'unknown': len(margins)},
             'total_net_revenue': all_net_rev,
             'total_net_profit': 0.0,
+            'total_loss_bleed': 0.0,
+            'top_loss_makers': [],
         }
     healthy = thin = unprofitable = 0
     for m in scored:
@@ -442,6 +450,35 @@ def bucket_margins(margins: list[SkuMargin]) -> dict:
     # Profit only includes scored SKUs (requires COGS to compute).
     total_net_rev = sum((float(m.net_revenue) for m in margins), 0.0)
     total_net_profit = sum((float(m.net_profit or 0) for m in scored), 0.0)
+
+    # Loss bleed — sum of negative net_profit across scored SKUs. Always
+    # negative or zero. Tells you "if I retired every loss-maker I'd
+    # save £X over this lookback window" (rough — assumes no spillover
+    # demand; treat as upper bound of recoverable margin).
+    losers = [m for m in scored if (m.net_profit or 0) < 0]
+    total_loss_bleed = round(
+        sum(float(m.net_profit or 0) for m in losers), 2,
+    )
+
+    # Top 5 loss-makers by absolute £ loss, surfaced in the summary so
+    # the frontend can show a "biggest bleeders" panel without
+    # post-processing the full results array. Each entry is a thin
+    # dict — full row still in `results`.
+    top_losers = sorted(losers, key=lambda x: float(x.net_profit or 0))[:5]
+    top_loss_makers = [
+        {
+            'asin': m.asin,
+            'm_number': m.m_number,
+            'marketplace': m.marketplace,
+            'units': m.units,
+            'net_revenue': float(m.net_revenue),
+            'net_profit': float(m.net_profit or 0),
+            'net_margin_pct': float(m.net_margin_pct or 0),
+            'confidence': m.confidence,
+        }
+        for m in top_losers
+    ]
+
     return {
         'total_skus': len(margins),
         'scored_skus': len(scored),
@@ -453,4 +490,6 @@ def bucket_margins(margins: list[SkuMargin]) -> dict:
         },
         'total_net_revenue': round(total_net_rev, 2),
         'total_net_profit': round(total_net_profit, 2),
+        'total_loss_bleed': total_loss_bleed,
+        'top_loss_makers': top_loss_makers,
     }

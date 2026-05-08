@@ -336,7 +336,14 @@ def margin_to_dict(m: EtsyMargin) -> dict:
 
 
 def bucket_margins(margins: list[EtsyMargin]) -> dict:
-    """Same bucket shape as Amazon engine for cross-channel summary parity."""
+    """Same bucket shape as Amazon engine for cross-channel summary parity.
+
+    Surfaces ``total_loss_bleed`` (negative-only sum) and
+    ``top_loss_makers`` (top 5 by absolute £ loss) so the frontend can
+    show a "biggest bleeders" panel without post-processing results.
+    Toby's framing 2026-05-08: the endpoint exists to spot which SKUs
+    are loss-making — bake that into the summary.
+    """
     scored = [m for m in margins if m.net_margin_pct is not None]
     all_net_rev = round(sum((float(m.net_revenue) for m in margins), 0.0), 2)
     if not scored:
@@ -347,6 +354,8 @@ def bucket_margins(margins: list[EtsyMargin]) -> dict:
                         'unknown': len(margins)},
             'total_net_revenue': all_net_rev,
             'total_net_profit': 0.0,
+            'total_loss_bleed': 0.0,
+            'top_loss_makers': [],
         }
     healthy = thin = unprofitable = 0
     for m in scored:
@@ -359,6 +368,26 @@ def bucket_margins(margins: list[EtsyMargin]) -> dict:
             unprofitable += 1
     total_net_rev = sum((float(m.net_revenue) for m in margins), 0.0)
     total_net_profit = sum((float(m.net_profit or 0) for m in scored), 0.0)
+
+    losers = [m for m in scored if (m.net_profit or 0) < 0]
+    total_loss_bleed = round(
+        sum(float(m.net_profit or 0) for m in losers), 2,
+    )
+    top_losers = sorted(losers, key=lambda x: float(x.net_profit or 0))[:5]
+    top_loss_makers = [
+        {
+            'asin': m.asin,
+            'm_number': m.m_number,
+            'marketplace': m.marketplace,
+            'units': m.units,
+            'net_revenue': float(m.net_revenue),
+            'net_profit': float(m.net_profit or 0),
+            'net_margin_pct': float(m.net_margin_pct or 0),
+            'confidence': m.confidence,
+        }
+        for m in top_losers
+    ]
+
     return {
         'total_skus': len(margins),
         'scored_skus': len(scored),
@@ -370,4 +399,6 @@ def bucket_margins(margins: list[EtsyMargin]) -> dict:
         },
         'total_net_revenue': round(total_net_rev, 2),
         'total_net_profit': round(total_net_profit, 2),
+        'total_loss_bleed': total_loss_bleed,
+        'top_loss_makers': top_loss_makers,
     }
