@@ -55,7 +55,10 @@ logger = logging.getLogger('fx_sync')
 
 # Free, no-auth ECB-sourced rates. Returns JSON like
 # {"date":"2026-05-08","base":"GBP","rates":{"USD":1.2734,"EUR":1.1683,...}}
-FRANKFURTER_LATEST_URL = 'https://api.frankfurter.app/latest'
+# Frankfurter migrated domains in 2026; old api.frankfurter.app 301s
+# to api.frankfurter.dev/v1. httpx doesn't follow redirects by default
+# so we hit the new URL directly.
+FRANKFURTER_LATEST_URL = 'https://api.frankfurter.dev/v1/latest'
 
 # Currencies we need GBP rates for. GBP itself goes in too with rate=1.0
 # so the FX lookup helper has a row to read for the no-op case.
