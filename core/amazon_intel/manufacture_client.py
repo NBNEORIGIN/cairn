@@ -106,7 +106,10 @@ async def batch_product_data(m_numbers: list[str]) -> dict[str, dict]:
     return result
 
 
-async def get_costs_bulk(m_numbers: list[str] | None = None) -> tuple[dict[str, dict], dict]:
+async def get_costs_bulk(
+    m_numbers: list[str] | None = None,
+    marketplace: str | None = None,
+) -> tuple[dict[str, dict], dict]:
     """
     Fetch Manufacture cost breakdown for many M-numbers in a single call.
 
@@ -116,12 +119,22 @@ async def get_costs_bulk(m_numbers: list[str] | None = None) -> tuple[dict[str, 
     costs_by_m_number: dict keyed by M-number with cost breakdown
     overhead_context: dict with monthly_overhead_gbp, b2b/ebay revenue, etc.
 
+    ``marketplace`` (UK / US / DE / FR / ...) — when set, Manufacture
+    returns marketplace-specific COGS from MNumberCostOverride if one
+    exists for that marketplace, falling back to the product default
+    and then to the cost engine. Threaded through 2026-05-08 so
+    /ami/margin/per-sku can reflect per-marketplace cost overrides
+    without a schema change. Omit (or pass None) for the legacy
+    marketplace-agnostic behaviour.
+
     Returns (empty dict, empty dict) if the API is unreachable.
     """
     params: dict = {}
     if m_numbers:
         # Keep URL length reasonable — cap at ~2000 M-numbers per call.
         params['m_numbers'] = ','.join(sorted({m for m in m_numbers if m})[:2000])
+    if marketplace:
+        params['marketplace'] = marketplace
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(

@@ -239,7 +239,16 @@ async def compute_margins(
     ads = _fetch_ad_spend(marketplace, lookback_days)
 
     m_numbers = sorted({v['m_number'] for v in orders.values() if v.get('m_number')})
-    costs, overhead_ctx = await get_costs_bulk(m_numbers) if m_numbers else ({}, {})
+    # Thread the marketplace param so Manufacture's MNumberCostOverride
+    # can return per-marketplace COGS (UK override beats default, etc).
+    # Added 2026-05-08 — additive on the Manufacture side, no schema
+    # change here. Falls back to default + cost engine when no override
+    # exists for this marketplace. The .upper() normalisation matches
+    # what /margin/per-sku already does for its own canonical handling.
+    costs, overhead_ctx = (
+        await get_costs_bulk(m_numbers, marketplace=marketplace.upper())
+        if m_numbers else ({}, {})
+    )
 
     # Channel-weighted overhead calculation
     channel_rev = _fetch_channel_revenue_summary(lookback_days)
