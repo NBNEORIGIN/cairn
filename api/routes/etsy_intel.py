@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse, HTMLResponse
+from pydantic import BaseModel, ConfigDict
 from typing import Optional
 import logging
 import httpx
@@ -516,22 +517,29 @@ async def margin_per_sku(
     from core.etsy_intel.margin.per_sku import (
         compute_margins, margin_to_dict, bucket_margins,
     )
-    margins = await compute_margins(
+    margins, ad_meta = await compute_margins(
         lookback_days=lookback_days, shop_id=shop_id,
     )
     if min_units:
         margins = [m for m in margins if m.units >= min_units]
-    return {
+    response: dict = {
         'marketplace': 'ETSY',
         'lookback_days': lookback_days,
         'currency': 'GBP',
         'fx_rate_used': {'GBP': 1.0},
-        'off_site_ads_excluded': True,
         'listing_fee_excluded': True,
         'fee_source': 'etsy_rate_card_v1',
         'summary': bucket_margins(margins),
         'results': [margin_to_dict(m) for m in margins],
     }
+    # Off-site ads / ad-data provenance: if any ad-spend record fed
+    # into this response, drop the ``off_site_ads_excluded`` flag and
+    # stamp the source(s) so the consumer can show provenance.
+    if ad_meta.get('has_ad_data'):
+        response['ad_data_source'] = ','.join(ad_meta.get('ad_sources') or [])
+    else:
+        response['off_site_ads_excluded'] = True
+    return response
 
 
 @router.get("/margin/buckets", dependencies=[Depends(verify_api_key)])
@@ -543,13 +551,371 @@ async def margin_buckets(
     from core.etsy_intel.margin.per_sku import (
         compute_margins, bucket_margins,
     )
-    margins = await compute_margins(
+    margins, ad_meta = await compute_margins(
         lookback_days=lookback_days, shop_id=shop_id,
     )
-    return {
+    response: dict = {
         'marketplace': 'ETSY',
         'lookback_days': lookback_days,
         'currency': 'GBP',
         'fx_rate_used': {'GBP': 1.0},
         'summary': bucket_margins(margins),
+    }
+    if ad_meta.get('has_ad_data'):
+        response['ad_data_source'] = ','.join(ad_meta.get('ad_sources') or [])
+    else:
+        response['off_site_ads_excluded'] = True
+    return response
+
+
+# ── Ad spend ingestion + listings lookup ───────────────────────────────────
+
+class _AdSpendRow(BaseModel):
+    """Single per-listing ad-spend row in a manual-paste batch."""
+    model_config = ConfigDict(extra='ignore')
+    listing_id:     int
+    views:          Optional[int] = None
+    clicks:         Optional[int] = None
+    orders_attrib:  Optional[int] = None
+    revenue_attrib: Optional[float] = None
+    spend:          float
+
+
+class _AdSpendBatch(BaseModel):
+    """Whole-batch payload from Manufacture's paste form."""
+    model_config = ConfigDict(extra='ignore')
+    period_start:    str   # YYYY-MM-DD
+    period_end:      str   # YYYY-MM-DD
+    source_currency: str = 'USD'
+    source:          str = 'manual_paste_v1'
+    uploaded_by:     Optional[str] = None
+    rows:            list[_AdSpendRow]
+
+
+@router.post("/ad-spend/ingest", dependencies=[Depends(verify_api_key)])
+async def ad_spend_ingest(payload: _AdSpendBatch):
+    """
+    Ingest a batch of per-listing ad-spend rows from the Manufacture
+    paste form. Behaviour per the brief:
+
+      1. Validate period_end >= period_start, listing_ids are ints,
+         spend >= 0.
+      2. Resolve a single FX rate at period midpoint (cached for the
+         batch) using the historical-aware ``convert_to_gbp(amount,
+         currency, as_of=...)`` helper.
+      3. Upsert with ON CONFLICT (listing_id, period_start, period_end)
+         DO UPDATE — re-uploads of the same window replace cleanly.
+      4. listing_ids that don't exist in etsy_listings are returned in
+         ``unknown_listings``; the valid rows still upsert.
+      5. Wrap in one transaction so partial failures leave prior data
+         intact.
+    """
+    from datetime import date as _date, timedelta as _timedelta
+    from decimal import Decimal as _Dec
+    from core.amazon_intel.fx import get_rate
+
+    try:
+        period_start = _date.fromisoformat(payload.period_start)
+        period_end = _date.fromisoformat(payload.period_end)
+    except ValueError as exc:
+        raise HTTPException(422, f'invalid period date: {exc}')
+    if period_end < period_start:
+        raise HTTPException(422, 'period_end must be >= period_start')
+
+    if not payload.rows:
+        raise HTTPException(422, 'rows: at least one row required')
+    for r in payload.rows:
+        if r.spend is None or r.spend < 0:
+            raise HTTPException(
+                422,
+                f'spend must be >= 0 (listing {r.listing_id}: {r.spend})',
+            )
+
+    # FX at period midpoint — historical-aware lookup against
+    # ami_fx_rates so April spend uploaded in May uses an April rate.
+    midpoint = period_start + _timedelta(
+        days=(period_end - period_start).days // 2,
+    )
+    currency_code = (payload.source_currency or 'USD').upper()
+    fx_rate_decimal = get_rate(currency_code, as_of=midpoint)
+    fx_rate = float(fx_rate_decimal)
+
+    from core.etsy_intel.db import get_conn as _get_conn
+    unknown: list[int] = []
+    rows_upserted = 0
+    rows_replaced = 0
+    total_spend_gbp = _Dec('0')
+
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            # 1. Find which listing_ids exist
+            input_listing_ids = sorted({r.listing_id for r in payload.rows})
+            cur.execute(
+                "SELECT listing_id FROM etsy_listings WHERE listing_id = ANY(%s)",
+                (input_listing_ids,),
+            )
+            valid_ids = {row[0] for row in cur.fetchall()}
+            unknown = sorted(set(input_listing_ids) - valid_ids)
+
+            for r in payload.rows:
+                if r.listing_id not in valid_ids:
+                    continue
+                spend_native = _Dec(str(r.spend))
+                # Convert native → GBP; GBP source short-circuits to
+                # the input. fx_rate=1.0 in that case.
+                if currency_code == 'GBP':
+                    spend_gbp = spend_native
+                else:
+                    spend_gbp = (spend_native / fx_rate_decimal)
+                spend_gbp = spend_gbp.quantize(_Dec('0.01'))
+                total_spend_gbp += spend_gbp
+
+                # Detect replace vs new
+                cur.execute(
+                    """
+                    SELECT 1 FROM etsy_ad_spend
+                     WHERE listing_id = %s AND period_start = %s AND period_end = %s
+                    """,
+                    (r.listing_id, period_start, period_end),
+                )
+                existed = cur.fetchone() is not None
+
+                cur.execute(
+                    """
+                    INSERT INTO etsy_ad_spend
+                        (listing_id, period_start, period_end,
+                         views, clicks, orders_attrib, revenue_attrib,
+                         spend, spend_gbp,
+                         source_currency, fx_rate_used,
+                         source, uploaded_by)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (listing_id, period_start, period_end)
+                    DO UPDATE SET
+                        views           = EXCLUDED.views,
+                        clicks          = EXCLUDED.clicks,
+                        orders_attrib   = EXCLUDED.orders_attrib,
+                        revenue_attrib  = EXCLUDED.revenue_attrib,
+                        spend           = EXCLUDED.spend,
+                        spend_gbp       = EXCLUDED.spend_gbp,
+                        source_currency = EXCLUDED.source_currency,
+                        fx_rate_used    = EXCLUDED.fx_rate_used,
+                        source          = EXCLUDED.source,
+                        uploaded_by     = EXCLUDED.uploaded_by,
+                        uploaded_at     = NOW()
+                    """,
+                    (
+                        r.listing_id, period_start, period_end,
+                        r.views, r.clicks, r.orders_attrib, r.revenue_attrib,
+                        spend_native, spend_gbp,
+                        currency_code, fx_rate,
+                        payload.source, payload.uploaded_by,
+                    ),
+                )
+                rows_upserted += 1
+                if existed:
+                    rows_replaced += 1
+        conn.commit()
+
+    return {
+        'period_start':    period_start.isoformat(),
+        'period_end':      period_end.isoformat(),
+        'source_currency': currency_code,
+        'fx_rate_used':    fx_rate,
+        'fx_as_of':        midpoint.isoformat(),
+        'rows_received':   len(payload.rows),
+        'rows_upserted':   rows_upserted,
+        'rows_replaced':   rows_replaced,
+        'unknown_listings': unknown,
+        'total_spend_gbp': float(total_spend_gbp),
+    }
+
+
+class _LookupBatch(BaseModel):
+    """Title→listing_id resolver input. Either ``titles`` or ``skus``
+    (or both) — review item 5: SKU is a much cleaner matcher when
+    available."""
+    model_config = ConfigDict(extra='ignore')
+    titles: Optional[list[str]] = None
+    skus:   Optional[list[str]] = None
+
+
+@router.post("/listings/lookup", dependencies=[Depends(verify_api_key)])
+async def listings_lookup(payload: _LookupBatch):
+    """
+    Resolve titles or SKUs to listing_ids. Used by Manufacture's
+    paste form to convert "what the user pasted" into the canonical
+    keys the ad-spend ingest endpoint expects.
+
+    Resolution order per input:
+
+      - SKUs:  exact match (case-insensitive)  → ``match_type='sku'``
+      - Title: exact (case-sensitive)          → ``match_type='exact'``
+               case-insensitive                → ``match_type='case_insensitive'``
+               trigram similarity ≥ 0.4        → ``match_type='fuzzy'``
+                                                  (or ``'ambiguous'`` if
+                                                   multiple within 0.05
+                                                   of the top score)
+
+    State is included in the response so the consumer can flag
+    matches against inactive listings.
+    """
+    titles = payload.titles or []
+    skus = payload.skus or []
+    if not titles and not skus:
+        raise HTTPException(
+            422, 'provide at least one of titles[] or skus[]',
+        )
+
+    from core.etsy_intel.db import get_conn as _get_conn
+    matches: list[dict] = []
+    unmatched_titles: list[str] = []
+    unmatched_skus: list[str] = []
+
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            # ── SKUs: case-insensitive exact match ─────────────────────
+            if skus:
+                normalised = [s.strip().lower() for s in skus if s and s.strip()]
+                cur.execute(
+                    """
+                    SELECT listing_id, sku, title, m_number, state
+                      FROM etsy_listings
+                     WHERE LOWER(TRIM(sku)) = ANY(%s)
+                    """,
+                    (normalised,),
+                )
+                by_sku = {
+                    row[1].strip().lower(): row
+                    for row in cur.fetchall()
+                    if row[1]
+                }
+                for raw in skus:
+                    key = (raw or '').strip().lower()
+                    if key in by_sku:
+                        lid, sku, title, m_number, state = by_sku[key]
+                        matches.append({
+                            'sku_input':   raw,
+                            'sku_matched': sku,
+                            'title':       title,
+                            'listing_id':  lid,
+                            'm_number':    m_number,
+                            'state':       state,
+                            'match_type':  'sku',
+                            'confidence':  1.0,
+                        })
+                    elif raw and raw.strip():
+                        unmatched_skus.append(raw)
+
+            # ── Titles ───────────────────────────────────────────────────
+            for raw_title in titles:
+                title = (raw_title or '').strip()
+                if not title:
+                    continue
+
+                # 1. exact (case-sensitive), prefer active
+                cur.execute(
+                    """
+                    SELECT listing_id, sku, title, m_number, state
+                      FROM etsy_listings
+                     WHERE title = %s
+                     ORDER BY (state = 'active') DESC
+                     LIMIT 1
+                    """,
+                    (title,),
+                )
+                row = cur.fetchone()
+                if row:
+                    lid, sku, t, m, state = row
+                    matches.append({
+                        'title_input':   raw_title,
+                        'title_matched': t,
+                        'sku':           sku,
+                        'listing_id':    lid,
+                        'm_number':      m,
+                        'state':         state,
+                        'match_type':    'exact',
+                        'confidence':    1.0,
+                    })
+                    continue
+
+                # 2. case-insensitive
+                cur.execute(
+                    """
+                    SELECT listing_id, sku, title, m_number, state
+                      FROM etsy_listings
+                     WHERE LOWER(title) = LOWER(%s)
+                     ORDER BY (state = 'active') DESC
+                     LIMIT 1
+                    """,
+                    (title,),
+                )
+                row = cur.fetchone()
+                if row:
+                    lid, sku, t, m, state = row
+                    matches.append({
+                        'title_input':   raw_title,
+                        'title_matched': t,
+                        'sku':           sku,
+                        'listing_id':    lid,
+                        'm_number':      m,
+                        'state':         state,
+                        'match_type':    'case_insensitive',
+                        'confidence':    0.99,
+                    })
+                    continue
+
+                # 3. trigram fuzzy — threshold 0.4 (review item 2;
+                #    0.85 was way too strict for the typical typo).
+                cur.execute(
+                    """
+                    SELECT listing_id, sku, title, m_number, state,
+                           similarity(title, %s) AS score
+                      FROM etsy_listings
+                     WHERE similarity(title, %s) >= 0.4
+                     ORDER BY score DESC, (state = 'active') DESC
+                     LIMIT 5
+                    """,
+                    (title, title),
+                )
+                rows = cur.fetchall()
+                if not rows:
+                    unmatched_titles.append(raw_title)
+                    continue
+                top_lid, top_sku, top_title, top_m, top_state, top_score = rows[0]
+                # Ambiguous if multiple within 0.05 of the top
+                close = [
+                    r for r in rows[1:]
+                    if abs(float(r[5]) - float(top_score)) <= 0.05
+                ]
+                if close:
+                    matches.append({
+                        'title_input':   raw_title,
+                        'match_type':    'ambiguous',
+                        'candidates': [
+                            {
+                                'listing_id': r[0],
+                                'sku':        r[1],
+                                'title':      r[2],
+                                'm_number':   r[3],
+                                'state':      r[4],
+                                'similarity': float(r[5]),
+                            }
+                            for r in rows
+                        ],
+                    })
+                else:
+                    matches.append({
+                        'title_input':   raw_title,
+                        'title_matched': top_title,
+                        'sku':           top_sku,
+                        'listing_id':    top_lid,
+                        'm_number':      top_m,
+                        'state':         top_state,
+                        'match_type':    'fuzzy',
+                        'confidence':    float(top_score),
+                    })
+
+    return {
+        'matches': matches,
+        'unmatched': unmatched_titles + unmatched_skus,
     }

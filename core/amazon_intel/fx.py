@@ -95,34 +95,69 @@ def marketplace_currency(marketplace: str) -> Optional[str]:
 _rate_cache: dict[tuple[str, date], Decimal] = {}
 
 
-def _read_rate_from_db(currency_code: str) -> Optional[tuple[Decimal, date]]:
-    """Read the most recent rate from `ami_fx_rates` within the last 7 days.
+def _read_rate_from_db(
+    currency_code: str,
+    as_of: Optional[date] = None,
+) -> Optional[tuple[Decimal, date]]:
+    """Read a rate from `ami_fx_rates`.
+
+    When ``as_of`` is None: latest row within the last 7 days
+    (live-rate behaviour for current-day margin calculations).
+
+    When ``as_of`` is set: nearest row within ±7 days of that date,
+    preferring on-or-before. Used by historical-period operations
+    like the Etsy ad-spend ingest, which uploads April spend in May
+    and wants April's average rate. Picking on-or-before first means
+    a backfill in May for April uses the late-April rate, not the
+    early-May rate — closer to the truth for monthly averages.
 
     Returns (unit_per_gbp, as_of_date) or None if nothing usable found.
     """
-    sql = """
-        SELECT unit_per_gbp, as_of_date
-          FROM ami_fx_rates
-         WHERE currency_code = %s
-           AND as_of_date >= CURRENT_DATE - INTERVAL '7 days'
-         ORDER BY as_of_date DESC
-         LIMIT 1
-    """
+    if as_of is None:
+        sql = """
+            SELECT unit_per_gbp, as_of_date
+              FROM ami_fx_rates
+             WHERE currency_code = %s
+               AND as_of_date >= CURRENT_DATE - INTERVAL '7 days'
+             ORDER BY as_of_date DESC
+             LIMIT 1
+        """
+        params: tuple = (currency_code.upper(),)
+    else:
+        # Two-step: nearest on-or-before within 7 days, else nearest
+        # after within 7 days. Done in one query via ORDER BY a
+        # custom signed-distance expression so the LIMIT 1 picks the
+        # closest match, with on-or-before tiebreaking when distance
+        # is equal.
+        sql = """
+            SELECT unit_per_gbp, as_of_date
+              FROM ami_fx_rates
+             WHERE currency_code = %s
+               AND as_of_date BETWEEN %s::date - INTERVAL '7 days'
+                                   AND %s::date + INTERVAL '7 days'
+             ORDER BY ABS(as_of_date - %s::date) ASC,
+                      (as_of_date <= %s::date) DESC
+             LIMIT 1
+        """
+        params = (currency_code.upper(), as_of, as_of, as_of, as_of)
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (currency_code.upper(),))
+                cur.execute(sql, params)
                 row = cur.fetchone()
                 if not row:
                     return None
-                rate, as_of = row
-                return Decimal(str(rate)), as_of
+                rate, as_of_date = row
+                return Decimal(str(rate)), as_of_date
     except Exception as exc:
         logger.warning('fx db lookup failed for %s: %s', currency_code, exc)
         return None
 
 
-def get_rate(currency_code: str) -> Decimal:
+def get_rate(
+    currency_code: str,
+    as_of: Optional[date] = None,
+) -> Decimal:
     """Return ``unit_per_gbp`` for the currency.
 
     1 GBP = N <currency>. Multiply GBP by this to get the foreign amount.
@@ -130,8 +165,13 @@ def get_rate(currency_code: str) -> Decimal:
 
     GBP returns Decimal('1.0') without touching the DB.
 
+    ``as_of`` (optional): historical date for backfill / late-uploaded
+    data (e.g. monthly Etsy ad spend uploaded in the following month).
+    When set, the lookup walks ami_fx_rates for the row nearest that
+    date. When None (the common case), today's live rate is used.
+
     Resolution order:
-        1. ami_fx_rates row from today (or most recent within 7 days)
+        1. ami_fx_rates row matching ``as_of`` (or today, if None)
         2. Hardcoded _DEFAULT_RATES fallback
         3. Decimal('1.0') with a warning if the currency is unknown
     """
@@ -139,24 +179,24 @@ def get_rate(currency_code: str) -> Decimal:
     if code == 'GBP':
         return Decimal('1.0')
 
-    today = date.today()
-    cached = _rate_cache.get((code, today))
+    cache_key = (code, as_of or date.today())
+    cached = _rate_cache.get(cache_key)
     if cached is not None:
         return cached
 
-    db_lookup = _read_rate_from_db(code)
+    db_lookup = _read_rate_from_db(code, as_of=as_of)
     if db_lookup is not None:
         rate, _as_of = db_lookup
-        _rate_cache[(code, today)] = rate
+        _rate_cache[cache_key] = rate
         return rate
 
     default = _DEFAULT_RATES.get(code)
     if default is not None:
         logger.warning(
-            'fx: no DB rate for %s within 7 days — using configured default %s',
-            code, default,
+            'fx: no DB rate for %s near %s — using configured default %s',
+            code, (as_of or 'today'), default,
         )
-        _rate_cache[(code, today)] = default
+        _rate_cache[cache_key] = default
         return default
 
     logger.error(
@@ -164,7 +204,7 @@ def get_rate(currency_code: str) -> Decimal:
         code,
     )
     rate = Decimal('1.0')
-    _rate_cache[(code, today)] = rate
+    _rate_cache[cache_key] = rate
     return rate
 
 
@@ -186,12 +226,19 @@ def bulk_rates(*, codes: Optional[list[str]] = None) -> dict[str, float]:
     return out
 
 
-def convert_to_gbp(amount: Decimal, currency: Optional[str]) -> Decimal:
+def convert_to_gbp(
+    amount: Decimal,
+    currency: Optional[str],
+    as_of: Optional[date] = None,
+) -> Decimal:
     """Convert a Decimal amount in ``currency`` to GBP.
 
     GBP / None / unknown currency code passes through unchanged so the
     UK code path is a true no-op. The caller decides whether to treat
     a None currency as "this row should be skipped" vs "1:1 was OK".
+
+    ``as_of``: historical date for backfill conversions (e.g. April
+    Etsy ad spend uploaded in May). When None, uses today's rate.
     """
     if amount is None:
         return amount
@@ -200,7 +247,7 @@ def convert_to_gbp(amount: Decimal, currency: Optional[str]) -> Decimal:
     code = currency.upper()
     if code == 'GBP':
         return amount
-    rate = get_rate(code)
+    rate = get_rate(code, as_of=as_of)
     if rate <= 0:
         return amount  # last-ditch — should never happen, log already emitted
     return (amount / rate)

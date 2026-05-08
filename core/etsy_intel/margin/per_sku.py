@@ -64,6 +64,8 @@ from dataclasses import asdict, dataclass
 from decimal import Decimal
 from typing import Optional
 
+from datetime import date, timedelta
+
 from core.amazon_intel.manufacture_client import get_costs_bulk
 from core.etsy_intel.db import get_conn
 
@@ -190,6 +192,75 @@ def _fetch_sales_aggregate(
     return out
 
 
+def _fetch_ad_spend_prorated(
+    lookback_days: int,
+) -> tuple[dict[int, Decimal], set[str]]:
+    """
+    Sum ad spend per listing_id over the lookback window, pro-rating
+    monthly upload windows that only partially overlap the lookback.
+
+    Returns ``(spend_by_listing, sources_seen)``.
+
+    Pro-ration math: for a single etsy_ad_spend row with period
+    [period_start, period_end] (inclusive), and a lookback window
+    [lookback_start, lookback_end]:
+
+        period_days   = period_end - period_start + 1
+        overlap_start = MAX(period_start, lookback_start)
+        overlap_end   = MIN(period_end,   lookback_end)
+        overlap_days  = MAX(0, overlap_end - overlap_start + 1)
+        contribution  = spend_gbp × overlap_days / period_days
+
+    Done in SQL with ``LEAST/GREATEST`` so the database does the
+    arithmetic in one round-trip; a 30-day window straddling two
+    monthly uploads correctly contributes from both.
+    """
+    today_d = date.today()
+    lookback_start = today_d - timedelta(days=lookback_days)
+    lookback_end = today_d
+
+    sql = """
+        SELECT listing_id,
+               SUM(
+                 spend_gbp *
+                 GREATEST(0,
+                   (LEAST(period_end, %(lb_end)s::date)
+                    - GREATEST(period_start, %(lb_start)s::date)
+                    + 1)::numeric
+                 ) /
+                 NULLIF((period_end - period_start + 1)::numeric, 0)
+               ) AS prorated_spend_gbp,
+               STRING_AGG(DISTINCT source, ',') AS sources
+          FROM etsy_ad_spend
+         WHERE daterange(period_start, period_end + 1, '[)')
+            && daterange(%(lb_start)s::date, %(lb_end)s::date + 1, '[)')
+         GROUP BY listing_id
+    """
+    out: dict[int, Decimal] = {}
+    sources: set[str] = set()
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, {
+                    'lb_start': lookback_start,
+                    'lb_end': lookback_end,
+                })
+                for lid, prorated, src_csv in cur.fetchall():
+                    if prorated is None:
+                        continue
+                    out[int(lid)] = Decimal(str(prorated)).quantize(TWO_PLACES)
+                    if src_csv:
+                        for s in src_csv.split(','):
+                            if s.strip():
+                                sources.add(s.strip())
+    except Exception as exc:
+        # Table may not exist yet on a fresh deploy if migrations
+        # haven't been re-run; degrade gracefully to "no ad data"
+        # rather than 500-ing the whole margin endpoint.
+        logger.warning('etsy_ad_spend lookup failed (treating as no data): %s', exc)
+    return out, sources
+
+
 def _fetch_listing_metadata(listing_ids: list[int]) -> dict[int, dict]:
     """Fetch m_number + sku + title for the given listing_ids."""
     if not listing_ids:
@@ -217,7 +288,7 @@ def _fetch_listing_metadata(listing_ids: list[int]) -> dict[int, dict]:
 async def compute_margins(
     lookback_days: int = 30,
     shop_id: Optional[int] = None,
-) -> list[EtsyMargin]:
+) -> tuple[list[EtsyMargin], dict]:
     """
     Per-listing margin breakdown for Etsy. One row per listing_id.
 
@@ -226,12 +297,24 @@ async def compute_margins(
     response shape declares ``currency: 'GBP'`` and includes the same
     fx_rate_used dict the Amazon engine returns (with all rates = 1.0
     for Etsy) to keep field-for-field parity with the combined view.
+
+    Returns ``(margins, ad_meta)`` where ``ad_meta`` is::
+
+        {
+          'has_ad_data':  bool,        # True if any listing has spend > 0
+          'ad_sources':   list[str],   # ['manual_paste_v1', ...]
+        }
+
+    The route layer uses this to flip the response-level
+    ``off_site_ads_excluded`` flag and stamp ``ad_data_source`` so the
+    consumer can show provenance.
     """
     sales = _fetch_sales_aggregate(lookback_days, shop_id=shop_id)
     if not sales:
-        return []
+        return [], {'has_ad_data': False, 'ad_sources': []}
 
     listing_meta = _fetch_listing_metadata(list(sales.keys()))
+    ad_spend_by_listing, ad_sources = _fetch_ad_spend_prorated(lookback_days)
 
     # Pull COGS for every M-number we resolved. marketplace='' tells
     # Manufacture to use the default UK warehouse cost — Etsy ships
@@ -285,8 +368,12 @@ async def compute_margins(
             blank_raw = cost_row.get('blank_raw')
             blank_normalized = cost_row.get('blank_normalized')
 
-        # ad_spend — etsy_ads_spend table doesn't exist yet
-        ad_spend = ZERO
+        # ad_spend — from etsy_ad_spend (manual paste v1, prorated to
+        # the lookback window). Already in GBP at ingest time. Empty
+        # dict when no uploads exist yet, in which case we still
+        # report ad_spend=0 and the route layer leaves the
+        # ``off_site_ads_excluded: true`` flag set.
+        ad_spend = ad_spend_by_listing.get(listing_id, ZERO)
 
         # Margin arithmetic
         if cogs_total is not None:
@@ -323,7 +410,13 @@ async def compute_margins(
             is_composite=is_composite,
             confidence=_confidence(cost_source, m_number),
         ))
-    return results
+
+    has_ad_data = any(m.ad_spend > 0 for m in results)
+    ad_meta = {
+        'has_ad_data': has_ad_data,
+        'ad_sources': sorted(ad_sources) if has_ad_data else [],
+    }
+    return results, ad_meta
 
 
 def margin_to_dict(m: EtsyMargin) -> dict:

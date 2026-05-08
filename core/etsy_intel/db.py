@@ -166,6 +166,55 @@ CREATE TABLE IF NOT EXISTS etsy_oauth_tokens (
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- pg_trgm extension — used by the listings lookup endpoint for fuzzy
+-- title matching (Manufacture pastes ad-spend rows from the seller
+-- dashboard, which has subtly different titles than the ones stored
+-- here). Idempotent and safe; ships with stock Postgres contrib.
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+-- Trigram GIN index for fast similarity() queries against the title.
+-- 655 rows is small enough that a seq scan is fine, but the index
+-- keeps lookup latency flat as the catalogue grows.
+CREATE INDEX IF NOT EXISTS idx_etsy_listings_title_trgm
+    ON etsy_listings USING gin (title gin_trgm_ops);
+
+-- Etsy ad spend — manual-paste path (seller-dashboard CSV) until/unless
+-- the API path opens up. Stored in source currency AND GBP because the
+-- dashboard reports in USD by default; FX is captured at ingest using
+-- a period-midpoint rate from ami_fx_rates.
+--
+-- Natural key: (listing_id, period_start, period_end). Re-uploading the
+-- same window for the same listing replaces, not duplicates — Toby
+-- might paste April twice (once early, once at month-close) and the
+-- second one wins.
+--
+-- The ``source`` field is versioned ('manual_paste_v1') so a future
+-- API-driven path can coexist on the same table; the unique constraint
+-- still applies so the most recent write per (listing,period) wins.
+CREATE TABLE IF NOT EXISTS etsy_ad_spend (
+    id              SERIAL PRIMARY KEY,
+    listing_id      BIGINT NOT NULL REFERENCES etsy_listings(listing_id),
+    period_start    DATE NOT NULL,
+    period_end      DATE NOT NULL,
+    views           INTEGER,
+    clicks          INTEGER,
+    orders_attrib   INTEGER,
+    revenue_attrib  NUMERIC(10,2),
+    spend           NUMERIC(10,2) NOT NULL,
+    spend_gbp       NUMERIC(10,2) NOT NULL,
+    source_currency TEXT NOT NULL DEFAULT 'USD',
+    fx_rate_used    NUMERIC(10,6),
+    source          TEXT NOT NULL DEFAULT 'manual_paste_v1',
+    uploaded_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    uploaded_by     TEXT,
+    CONSTRAINT etsy_ad_spend_period_chk CHECK (period_end >= period_start),
+    CONSTRAINT etsy_ad_spend_unique_period UNIQUE (listing_id, period_start, period_end)
+);
+CREATE INDEX IF NOT EXISTS idx_etsy_ad_spend_listing
+    ON etsy_ad_spend(listing_id);
+CREATE INDEX IF NOT EXISTS idx_etsy_ad_spend_period
+    ON etsy_ad_spend(period_start, period_end);
 """
 
 
