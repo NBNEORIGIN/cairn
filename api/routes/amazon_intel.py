@@ -601,6 +601,42 @@ async def spapi_report_download(report_id: str, region: str = "EU"):
 
 # ── SKU Mapping Lookup (used by Manufacture restock assembler) ────────────────
 
+def _expand_marketplace_for_lookup(marketplace: str) -> list[str]:
+    """For a plain ISO code, return every ``ami_sku_mapping.country`` value
+    that should be considered a match.
+
+    Background: the 2026-05-08 Stock Sheet re-seed tagged FR/IT rows with
+    seller-account variants (``FR_CRAFTS`` for NorthByNorthEast,
+    ``FR_DESIGNED`` for NBNE, plus ``FR_*_DUP_*`` cross-account flags;
+    same shape for ``IT_DESIGNED``). Manufacture passes plain ISO codes
+    from order metadata — it has no way to know which seller account
+    fulfilled a given order, so a bare ``FR`` lookup must still succeed.
+
+    Works for any ISO code: the expansion just appends the four
+    account-bearing suffixes. Codes that have no tagged variants in the
+    DB (UK / DE / US / etc.) get the same expanded list, but the
+    irrelevant entries simply won't match — no harm. Non-ISO codes
+    (ETSY / EBAY / SHOPIFY) work the same way: the suffix variants
+    don't exist for them either, so only the exact match contributes.
+
+    The exact ``marketplace`` value is included as the first element so
+    callers passing ``FR_DESIGNED`` directly still resolve via that
+    exact tag.
+    """
+    if not marketplace:
+        return []
+    base = marketplace.strip().upper()
+    if not base:
+        return []
+    return [
+        base,
+        f'{base}_CRAFTS',
+        f'{base}_DESIGNED',
+        f'{base}_CRAFTS_DUP_DESIGNED',
+        f'{base}_DESIGNED_DUP_CRAFTS',
+    ]
+
+
 @router.get("/sku-mapping/lookup")
 async def sku_mapping_lookup(
     sku: str = Query(..., description="Merchant SKU to look up"),
@@ -609,6 +645,13 @@ async def sku_mapping_lookup(
     """
     Look up M-number for a merchant SKU.
     Returns {sku, m_number, asin, country} or 404 if not found.
+
+    A plain ISO ``marketplace`` (FR, IT, etc.) matches both the bare
+    code and the seller-account-tagged variants (FR_CRAFTS / FR_DESIGNED
+    / FR_*_DUP_*). When multiple rows match, the row whose country
+    string equals the input verbatim is preferred — so
+    ``marketplace=FR_DESIGNED`` always returns the FR_DESIGNED row when
+    one exists. See ``_expand_marketplace_for_lookup`` for context.
     """
     from core.amazon_intel.db import get_conn
 
@@ -616,14 +659,16 @@ async def sku_mapping_lookup(
         with get_conn() as conn:
             with conn.cursor() as cur:
                 if marketplace:
+                    variants = _expand_marketplace_for_lookup(marketplace)
                     cur.execute(
                         """
                         SELECT sku, m_number, asin, country
                         FROM ami_sku_mapping
-                        WHERE sku = %s AND (country ILIKE %s OR country IS NULL)
+                        WHERE sku = %s AND country = ANY(%s)
+                        ORDER BY (country = %s) DESC NULLS LAST
                         LIMIT 1
                         """,
-                        (sku, marketplace),
+                        (sku, variants, marketplace.strip().upper()),
                     )
                 else:
                     cur.execute(
