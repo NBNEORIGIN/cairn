@@ -52,7 +52,28 @@ def should_skip_email(sender: str, subject: str) -> tuple[bool, str]:
     """
     Returns (skip, reason).
     Applied to all mailboxes after is_business_relevant().
+
+    Resolution order:
+        1. Learned filters (cairn_email_learned_filters) — populated
+           by Toby's replies to triage digests via Q0 = SPAM / PERSONAL.
+           Most specific match wins (exact > domain; spam > personal).
+        2. Hardcoded SKIP_SENDERS / TRANSACTIONAL_SUBJECTS lists below.
+
+    Learned filters come first so a sender Toby has explicitly flagged
+    as spam skips immediately, no matter what the hardcoded heuristics
+    say. DB errors in the learned-filter lookup degrade silently to the
+    hardcoded path (defensive — never want a learned-filter failure
+    to drop a legit email).
     """
+    try:
+        from .learned_filters import is_blocked as _is_blocked
+        blocked, reason = _is_blocked(sender)
+        if blocked:
+            return True, reason
+    except Exception:
+        # Defensive — fall through to hardcoded checks
+        pass
+
     sender_lower = sender.lower()
     for pattern in SKIP_SENDERS:
         if pattern in sender_lower:

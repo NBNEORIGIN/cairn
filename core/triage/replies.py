@@ -83,6 +83,24 @@ _EDIT_PREFIX_RE = re.compile(r'^\s*edit\s*:\s*', re.IGNORECASE)
 # resolves via CRM search in apply_reply. Added 2026-05-07.
 _PROJECT_OVERRIDE_RE = re.compile(r'^\s*project\s*:\s*(.+?)\s*$', re.IGNORECASE)
 
+# Q0 (email_classification) verdicts — Toby tells Deek what kind of
+# email this is so the system can learn (spam blocklist, personal
+# filter, new-enquiry training signal). EXISTING is the implicit
+# default if Q0 is blank — preserves the legacy single-question flow.
+# Added 2026-05-08.
+_Q0_TOKENS = {
+    'spam':         'spam',
+    'junk':         'spam',
+    'new':          'new_enquiry',
+    'new_enquiry':  'new_enquiry',
+    'newenquiry':   'new_enquiry',
+    'enquiry':      'new_enquiry',
+    'existing':     'existing',
+    'personal':     'personal',
+    'ignore':       'ignore',
+    'skip':         'ignore',
+}
+
 
 # ── Data types ───────────────────────────────────────────────────────
 
@@ -197,6 +215,48 @@ def strip_quoted(text: str) -> str:
             break
         lines.append(line)
     return '\n'.join(lines).strip()
+
+
+def _classify_email_classification(text: str) -> ParsedAnswer:
+    """Q0 verdict — top-level "what kind of email is this?".
+
+    Verdicts:
+      spam          → add sender DOMAIN to learned ignore list
+      personal      → add sender EMAIL (exact) to learned ignore list
+      new_enquiry   → write a training-signal memory chunk with the
+                      email body so retrieval surfaces it next time
+      existing      → fall through to Q1's project-pick (the default)
+      ignore        → mark reviewed, no learning signal
+      empty         → no Q0 answered; treat as 'existing' downstream
+
+    Accepted input shapes (case-insensitive):
+      'SPAM', 'JUNK', 'spam'
+      'NEW_ENQUIRY', 'NEW', 'NEW ENQUIRY', 'NEW-ENQUIRY', 'ENQUIRY'
+      'EXISTING'
+      'PERSONAL'
+      'IGNORE', 'SKIP'
+    """
+    cleaned = (text or '').strip()
+    if not cleaned:
+        return ParsedAnswer(
+            q_number=0, category='email_classification',
+            raw_text=text, verdict='empty',
+        )
+    first = cleaned.splitlines()[0].strip()
+    # Normalise: collapse spaces/hyphens/underscores to one form for lookup
+    normalised = re.sub(r'[\s\-_]+', '_', first.lower())
+    if normalised in _Q0_TOKENS:
+        verdict = _Q0_TOKENS[normalised]
+    else:
+        # Single-word lookup if the user typed extra context after the
+        # keyword (e.g. "SPAM — cold sales pitch from Acme Marketing")
+        first_word = re.split(r'[\s\-_:,]+', normalised, maxsplit=1)[0]
+        verdict = _Q0_TOKENS.get(first_word, 'text')
+    free_text = cleaned if verdict == 'text' else ''
+    return ParsedAnswer(
+        q_number=0, category='email_classification',
+        raw_text=text, verdict=verdict, free_text=free_text,
+    )
 
 
 def _classify_match_confirm(text: str) -> ParsedAnswer:
@@ -360,7 +420,9 @@ def parse_reply_body(
         end = matches[i + 1].start() if i + 1 < len(matches) else len(stripped)
         block_text = _strip_format_hint(stripped[start:end].strip())
 
-        if category == 'match_confirm':
+        if category == 'email_classification':
+            reply.answers.append(_classify_email_classification(block_text))
+        elif category == 'match_confirm':
             reply.answers.append(_classify_match_confirm(block_text))
         elif category == 'reply_approval':
             reply.answers.append(_classify_reply_approval(block_text))
@@ -623,6 +685,91 @@ def load_triage_row(conn, triage_id: int) -> dict | None:
         'draft_reply': row[5],
         'draft_model': row[6],
     }
+
+
+def _handle_email_class_spam(*, row: dict, triage_id: int, learned_by: str) -> str:
+    """Q0 = SPAM: add sender domain to learned filter, log the event.
+
+    Default match_type is 'domain' — mass-mailing lists rotate sender
+    local-parts so blocking the whole domain catches future variants.
+    Toby can curate exceptions manually via SQL if a domain is too
+    broad (e.g. @gmail.com from one spam-prone contact).
+    """
+    from core.email_ingest.learned_filters import add_learned_filter
+    sender = row.get('email_sender') or ''
+    result = add_learned_filter(
+        sender_raw=sender,
+        classification='spam',
+        match_type='domain',
+        triage_id=triage_id,
+        learned_by=learned_by,
+    )
+    return f'spam learned: {result.get("note", "?")}'
+
+
+def _handle_email_class_personal(*, row: dict, triage_id: int, learned_by: str) -> str:
+    """Q0 = PERSONAL: add sender EXACT email to learned filter.
+
+    Personal contacts aren't mass-mailers — block just the one email,
+    not the whole domain (often @gmail.com or similar).
+    """
+    from core.email_ingest.learned_filters import add_learned_filter
+    sender = row.get('email_sender') or ''
+    result = add_learned_filter(
+        sender_raw=sender,
+        classification='personal',
+        match_type='exact',
+        triage_id=triage_id,
+        learned_by=learned_by,
+    )
+    return f'personal learned: {result.get("note", "?")}'
+
+
+def _handle_email_class_new_enquiry(conn, *, row: dict, triage_id: int) -> str:
+    """Q0 = NEW_ENQUIRY: write a memory chunk with the full email body
+    so retrieval surfaces this enquiry next time.
+
+    Doesn't auto-create a CRM project today — that path requires a
+    confirmed project shape (client name, budget bucket, etc.) that
+    only Toby has the context to set. Capturing the enquiry as a
+    searchable memory is the cheap first cut; CRM-auto-creation is a
+    separate brief if Toby later wants it.
+
+    Body comes from cairn_email_raw via the email_message_id link on
+    the triage row.
+    """
+    message_id = row.get('email_message_id')
+    sender = row.get('email_sender') or '(unknown)'
+    subject = row.get('email_subject') or '(no subject)'
+    body_text = ''
+    if message_id:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT COALESCE(body_text, body_html, '')
+                         FROM cairn_email_raw
+                        WHERE message_id = %s
+                        LIMIT 1""",
+                    (message_id,),
+                )
+                row_body = cur.fetchone()
+                if row_body:
+                    body_text = (row_body[0] or '')[:4000]
+        except Exception:
+            body_text = ''
+
+    memory_text = (
+        f'New enquiry captured (triage {triage_id}).\n'
+        f'From: {sender}\n'
+        f'Subject: {subject}\n\n'
+        f'{body_text}'
+    )
+    new_id = _write_toby_memory(
+        conn, memory_text,
+        reference_triage_id=triage_id,
+        tag='triage_new_enquiry',
+    )
+    return f'new enquiry memory written (id={new_id})'
 
 
 def _resolve_project_by_name(typed_name: str) -> dict:
@@ -913,7 +1060,93 @@ def apply_reply(conn, reply: ParsedReply, raw_body: str) -> dict:
     project_folder_path = ''
     review_action = 'reviewed'
 
+    # ── Q0 (email_classification) pre-scan ─────────────────────────────
+    # Spam / personal / new_enquiry short-circuit the rest of the
+    # reply processing — if Toby flagged this as spam, we don't want
+    # to also try to confirm a project match (likely empty), post a
+    # CRM note, or persist a thread association. New_enquiry captures
+    # the email body as a training-signal memory and skips the
+    # project-confirm path. EXISTING (or empty Q0) falls through to
+    # the legacy single-question flow so behaviour is unchanged for
+    # the dominant case. Added 2026-05-08.
+    q0_short_circuit = False
     for ans in reply.answers:
+        if ans.category != 'email_classification':
+            continue
+        action: dict = {
+            'q_number': ans.q_number,
+            'category': ans.category,
+            'verdict': ans.verdict,
+        }
+        try:
+            if ans.verdict == 'spam':
+                action['result'] = _handle_email_class_spam(
+                    row=row, triage_id=reply.triage_id,
+                    learned_by=reply.user_email,
+                )
+                review_action = 'ignored_spam'
+                final_project_id = None
+                approved_reply = ''
+                q0_short_circuit = True
+            elif ans.verdict == 'personal':
+                action['result'] = _handle_email_class_personal(
+                    row=row, triage_id=reply.triage_id,
+                    learned_by=reply.user_email,
+                )
+                review_action = 'ignored_personal'
+                final_project_id = None
+                approved_reply = ''
+                q0_short_circuit = True
+            elif ans.verdict == 'new_enquiry':
+                action['result'] = _handle_email_class_new_enquiry(
+                    conn, row=row, triage_id=reply.triage_id,
+                )
+                review_action = 'new_enquiry_captured'
+                final_project_id = None
+                approved_reply = ''
+                # Don't short-circuit — Q1 may still carry a follow-up
+                # PROJECT: hint if Toby wants to nominate a project name
+                # for the future. Treat as additive context.
+            elif ans.verdict == 'ignore':
+                action['result'] = 'ignored (no learning signal)'
+                review_action = 'ignored'
+                final_project_id = None
+                approved_reply = ''
+                q0_short_circuit = True
+            elif ans.verdict == 'existing':
+                # Default path — let Q1 take over
+                action['result'] = 'existing (pass-through to Q1)'
+            elif ans.verdict == 'empty':
+                action['result'] = 'empty (implicit existing)'
+            else:
+                # 'text' verdict — free text that wasn't a known token
+                action['result'] = (
+                    f'free-text Q0 (no learning rule): '
+                    f'{(ans.free_text or "")[:80]}'
+                )
+                _write_toby_memory(
+                    conn,
+                    f'Q0 free-text on triage {reply.triage_id}: {ans.free_text}',
+                    reference_triage_id=reply.triage_id,
+                    tag='triage_q0_freetext',
+                )
+        except Exception as exc:
+            action['error'] = f'{type(exc).__name__}: {exc}'
+            logger.warning('[triage-reply] Q0 handler failure: %s', exc)
+        summary['answers_processed'].append(action)
+
+    for ans in reply.answers:
+        if ans.category == 'email_classification':
+            continue  # already handled in pre-scan
+        if q0_short_circuit and ans.category in ('match_confirm', 'reply_approval'):
+            # Don't second-guess spam/personal/ignore — skip Q1/Q2 entirely
+            summary['answers_processed'].append({
+                'q_number': ans.q_number,
+                'category': ans.category,
+                'verdict':  ans.verdict,
+                'result':   'skipped (Q0 short-circuit)',
+            })
+            continue
         action: dict = {
             'q_number': ans.q_number,
             'category': ans.category,

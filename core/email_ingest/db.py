@@ -78,4 +78,33 @@ CREATE TABLE IF NOT EXISTS cairn_email_ingest_log (
     last_message_id VARCHAR(500),
     status          VARCHAR(20)
 );
+
+-- Learned filters — populated when Toby replies to a triage digest with
+-- a SPAM / PERSONAL classification. Future emails matching this sender
+-- (exact email or domain) skip the digest pipeline at filter-check time.
+--
+-- ``match_type``:
+--   'exact'   — match the full sender email (e.g. `bob@example.com`)
+--   'domain'  — match the @-suffix (e.g. `@spammy-marketers.com`)
+--
+-- ``classification``:
+--   'spam'      — junk/marketing; filter skip reason = 'learned_spam'
+--   'personal'  — personal contact that ended up in business inbox
+--   'newsletter' — non-spam non-business automation; reserved for future use
+--
+-- ``learned_from_triage_id`` — audit trail; null for filters added via
+-- admin tools rather than the reply-back loop.
+CREATE TABLE IF NOT EXISTS cairn_email_learned_filters (
+    id                     SERIAL PRIMARY KEY,
+    sender                 TEXT NOT NULL,
+    match_type             VARCHAR(20) NOT NULL,
+    classification         VARCHAR(20) NOT NULL,
+    learned_from_triage_id INTEGER,
+    learned_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    learned_by             TEXT,
+    CONSTRAINT cairn_email_learned_filters_unique
+        UNIQUE (sender, match_type, classification)
+);
+CREATE INDEX IF NOT EXISTS cairn_email_learned_filters_sender_idx
+    ON cairn_email_learned_filters (LOWER(sender));
 """
