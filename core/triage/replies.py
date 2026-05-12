@@ -772,30 +772,116 @@ def _handle_email_class_new_enquiry(conn, *, row: dict, triage_id: int) -> str:
     return f'new enquiry memory written (id={new_id})'
 
 
+def _crm_db_url() -> str | None:
+    """Build the CRM database connection string from Deek's DATABASE_URL.
+    Same shape as scripts/email_triage/project_matcher._crm_db_url —
+    duplicated here to keep replies.py self-contained for clarity.
+    """
+    url = os.getenv('DATABASE_URL', '')
+    if not url or '/' not in url:
+        return None
+    return url.rsplit('/', 1)[0] + '/crm'
+
+
+def _resolve_project_by_name_via_crm_db(name: str) -> dict | None:
+    """Direct CRM DB lookup for a free-text project name.
+
+    CRM's search API ranks badly for short queries — three projects can
+    tie at the 0.014-0.016 cosine noise floor with no signal to
+    discriminate. ILIKE against the structured columns is far more
+    reliable when Toby types something specific like
+    ``PROJECT: Flowers by Julie``. Matches:
+
+      1. exact-substring on Project.name (case-insensitive)
+      2. exact-substring on Project.clientName (case-insensitive)
+
+    Most recently updated wins on ties. Returns the same dict shape as
+    the search-API path so the caller treats them identically.
+    """
+    name_norm = (name or '').strip()
+    if not name_norm:
+        return None
+    crm_url = _crm_db_url()
+    if not crm_url:
+        return None
+
+    try:
+        import psycopg2
+        conn = psycopg2.connect(crm_url, connect_timeout=5)
+    except Exception as exc:
+        logger.warning('resolve_by_name: CRM DB connect failed: %s', exc)
+        return None
+
+    try:
+        with conn.cursor() as cur:
+            pattern = f'%{name_norm}%'
+            cur.execute(
+                '''
+                SELECT id, name, "clientName", "clientEmail", "updatedAt"
+                  FROM "Project"
+                 WHERE name ILIKE %s OR "clientName" ILIKE %s
+                 ORDER BY "updatedAt" DESC NULLS LAST
+                 LIMIT 1
+                ''',
+                (pattern, pattern),
+            )
+            row = cur.fetchone()
+    except Exception as exc:
+        logger.warning('resolve_by_name: CRM DB query failed: %s', exc)
+        return None
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    if not row:
+        return None
+    project_id, proj_name, client_name, _email, _updated = row
+    return {
+        'project_id':   project_id,
+        'project_name': proj_name or '',
+        'match_score':  1.0,  # exact substring; not a fuzzy score
+        'note':         f'resolved "{name_norm[:60]}" -> {proj_name[:60]} (via CRM DB)',
+    }
+
+
 def _resolve_project_by_name(typed_name: str) -> dict:
     """Resolve a free-text ``PROJECT: <name>`` override to a CRM project.
 
     Toby types something like ``PROJECT: Smith windows`` or
-    ``PROJECT: M1234`` or ``PROJECT: Acme Ltd``. We hit
-    ``/api/cairn/search?q=<name>&types=project&limit=5`` and take the
-    top scoring project.
+    ``PROJECT: M1234`` or ``PROJECT: Acme Ltd``.
+
+    Resolution order:
+      1. Direct CRM DB ILIKE on Project.name / Project.clientName
+         (``_resolve_project_by_name_via_crm_db``) — the canonical
+         path. Reliable for specific names even when CRM's search
+         ranking is junk.
+      2. CRM ``/api/cairn/search?q=<name>&types=project&limit=5``
+         fallback — used when the DB is unreachable.
 
     Returns ``{'project_id': str, 'project_name': str, 'match_score':
     float, 'note': str}``. ``project_id`` is empty when nothing
     plausible came back; the note explains why.
 
-    Mirrors ``project_matcher._exact_email_match`` in shape so callers
-    can treat the two as the same kind of result. No exceptions are
-    raised — network/HTTP failures degrade to an empty result.
-
-    Added 2026-05-07 alongside the ``PROJECT:`` Q1 override.
+    Updated 2026-05-12: added direct-DB primary path after CRM's
+    search was confirmed not to index clientEmail / not to surface
+    structured-column matches above the 0.014-0.016 noise floor.
     """
-    import httpx
     out = {'project_id': '', 'project_name': '', 'match_score': 0.0, 'note': ''}
     name = (typed_name or '').strip()
     if not name:
         out['note'] = 'empty name'
         return out
+
+    # Primary path — direct DB
+    via_db = _resolve_project_by_name_via_crm_db(name)
+    if via_db is not None:
+        out.update(via_db)
+        return out
+
+    # Fallback — search API
+    import httpx
     base = (os.getenv('CRM_BASE_URL') or 'https://crm.nbnesigns.co.uk').rstrip('/')
     token = (
         os.getenv('DEEK_API_KEY')
@@ -803,7 +889,7 @@ def _resolve_project_by_name(typed_name: str) -> dict:
         or os.getenv('CLAW_API_KEY', '')
     ).strip()
     if not token:
-        out['note'] = 'no auth token'
+        out['note'] = 'no auth token + DB unavailable'
         return out
     try:
         with httpx.Client(timeout=10.0) as client:
@@ -837,7 +923,7 @@ def _resolve_project_by_name(typed_name: str) -> dict:
         or ''
     )
     out['match_score'] = float(top.get('score') or 0.0)
-    out['note'] = f'resolved "{name[:60]}" -> {out["project_name"][:60]}'
+    out['note'] = f'resolved "{name[:60]}" -> {out["project_name"][:60]} (via search API)'
     return out
 
 

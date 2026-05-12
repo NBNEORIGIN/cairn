@@ -81,6 +81,94 @@ def _bare_email(sender: str) -> str:
     return sender.strip().lower()
 
 
+def _crm_db_url() -> str | None:
+    """Build a connection string for the CRM database from Deek's own
+    DATABASE_URL. Both live on the same Postgres host (`deek-db`); only
+    the database name differs. Returns None when DATABASE_URL is unset
+    or malformed.
+
+    Used as a bypass when the CRM search API doesn't expose the field
+    we need (e.g. clientEmail is on Project but not indexed in CRM's
+    search corpus, so /api/cairn/search?q=<email> returns junk).
+    """
+    url = os.getenv('DATABASE_URL', '')
+    if not url or '/' not in url:
+        return None
+    return url.rsplit('/', 1)[0] + '/crm'
+
+
+def _exact_email_match_via_crm_db(sender_email: str) -> dict | None:
+    """Direct CRM DB lookup — the canonical path for exact-email matching.
+
+    CRM's ``/api/cairn/search`` indexes project content (name, brief,
+    embedded original-email body) but NOT the structured ``clientEmail``
+    column. So searching for an email returns noise even when there's
+    a perfect ``clientEmail`` match in the DB. We bypass the search API
+    and query Postgres directly — same connection pattern any
+    cross-database read would use.
+
+    Returns the same candidate dict shape as the search-API fallback
+    so ``match_project`` can treat both identically. None on any
+    failure or no match.
+    """
+    sender_norm = (sender_email or '').strip().lower()
+    if '@' not in sender_norm:
+        return None
+    crm_url = _crm_db_url()
+    if not crm_url:
+        return None
+
+    try:
+        import psycopg2
+        conn = psycopg2.connect(crm_url, connect_timeout=5)
+    except Exception as exc:
+        log.warning('exact_email_match: CRM DB connect failed: %s', exc)
+        return None
+
+    try:
+        with conn.cursor() as cur:
+            # Prefer the project most recently updated when the same
+            # client email appears on multiple projects (often the
+            # active one). Falls back to created order if updatedAt
+            # isn't populated.
+            cur.execute(
+                '''
+                SELECT id, name, "clientName", "clientEmail",
+                       "updatedAt", "createdAt"
+                  FROM "Project"
+                 WHERE LOWER("clientEmail") = %s
+                 ORDER BY "updatedAt" DESC NULLS LAST,
+                          "createdAt"  DESC NULLS LAST
+                 LIMIT 1
+                ''',
+                (sender_norm,),
+            )
+            row = cur.fetchone()
+    except Exception as exc:
+        log.warning('exact_email_match: CRM DB query failed: %s', exc)
+        return None
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    if not row:
+        return None
+
+    project_id, name, client_name, client_email, updated_at, _created = row
+    return {
+        'project_id':       project_id,
+        'match_score':      EXACT_EMAIL_MATCH_SCORE,
+        'project_name':     name or '',
+        'source_type':      SOURCE_TYPE_EMAIL_EXACT,
+        'last_activity_at': updated_at.isoformat() if updated_at else '',
+        'status':           '',
+        'excerpt':          f'Client: {client_name or "?"}',
+        'matched_email':    sender_norm,
+    }
+
+
 def _exact_email_match(
     sender_email: str,
     base_url: str,
@@ -88,26 +176,26 @@ def _exact_email_match(
 ) -> dict | None:
     """Look up a CRM project whose ``clientEmail`` equals ``sender_email``.
 
-    Returns a candidate dict with ``source_type=SOURCE_TYPE_EMAIL_EXACT``
-    on hit, or None if no exact match was found.
+    Resolution order:
+      1. Direct CRM DB query (``_exact_email_match_via_crm_db``) — the
+         canonical path. CRM's search API doesn't index ``clientEmail``,
+         so this is the only reliable way to do exact-email match.
+      2. Search API filter (legacy fallback) — kept for the case where
+         Deek can't reach the CRM DB but CAN reach the search API (e.g.
+         CRM lives on a different host than Cairn in the future).
 
-    Strategy: query ``/api/cairn/search`` with the full sender email as
-    the search text (BM25 will rank rows containing that exact token
-    very high), then filter results client-side for those whose
-    ``metadata.clientEmail`` (or analogues) equal the sender exactly,
-    case-insensitive. If the CRM later exposes a dedicated
-    ``/api/cairn/clients/by-email`` endpoint this can be swapped in;
-    until then the search-with-filter approach works against the
-    schema we have today.
-
-    Returns None on any of: missing sender email, network failure,
-    non-200 response, malformed JSON, no matching row in results. The
-    caller (``match_project``) gracefully degrades to fuzzy search.
+    Returns a candidate dict on hit, or None.
     """
     sender_norm = (sender_email or '').strip().lower()
     if '@' not in sender_norm:
         return None
 
+    # Primary path — direct DB query
+    via_db = _exact_email_match_via_crm_db(sender_norm)
+    if via_db is not None:
+        return via_db
+
+    # Fallback — search API with metadata-field filter
     try:
         with httpx.Client(timeout=CRM_REQUEST_TIMEOUT) as client:
             response = client.get(
@@ -120,7 +208,7 @@ def _exact_email_match(
                 headers={'Authorization': f'Bearer {token}'},
             )
     except Exception as exc:
-        log.warning('exact_email_match: CRM lookup failed: %s', exc)
+        log.warning('exact_email_match: CRM search fallback failed: %s', exc)
         return None
 
     if response.status_code != 200:
@@ -133,8 +221,6 @@ def _exact_email_match(
 
     for r in results:
         md = r.get('metadata') or {}
-        # Schema variants: clientEmail (Prisma), client_email (snake),
-        # email (denormalised). Compare all three lowercased.
         candidate_emails = {
             (md.get('clientEmail') or '').strip().lower(),
             (md.get('client_email') or '').strip().lower(),
