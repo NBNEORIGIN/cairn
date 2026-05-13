@@ -80,6 +80,32 @@ async def pending_list(
     return {'count': len(rows), 'rows': rows}
 
 
+@crm_router.post('/learning/reevaluate')
+async def crm_learning_reevaluate(commit: bool = Query(False)):
+    """Re-apply Phase 1 (skip rules) and Phase 5 (learned auto-match)
+    to the existing pending-review queue.
+
+    Without ``commit`` this is a dry run that returns counts of what
+    *would* change. With ``commit=true`` it actually writes:
+
+      - Phase 1 hits land as ``review_action='auto_skipped'`` —
+        the row leaves the pending queue immediately.
+      - Phase 5 hits update ``project_id`` on the row to the
+        learned-match winner. The draft stays in the queue so
+        Toby can still review the text; only the routing was wrong.
+
+    Use this once after deploying a new phase to bring the inventory
+    up to date. New emails picked up by the cron are already at
+    current rules — this is purely for the backlog.
+    """
+    from scripts.email_triage.reevaluate_pending import reevaluate
+    try:
+        stats = reevaluate(commit=commit)
+        return {'ok': True, 'commit': commit, **stats}
+    except Exception as exc:
+        raise HTTPException(500, f'reevaluate failed: {exc}')
+
+
 @crm_router.get('/learning/stats')
 async def crm_learning_stats():
     """Verification surface for the inbox learning pipeline.

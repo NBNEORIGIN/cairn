@@ -140,7 +140,28 @@ def list_pending_drafts(
                processed_at, classification, project_id,
                LEFT(draft_reply, 240) AS draft_preview,
                LENGTH(draft_reply) AS draft_length,
-               reviewed_at, review_action
+               reviewed_at, review_action,
+               draft_model,
+               -- Phase 5 instrumentation: if this sender has a strong
+               -- learned association to the same project that's
+               -- currently set on the row, flag it so the inbox UI
+               -- can show a "Learned" badge. Cheap subquery; the
+               -- index on sender_email makes it ~ms.
+               (
+                 SELECT spa.confirmations + spa.overrides - spa.rejections
+                   FROM cairn_intel.sender_project_associations spa
+                  WHERE spa.sender_email = LOWER(email_triage.email_sender)
+                    AND spa.project_id   = email_triage.project_id
+                  LIMIT 1
+               ) AS learned_net_signal,
+               -- Total actions for this sender (across all projects).
+               -- Lets the UI distinguish "new sender — best guess" vs
+               -- "known sender — learned association".
+               (
+                 SELECT COALESCE(SUM(confirmations + overrides + rejections), 0)
+                   FROM cairn_intel.sender_project_associations spa
+                  WHERE spa.sender_email = LOWER(email_triage.email_sender)
+               ) AS learned_total_actions
           FROM cairn_intel.email_triage
          WHERE {where_sql}
          ORDER BY processed_at DESC
@@ -152,7 +173,22 @@ def list_pending_drafts(
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(sql, params)
             for r in cur.fetchall():
-                rows.append(_jsonify(dict(r)))
+                d = dict(r)
+                # Compute a human-readable match_source. Priority:
+                #   - 'spa_strong' : current project_id has ≥3 net learned signal
+                #   - 'spa_weak'   : current project_id has 1-2 net learned signal
+                #   - 'fuzzy'      : project set but no learning agrees
+                #   - 'no_match'   : project_id is null
+                net = d.get('learned_net_signal')
+                if not d.get('project_id'):
+                    d['match_source'] = 'no_match'
+                elif net is None or net <= 0:
+                    d['match_source'] = 'fuzzy'
+                elif net >= 3:
+                    d['match_source'] = 'learned_strong'
+                else:
+                    d['match_source'] = 'learned_weak'
+                rows.append(_jsonify(d))
     return rows
 
 
