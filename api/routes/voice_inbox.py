@@ -277,11 +277,17 @@ async def crm_learning_stats():
                     # Senders eligible for auto-match — replicates the
                     # logic in sender_associations.auto_match_for in
                     # SQL so we don't have to N+1 in Python.
+                    # Mirror exactly the logic in
+                    # sender_associations.auto_match_for:
+                    #   - winner score >= 0.70
+                    #   - winner total_actions >= 3
+                    #   - winner score >= (runner-up score + 0.20)
+                    #     (or no runner-up exists)
                     cur.execute(
                         """
                         WITH scored AS (
                           SELECT sender_email, project_id,
-                                 confirmations, overrides, rejections,
+                                 confirmations + overrides + rejections AS total_actions,
                                  GREATEST(0.0,
                                    (1.0*confirmations + 1.5*overrides - 1.2*rejections)
                                    / NULLIF(confirmations + overrides + rejections, 0)
@@ -289,17 +295,24 @@ async def crm_learning_stats():
                             FROM cairn_intel.sender_project_associations
                         ),
                         ranked AS (
-                          SELECT *, ROW_NUMBER() OVER (
-                                       PARTITION BY sender_email
-                                       ORDER BY score DESC
-                                   ) AS rk
+                          SELECT sender_email, project_id, total_actions, score,
+                                 ROW_NUMBER() OVER (
+                                   PARTITION BY sender_email
+                                   ORDER BY score DESC
+                                 ) AS rk,
+                                 LEAD(score) OVER (
+                                   PARTITION BY sender_email
+                                   ORDER BY score DESC
+                                 ) AS runner_up_score
                             FROM scored
                         )
                         SELECT COUNT(DISTINCT sender_email)
                           FROM ranked
                          WHERE rk = 1
                            AND score >= 0.70
-                           AND (confirmations + overrides + rejections) >= 3
+                           AND total_actions >= 3
+                           AND (runner_up_score IS NULL
+                                OR (score - runner_up_score) >= 0.20)
                         """
                     )
                     out['auto_match_eligible_senders'] = int(cur.fetchone()[0])
