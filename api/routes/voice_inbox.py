@@ -153,6 +153,30 @@ async def crm_mark_spam(triage_id: int, payload: _CrmSpamBody):
     return result
 
 
+class _CrmInternalBody(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+    marked_by: Optional[str] = None
+    reason: Optional[str] = None
+
+
+@crm_router.post('/{triage_id}/internal')
+async def crm_mark_internal(triage_id: int, payload: _CrmInternalBody):
+    """Mark a triaged email as internal staff comms — not client, not
+    spam. Deek shouldn't draft client-style replies for chatter
+    between people at @nbnesigns.com or @nbnesigns.co.uk. Persists
+    ``review_action='internal_communication'`` for the matcher to
+    learn from."""
+    from core.triage.inbox import mark_as_internal
+    result = mark_as_internal(
+        triage_id,
+        marked_by=payload.marked_by or '',
+        reason=payload.reason or '',
+    )
+    if not result.get('ok'):
+        raise HTTPException(404, result.get('error', 'internal mark failed'))
+    return result
+
+
 class _CrmReassignBody(BaseModel):
     model_config = ConfigDict(extra='ignore')
     project_id: Optional[str] = None

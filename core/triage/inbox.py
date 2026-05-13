@@ -314,6 +314,51 @@ def reject_draft(triage_id: int, *, rejected_by: str = '', reason: str = '') -> 
     return {'ok': True, 'triage_id': triage_id}
 
 
+def mark_as_internal(triage_id: int, *, marked_by: str = '', reason: str = '') -> dict:
+    """Mark a triaged email as internal staff comms (not client, not spam).
+
+    Use case: Gabby emails toby@nbnesigns.com about a manufacture-app bug.
+    Deek shouldn't be drafting client-style replies for these — they're
+    operational chatter that belongs in our internal channels.
+
+    Recorded as ``review_action='internal_communication'`` so the
+    reranker / classifier learns to skip emails from staff domains
+    (@nbnesigns.com, @nbnesigns.co.uk) and any other internal-comms
+    sender patterns Toby flags here over time.
+    """
+    notes = f'internal-comms by {marked_by or "?"}@{datetime.now(timezone.utc).isoformat()}'
+    if reason:
+        notes += f' — {reason[:200]}'
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                'SELECT email_message_id FROM cairn_intel.email_triage WHERE id = %s',
+                (triage_id,),
+            )
+            mid_row = cur.fetchone()
+            message_id = mid_row[0] if mid_row else None
+            cur.execute(
+                """UPDATE cairn_intel.email_triage
+                      SET reviewed_at = NOW(),
+                          review_action = %s,
+                          review_notes = COALESCE(NULLIF(review_notes,''), '') || %s
+                    WHERE id = %s
+                    RETURNING id""",
+                ('internal_communication', '\n' + notes, triage_id),
+            )
+            row = cur.fetchone()
+            conn.commit()
+    if not row:
+        return {'ok': False, 'error': 'not found'}
+    _mirror_state_to_crm(
+        message_id=message_id,
+        is_approved=False,
+        approved_by=marked_by or 'inbox-action',
+        review_action='internal_communication',
+    )
+    return {'ok': True, 'triage_id': triage_id}
+
+
 def mark_as_spam(triage_id: int, *, marked_by: str = '', reason: str = '') -> dict:
     """Mark a triaged email as spam — a stronger negative signal than
     ``reject``. Reject = "draft was wrong, the email itself was legit".
