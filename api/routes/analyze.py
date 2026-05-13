@@ -4,6 +4,9 @@ Enquiry Analysis API route.
 POST /api/deek/analyze — wraps the existing _analyze_enquiry() tool
 so the CRM (and other consumers) can request strategy briefs over HTTP.
 """
+import asyncio
+import functools
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
@@ -52,10 +55,24 @@ async def analyze_enquiry(req: AnalyzeRequest):
 
     from core.tools.enquiry_analyzer import _analyze_enquiry
 
-    raw = _analyze_enquiry(
-        project_root='',
-        enquiry=req.enquiry,
-        focus=req.focus,
+    # _analyze_enquiry is sync and uses the sync Anthropic SDK
+    # (httpx sync transport). Running it directly in this async
+    # handler blocks the event loop for the full Sonnet round-trip
+    # (5-30s typical, longer on retries). The loop-stall watchdog
+    # caught this in production on 2026-05-13: the event loop hung
+    # for >5s on every enquiry analyze request, healthcheck failed,
+    # autoheal recycled the container, and any background work
+    # (SP-API order sync, etc.) died with it. Offload to the default
+    # thread pool so the loop stays responsive.
+    loop = asyncio.get_event_loop()
+    raw = await loop.run_in_executor(
+        None,
+        functools.partial(
+            _analyze_enquiry,
+            project_root='',
+            enquiry=req.enquiry,
+            focus=req.focus,
+        ),
     )
 
     # Check for error messages (they don't contain sentinel markers)
