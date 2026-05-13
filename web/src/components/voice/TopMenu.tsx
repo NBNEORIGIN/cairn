@@ -156,6 +156,14 @@ export function TopMenu({
       </button>
       {open && !showVoices && (
         <div className="absolute right-0 top-full mt-2 w-60 overflow-hidden rounded-lg border border-slate-700 bg-slate-900 shadow-lg">
+          {/* Inbox — pending Deek-drafted email replies awaiting review.
+              Phase 1 of the active-PM workflow (2026-05-13). */}
+          <MenuItem
+            onClick={() => { window.location.href = '/voice/inbox' }}
+            label="Inbox"
+            hint="pending drafts to review"
+          />
+          <div className="border-t border-slate-800" />
           <MenuItem onClick={handleDownload} label="Download transcript" hint=".md file" />
           <MenuItem onClick={handleCommit} label="Commit to memory" hint="save as wiki article" />
           <MenuItem
