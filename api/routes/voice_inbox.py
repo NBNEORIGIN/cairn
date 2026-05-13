@@ -80,6 +80,104 @@ async def pending_list(
     return {'count': len(rows), 'rows': rows}
 
 
+@crm_router.get('/learning/stats')
+async def crm_learning_stats():
+    """Verification surface for the inbox learning pipeline.
+
+    Toby's question: "how do I check Deek is actually learning?"
+    Honest answer: writes work, reads don't (yet). This endpoint
+    surfaces the counts that prove writes ARE happening so the gap
+    can be measured rather than guessed at.
+
+    Returns counts for the four claimed pipeline components plus a
+    breakdown of recent review actions, so the dashboard can show
+    "feedback recorded" alongside the existing learning artefacts.
+    """
+    from core.triage.inbox import _conn, _crm_conn
+    out: dict = {}
+
+    # 1. RAG — chunks embedded into claw_code_chunks
+    try:
+        with _conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT COUNT(*) FROM claw_code_chunks WHERE chunk_type='email'"
+                )
+                out['email_chunks'] = int(cur.fetchone()[0])
+                cur.execute(
+                    "SELECT COUNT(*) FROM claw_code_chunks WHERE chunk_type='wiki'"
+                )
+                out['wiki_chunks'] = int(cur.fetchone()[0])
+                cur.execute("SELECT COUNT(*) FROM claw_code_chunks")
+                out['total_chunks'] = int(cur.fetchone()[0])
+                cur.execute(
+                    """SELECT MAX(created_at) FROM claw_code_chunks
+                        WHERE chunk_type IN ('email','wiki')"""
+                )
+                last = cur.fetchone()[0]
+                out['last_chunk_at'] = last.isoformat() if last else None
+    except Exception as exc:
+        out['embeddings_error'] = str(exc)
+
+    # 2. BM25 — persistent tsvector index check (we don't have one;
+    #    the dashboard should flag this honestly)
+    try:
+        with _conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT COUNT(*) FROM pg_indexes
+                        WHERE tablename IN ('claw_code_chunks','email_triage')
+                          AND indexdef LIKE '%tsvector%'"""
+                )
+                out['tsvector_indexes'] = int(cur.fetchone()[0])
+    except Exception as exc:
+        out['bm25_error'] = str(exc)
+
+    # 3. Feedback — review_action counts (write-only path, but worth
+    #    showing the volume so Toby can see his corrections landing)
+    try:
+        with _conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT COALESCE(review_action, 'pending') AS action,
+                              COUNT(*)
+                         FROM cairn_intel.email_triage
+                        GROUP BY 1
+                        ORDER BY 2 DESC"""
+                )
+                out['review_action_totals'] = [
+                    {'action': r[0], 'count': int(r[1])} for r in cur.fetchall()
+                ]
+                cur.execute(
+                    """SELECT COALESCE(review_action,'pending') AS action,
+                              COUNT(*)
+                         FROM cairn_intel.email_triage
+                        WHERE reviewed_at >= NOW() - INTERVAL '7 days'
+                           OR (reviewed_at IS NULL AND processed_at >= NOW() - INTERVAL '7 days')
+                        GROUP BY 1
+                        ORDER BY 2 DESC"""
+                )
+                out['review_action_7d'] = [
+                    {'action': r[0], 'count': int(r[1])} for r in cur.fetchall()
+                ]
+                cur.execute(
+                    """SELECT COUNT(*) FROM cairn_intel.email_triage
+                        WHERE draft_reply IS NOT NULL"""
+                )
+                out['drafts_written_total'] = int(cur.fetchone()[0])
+    except Exception as exc:
+        out['feedback_error'] = str(exc)
+
+    # 4. Read-back check — is anyone reading review_action to weight
+    #    future matches? Today: no. We surface this as a literal flag
+    #    so the UI can render the honest status.
+    out['feedback_consumed_by_reranker'] = False
+    out['feedback_consumed_by_matcher'] = False
+    out['bm25_persisted'] = (out.get('tsvector_indexes') or 0) > 0
+
+    return out
+
+
 @crm_router.get('/{triage_id}')
 async def crm_get_inbox_item(triage_id: int):
     """Detail panel data for the CRM inbox view. Same payload as
@@ -150,6 +248,28 @@ async def crm_mark_spam(triage_id: int, payload: _CrmSpamBody):
     )
     if not result.get('ok'):
         raise HTTPException(404, result.get('error', 'spam mark failed'))
+    return result
+
+
+class _CrmArchiveBody(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+    archived_by: Optional[str] = None
+    reason: Optional[str] = None
+
+
+@crm_router.post('/{triage_id}/archive')
+async def crm_archive(triage_id: int, payload: _CrmArchiveBody):
+    """Mark a draft archived — Toby's already actioned it (copied to
+    clipboard, pasted into sales@, sent manually) and wants it out of
+    the pending queue. Neutral signal, not a learning event."""
+    from core.triage.inbox import archive_draft
+    result = archive_draft(
+        triage_id,
+        archived_by=payload.archived_by or '',
+        reason=payload.reason or '',
+    )
+    if not result.get('ok'):
+        raise HTTPException(404, result.get('error', 'archive failed'))
     return result
 
 

@@ -314,6 +314,48 @@ def reject_draft(triage_id: int, *, rejected_by: str = '', reason: str = '') -> 
     return {'ok': True, 'triage_id': triage_id}
 
 
+def archive_draft(triage_id: int, *, archived_by: str = '', reason: str = '') -> dict:
+    """Neutral 'done with this' action — Toby has already actioned the
+    email (likely pasted into sales@ and sent manually) and wants the
+    row to drop from the pending list.
+
+    Distinct from reject / spam / internal: those are LEARNING signals.
+    Archive is just queue management — no negative weight on the draft
+    or sender, just 'reviewed_at = NOW(), get this out of my face'.
+    """
+    notes = f'archived by {archived_by or "?"}@{datetime.now(timezone.utc).isoformat()}'
+    if reason:
+        notes += f' — {reason[:200]}'
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                'SELECT email_message_id FROM cairn_intel.email_triage WHERE id = %s',
+                (triage_id,),
+            )
+            mid_row = cur.fetchone()
+            message_id = mid_row[0] if mid_row else None
+            cur.execute(
+                """UPDATE cairn_intel.email_triage
+                      SET reviewed_at = NOW(),
+                          review_action = %s,
+                          review_notes = COALESCE(NULLIF(review_notes,''), '') || %s
+                    WHERE id = %s
+                    RETURNING id""",
+                ('archived', '\n' + notes, triage_id),
+            )
+            row = cur.fetchone()
+            conn.commit()
+    if not row:
+        return {'ok': False, 'error': 'not found'}
+    _mirror_state_to_crm(
+        message_id=message_id,
+        is_approved=True,  # archive = "done", treated like staged
+        approved_by=archived_by or 'inbox-action',
+        review_action='archived',
+    )
+    return {'ok': True, 'triage_id': triage_id}
+
+
 def mark_as_internal(triage_id: int, *, marked_by: str = '', reason: str = '') -> dict:
     """Mark a triaged email as internal staff comms (not client, not spam).
 
