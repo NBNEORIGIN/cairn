@@ -314,6 +314,105 @@ def reject_draft(triage_id: int, *, rejected_by: str = '', reason: str = '') -> 
     return {'ok': True, 'triage_id': triage_id}
 
 
+def mark_as_spam(triage_id: int, *, marked_by: str = '', reason: str = '') -> dict:
+    """Mark a triaged email as spam — a stronger negative signal than
+    ``reject``. Reject = "draft was wrong, the email itself was legit".
+    Spam = "this sender/topic should not produce a draft at all".
+    Persists ``review_action='spam'`` so the reranker treats it as a
+    hard down-weight on future emails from the same sender."""
+    notes = f'spam by {marked_by or "?"}@{datetime.now(timezone.utc).isoformat()}'
+    if reason:
+        notes += f' — {reason[:200]}'
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                'SELECT email_message_id FROM cairn_intel.email_triage WHERE id = %s',
+                (triage_id,),
+            )
+            mid_row = cur.fetchone()
+            message_id = mid_row[0] if mid_row else None
+            cur.execute(
+                """UPDATE cairn_intel.email_triage
+                      SET reviewed_at = NOW(),
+                          review_action = %s,
+                          review_notes = COALESCE(NULLIF(review_notes,''), '') || %s
+                    WHERE id = %s
+                    RETURNING id""",
+                ('spam', '\n' + notes, triage_id),
+            )
+            row = cur.fetchone()
+            conn.commit()
+    if not row:
+        return {'ok': False, 'error': 'not found'}
+    _mirror_state_to_crm(
+        message_id=message_id,
+        is_approved=False,
+        approved_by=marked_by or 'inbox-action',
+        review_action='spam',
+    )
+    return {'ok': True, 'triage_id': triage_id}
+
+
+def reassign_to_project(
+    triage_id: int,
+    *,
+    new_project_id: Optional[str] = None,
+    reassigned_by: str = '',
+    reason: str = '',
+) -> dict:
+    """Override Deek's project match. Records the correction in
+    ``review_notes`` so the matcher can be retrained on Toby's
+    feedback. ``new_project_id=None`` clears the association."""
+    notes = (
+        f'reassigned to {new_project_id or "(none)"} '
+        f'by {reassigned_by or "?"}@{datetime.now(timezone.utc).isoformat()}'
+    )
+    if reason:
+        notes += f' — {reason[:200]}'
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                'SELECT email_message_id, project_id FROM cairn_intel.email_triage WHERE id = %s',
+                (triage_id,),
+            )
+            head = cur.fetchone()
+            if not head:
+                return {'ok': False, 'error': 'not found'}
+            message_id, old_project_id = head[0], head[1]
+            cur.execute(
+                """UPDATE cairn_intel.email_triage
+                      SET project_id = %s,
+                          review_notes = COALESCE(NULLIF(review_notes,''), '') || %s
+                    WHERE id = %s
+                    RETURNING id""",
+                (new_project_id, '\n' + notes, triage_id),
+            )
+            row = cur.fetchone()
+            conn.commit()
+    if not row:
+        return {'ok': False, 'error': 'not found'}
+    # Mirror to CRM `emails.project_id` so the inbox UI re-groups
+    # the row under the correct project without waiting for the sync.
+    # Different database — use _crm_conn, not _conn.
+    if message_id:
+        try:
+            with _crm_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        'UPDATE emails SET project_id = %s WHERE message_id = %s',
+                        (new_project_id, message_id),
+                    )
+                    conn.commit()
+        except Exception:
+            logger.exception('failed to mirror reassign for triage %s', triage_id)
+    return {
+        'ok': True,
+        'triage_id': triage_id,
+        'old_project_id': old_project_id,
+        'new_project_id': new_project_id,
+    }
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 def _compose_staging_body(row: dict) -> str:

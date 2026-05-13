@@ -65,14 +65,116 @@ async def pending_list(
     project_id: Optional[str] = Query(None),
 ):
     """Same data as /api/voice/inbox but namespaced under /api/cairn/*
-    so CRM has a stable contract. Read-only — CRM's frontend calls
-    /api/voice/inbox/{id}/{stage|reject|edit} for actions."""
+    so CRM has a stable contract.
+
+    Read-only — for actions and detail, CRM calls the matching
+    ``/api/cairn/notifications/{id}/{...}`` endpoints below (which
+    are also under the open X-API-Key namespace; the original
+    ``/api/voice/inbox/*`` route is blocked by the PWA's
+    session-cookie nginx rule)."""
     from core.triage.inbox import list_pending_drafts
     rows = list_pending_drafts(
         limit=limit, offset=0,
         project_id=project_id, include_reviewed=False,
     )
     return {'count': len(rows), 'rows': rows}
+
+
+@crm_router.get('/{triage_id}')
+async def crm_get_inbox_item(triage_id: int):
+    """Detail panel data for the CRM inbox view. Same payload as
+    ``GET /api/voice/inbox/{id}`` but reachable with the shared
+    X-API-Key (the PWA route is session-gated by nginx)."""
+    from core.triage.inbox import get_pending_draft
+    row = get_pending_draft(triage_id)
+    if not row:
+        raise HTTPException(404, 'triage row not found')
+    return row
+
+
+class _CrmEditBody(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+    draft_reply: str
+    edited_by: Optional[str] = None
+
+
+@crm_router.post('/{triage_id}/edit')
+async def crm_edit_inbox_item(triage_id: int, payload: _CrmEditBody):
+    """Save Toby's edits to the draft. Doesn't mark reviewed — same
+    semantics as the PWA's /api/voice/inbox/{id}/edit."""
+    from core.triage.inbox import update_draft_text
+    result = update_draft_text(triage_id, payload.draft_reply)
+    if not result.get('ok'):
+        raise HTTPException(400, result.get('error', 'edit failed'))
+    return result
+
+
+class _CrmRejectBody(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+    rejected_by: Optional[str] = None
+    reason: Optional[str] = None
+
+
+@crm_router.post('/{triage_id}/reject')
+async def crm_reject_inbox_item(triage_id: int, payload: _CrmRejectBody):
+    """Reject a draft (wrong tone / wrong template / wrong product).
+    Reason persists in review_notes so the reranker learns."""
+    from core.triage.inbox import reject_draft
+    result = reject_draft(
+        triage_id,
+        rejected_by=payload.rejected_by or '',
+        reason=payload.reason or '',
+    )
+    if not result.get('ok'):
+        raise HTTPException(404, result.get('error', 'reject failed'))
+    return result
+
+
+class _CrmSpamBody(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+    marked_by: Optional[str] = None
+    reason: Optional[str] = None
+
+
+@crm_router.post('/{triage_id}/spam')
+async def crm_mark_spam(triage_id: int, payload: _CrmSpamBody):
+    """Mark a triaged email as spam so Deek learns not to draft for
+    similar senders/topics. Mirrors reject but records
+    ``review_action='spam'`` which the reranker treats as a strong
+    negative signal (and the classifier picks up on rebuild)."""
+    from core.triage.inbox import mark_as_spam
+    result = mark_as_spam(
+        triage_id,
+        marked_by=payload.marked_by or '',
+        reason=payload.reason or '',
+    )
+    if not result.get('ok'):
+        raise HTTPException(404, result.get('error', 'spam mark failed'))
+    return result
+
+
+class _CrmReassignBody(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+    project_id: Optional[str] = None
+    reassigned_by: Optional[str] = None
+    reason: Optional[str] = None
+
+
+@crm_router.post('/{triage_id}/reassign')
+async def crm_reassign_project(triage_id: int, payload: _CrmReassignBody):
+    """Override Deek's project match. Used when Deek guessed wrong (or
+    didn't guess at all). Persists the correction in review_notes so
+    the matcher learns. ``project_id=None`` clears the association."""
+    from core.triage.inbox import reassign_to_project
+    result = reassign_to_project(
+        triage_id,
+        new_project_id=payload.project_id,
+        reassigned_by=payload.reassigned_by or '',
+        reason=payload.reason or '',
+    )
+    if not result.get('ok'):
+        raise HTTPException(404, result.get('error', 'reassign failed'))
+    return result
 
 
 # ── List + detail ──────────────────────────────────────────────────────────
