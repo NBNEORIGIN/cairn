@@ -67,6 +67,7 @@ def _build_prompt(
     project_history: str,
     tone: dict,
     low_confidence: bool,
+    negative_examples: list[str] | None = None,
 ) -> str:
     """Assemble the Ollama prompt. Deterministic given inputs — no
     randomness here."""
@@ -80,6 +81,15 @@ def _build_prompt(
     max_words = length_cfg.get('max_words', 180)
 
     rules_block = '\n'.join(f'  - {r}' for r in rules_list) if rules_list else '  (no explicit rules)'
+
+    # Phase 3 of the learning loop (2026-05-13): when Toby has rejected
+    # past drafts for this sender, inject the rejection reasons as an
+    # AVOID block. Phrased as feedback from Toby so the LLM treats it
+    # as a hard constraint rather than self-improvement advice.
+    avoid_block = ''
+    if negative_examples:
+        from core.triage.drafter_feedback import format_avoid_block
+        avoid_block = format_avoid_block(negative_examples)
 
     # Candidate block — what we believe the email is about. Includes
     # match score so the drafter can hedge when uncertain.
@@ -113,7 +123,7 @@ def _build_prompt(
 
 ## Rules
 {rules_block}
-
+{avoid_block + chr(10) if avoid_block else ''}
 ## Length
 Target around {target_words} words. Hard maximum {max_words} words. Shorter is better than padded. Do NOT exceed the hard max.
 
@@ -180,6 +190,7 @@ def draft_reply(
     ollama_base: str | None = None,
     model: str | None = None,
     low_confidence: bool = False,
+    negative_examples: list[str] | None = None,
 ) -> DraftResult:
     """Produce a draft reply. Never raises.
 
@@ -205,7 +216,14 @@ def draft_reply(
     )
 
     tone = _load_tone()
-    prompt = _build_prompt(email, candidate, project_history, tone, low_confidence)
+    # Track how many AVOID examples we used so the audit trail can
+    # show "this draft was conditioned on N past rejections from this
+    # sender". Stamped into DraftResult.model below.
+    n_negative = len(negative_examples) if negative_examples else 0
+    prompt = _build_prompt(
+        email, candidate, project_history, tone, low_confidence,
+        negative_examples=negative_examples,
+    )
 
     try:
         with httpx.Client(timeout=OLLAMA_TIMEOUT) as client:
@@ -249,8 +267,12 @@ def draft_reply(
     elif notes:
         conf_note = f'[note: {notes[:200]}]'
 
+    # Stamp the feedback-example count into the model string so it
+    # lands in cairn_intel.email_triage.draft_model and the dashboard
+    # can count how many drafts were conditioned on rejection feedback.
+    model_stamp = f'{model} | feedback_examples={n_negative}'
     return DraftResult(
-        text=draft, model=model, confidence_note=conf_note, error='',
+        text=draft, model=model_stamp, confidence_note=conf_note, error='',
     )
 
 

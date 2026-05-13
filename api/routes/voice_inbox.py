@@ -230,15 +230,39 @@ async def crm_learning_stats():
                     """
                 )
                 out['senders_with_matcher_boost'] = int(cur.fetchone()[0])
+
+                # Phase 3 counters. The drafter stamps
+                # ' | feedback_examples=N' into draft_model when it
+                # injects AVOID examples — count drafts where N > 0.
+                cur.execute(
+                    """SELECT COUNT(*) FROM cairn_intel.email_triage
+                        WHERE draft_model ~ 'feedback_examples=[1-9]'
+                          AND processed_at >= NOW() - INTERVAL '7 days'"""
+                )
+                out['drafts_with_feedback_examples_7d'] = int(cur.fetchone()[0])
+                cur.execute(
+                    """SELECT COUNT(*) FROM cairn_intel.email_triage
+                        WHERE review_action = 'rejected_via_inbox'
+                          AND reviewed_at >= NOW() - INTERVAL '90 days'"""
+                )
+                out['rejections_90d'] = int(cur.fetchone()[0])
+                cur.execute(
+                    """
+                    SELECT COUNT(DISTINCT LOWER(email_sender))
+                      FROM cairn_intel.email_triage
+                     WHERE review_action = 'rejected_via_inbox'
+                       AND reviewed_at >= NOW() - INTERVAL '90 days'
+                    """
+                )
+                out['senders_with_rejection_history'] = int(cur.fetchone()[0])
     except Exception as exc:
         out['feedback_error'] = str(exc)
 
-    # Read-back consumption flags. Phase 1 (skip rules) and Phase 2
-    # (matcher feedback) are live; reranker (Phase 3) and persistent
-    # BM25 (Phase 4) remain unwired.
+    # Read-back consumption flags. Phases 1–3 are live; persistent
+    # BM25 (Phase 4) is the remaining gap.
     out['feedback_consumed_by_skip_rules'] = True
     out['feedback_consumed_by_matcher'] = True
-    out['feedback_consumed_by_reranker'] = False
+    out['feedback_consumed_by_reranker'] = True  # AVOID injection
     out['bm25_persisted'] = (out.get('tsvector_indexes') or 0) > 0
 
     return out

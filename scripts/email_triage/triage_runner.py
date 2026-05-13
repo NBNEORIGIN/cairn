@@ -419,8 +419,19 @@ def _process_one(email: dict, commit: bool) -> dict:
         try:
             from .response_drafter import draft_reply
             from .project_history import fetch_project_history
+            from core.triage.drafter_feedback import recent_rejections_for
             top = (match.get('candidates') or [None])[0]
             history = fetch_project_history(top) if top else ''
+            # Phase 3 of the learning loop: pull recent rejection reasons
+            # for this sender so the drafter can inject them as AVOID
+            # examples. Empty list when there's no history — the
+            # drafter then behaves exactly as before.
+            neg_examples = recent_rejections_for(email.get('sender') or '')
+            if neg_examples:
+                log.info(
+                    'drafter_feedback: %d rejection example(s) for sender=%s',
+                    len(neg_examples), email.get('sender'),
+                )
             drafted = draft_reply(
                 email=email,
                 candidate=top,
@@ -428,6 +439,7 @@ def _process_one(email: dict, commit: bool) -> dict:
                 low_confidence=(
                     classification.get('confidence', 'medium') == 'low'
                 ),
+                negative_examples=neg_examples,
             )
             if drafted.text:
                 row['draft_reply'] = drafted.text + (
