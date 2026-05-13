@@ -61,6 +61,57 @@ def _conn():
     return psycopg2.connect(url, connect_timeout=5)
 
 
+def _crm_conn():
+    """CRM-DB connection — same host as Cairn, different database."""
+    url = os.getenv('DATABASE_URL', '')
+    if not url or '/' not in url:
+        raise RuntimeError('DATABASE_URL not set or malformed')
+    crm_url = url.rsplit('/', 1)[0] + '/crm'
+    return psycopg2.connect(crm_url, connect_timeout=5)
+
+
+def _mirror_state_to_crm(
+    *,
+    message_id: Optional[str],
+    is_approved: bool,
+    approved_by: str,
+    review_action: str,
+) -> None:
+    """Reflect a stage/reject action into CRM's emails table.
+
+    Best-effort — if the CRM-side row doesn't exist yet (sync hasn't
+    caught up) or the connection fails, the Cairn-side action still
+    succeeded. The next sync_drafts_to_crm run will reconcile.
+    """
+    if not message_id:
+        return
+    try:
+        with _crm_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE emails
+                       SET is_approved = %s,
+                           approved_by = %s,
+                           sent_at     = CASE WHEN %s THEN NOW() ELSE sent_at END,
+                           classification = CASE WHEN %s THEN COALESCE(classification, %s) ELSE classification END
+                     WHERE message_id = %s
+                       AND is_cairn_draft = true
+                    """,
+                    (
+                        is_approved,
+                        approved_by,
+                        is_approved,
+                        not is_approved,  # only stamp 'rejected' on rejects
+                        review_action,
+                        message_id,
+                    ),
+                )
+                conn.commit()
+    except Exception as exc:
+        logger.warning('CRM mirror failed for message_id=%s: %s', message_id, exc)
+
+
 # ── List / read ────────────────────────────────────────────────────────────
 
 def list_pending_drafts(
@@ -211,6 +262,13 @@ def stage_to_sales(
                 ('staged_to_sales', ('\n' if row.get('review_notes') else '') + notes, triage_id),
             )
             conn.commit()
+    # Mirror state to CRM emails (best-effort; sync job reconciles if it fails)
+    _mirror_state_to_crm(
+        message_id=row.get('email_message_id'),
+        is_approved=True,
+        approved_by=staged_by or 'inbox-action',
+        review_action='staged_to_sales',
+    )
     return {
         'ok': True,
         'triage_id': triage_id,
@@ -225,8 +283,15 @@ def reject_draft(triage_id: int, *, rejected_by: str = '', reason: str = '') -> 
     notes = f'rejected by {rejected_by or "?"}@{datetime.now(timezone.utc).isoformat()}'
     if reason:
         notes += f' — {reason[:200]}'
+    # Need email_message_id for the CRM mirror — look up before the UPDATE
     with _conn() as conn:
         with conn.cursor() as cur:
+            cur.execute(
+                'SELECT email_message_id FROM cairn_intel.email_triage WHERE id = %s',
+                (triage_id,),
+            )
+            mid_row = cur.fetchone()
+            message_id = mid_row[0] if mid_row else None
             cur.execute(
                 """UPDATE cairn_intel.email_triage
                       SET reviewed_at = NOW(),
@@ -240,6 +305,12 @@ def reject_draft(triage_id: int, *, rejected_by: str = '', reason: str = '') -> 
             conn.commit()
     if not row:
         return {'ok': False, 'error': 'not found'}
+    _mirror_state_to_crm(
+        message_id=message_id,
+        is_approved=False,
+        approved_by=rejected_by or 'inbox-action',
+        review_action='rejected_via_inbox',
+    )
     return {'ok': True, 'triage_id': triage_id}
 
 

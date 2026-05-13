@@ -3498,8 +3498,9 @@ from api.routes.ebay_intel import router as ebay_router
 app.include_router(ebay_router)
 
 # Register Voice Inbox routes — Toby's active-PM pending-drafts surface
-from api.routes.voice_inbox import router as voice_inbox_router
+from api.routes.voice_inbox import router as voice_inbox_router, crm_router as crm_notifications_router
 app.include_router(voice_inbox_router)
+app.include_router(crm_notifications_router)
 
 # Register Wiki Layer routes
 from api.routes.wiki import router as wiki_router

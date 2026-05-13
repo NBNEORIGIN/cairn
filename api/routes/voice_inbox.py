@@ -23,6 +23,58 @@ router = APIRouter(
 )
 
 
+# A separate router exposed at /api/cairn/notifications so CRM has
+# a stable namespace to consume (matches the rest of the /api/cairn/*
+# CRM-facing surface). All endpoints are read-only counts/lists; the
+# action endpoints stay on /api/voice/inbox.
+crm_router = APIRouter(
+    prefix='/api/cairn/notifications',
+    tags=['CRM Notifications'],
+    dependencies=[Depends(verify_api_key)],
+)
+
+
+@crm_router.get('/unread_count')
+async def unread_count_global(project_id: Optional[str] = Query(None)):
+    """Badge count for the CRM header (or a per-project chip).
+
+    Returns the count of pending drafts (draft_reply present,
+    reviewed_at IS NULL). Optional ``project_id`` filter for the
+    per-project chip on a CRM project page.
+    """
+    from core.triage.inbox import _conn
+    sql = (
+        "SELECT COUNT(*) FROM cairn_intel.email_triage "
+        "WHERE draft_reply IS NOT NULL AND draft_reply <> '' "
+        "AND reviewed_at IS NULL"
+    )
+    params: list = []
+    if project_id:
+        sql += " AND project_id = %s"
+        params.append(project_id)
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            count = cur.fetchone()[0]
+    return {'unread_count': int(count), 'project_id': project_id}
+
+
+@crm_router.get('/pending')
+async def pending_list(
+    limit: int = Query(50, ge=1, le=200),
+    project_id: Optional[str] = Query(None),
+):
+    """Same data as /api/voice/inbox but namespaced under /api/cairn/*
+    so CRM has a stable contract. Read-only — CRM's frontend calls
+    /api/voice/inbox/{id}/{stage|reject|edit} for actions."""
+    from core.triage.inbox import list_pending_drafts
+    rows = list_pending_drafts(
+        limit=limit, offset=0,
+        project_id=project_id, include_reviewed=False,
+    )
+    return {'count': len(rows), 'rows': rows}
+
+
 # ── List + detail ──────────────────────────────────────────────────────────
 
 @router.get('')
