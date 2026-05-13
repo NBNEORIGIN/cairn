@@ -200,12 +200,109 @@ class HybridRetriever:
         self._bm25_corpus.pop(key, None)
         self._bm25_built_at.pop(key, None)
 
+    # ── Phase 4 of the inbox learning loop (2026-05-13) ─────────────────
+    # Persistent BM25 via the GIN index added in
+    # migrations/2026-05-13-bm25-gin-index.sql. Postgres scores
+    # ts_rank_cd over the full corpus on demand — no cache, no
+    # staleness, no per-worker RAM cost. Falls back to the legacy
+    # in-memory path if the query errors (typically because the
+    # index hasn't been created yet on an older environment).
+    _PG_FTS_ENABLED: bool = True
+
+    def _bm25_search_pg(
+        self,
+        query: str,
+        subproject_id: str | None = None,
+        top_k: int | None = None,
+    ) -> list[RetrievedChunk] | None:
+        """Postgres-side ts_rank_cd over the GIN index.
+
+        Returns a list of RetrievedChunk on success. Returns ``None``
+        if the index isn't available or the query fails — callers
+        should fall back to the in-memory path.
+        """
+        if not self._PG_FTS_ENABLED:
+            return None
+        engine = self.context_engine
+        if not getattr(engine, 'db_url', None):
+            return None
+        top_k = top_k or self.bm25_top_k
+
+        # websearch_to_tsquery is the user-text-friendly query parser:
+        # handles unquoted terms as AND, supports "exact phrases", and
+        # ignores stop-words. plainto_tsquery would also work but is
+        # less forgiving of punctuation in pasted client names.
+        sql = """
+            WITH q AS (
+              SELECT websearch_to_tsquery('english', %(query)s) AS tsq
+            )
+            SELECT file_path, chunk_content, chunk_type, chunk_name,
+                   ts_rank_cd(
+                       to_tsvector('english', COALESCE(chunk_content, '')),
+                       q.tsq
+                   ) AS score
+              FROM claw_code_chunks, q
+             WHERE project_id = %(project_id)s
+        """
+        params: dict = {
+            'query': query,
+            'project_id': getattr(engine, 'project_id', None),
+            'top_k': top_k,
+        }
+        if subproject_id:
+            sql += " AND (subproject_id IS NULL OR subproject_id = %(subproject_id)s)"
+            params['subproject_id'] = subproject_id
+        sql += """
+               AND to_tsvector('english', COALESCE(chunk_content, '')) @@ q.tsq
+             ORDER BY score DESC
+             LIMIT %(top_k)s
+        """
+        try:
+            conn = engine._get_connection()
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                rows = cur.fetchall()
+        except Exception as exc:
+            logger.warning(
+                '[retriever] _bm25_search_pg failed (%s) — '
+                'falling back to in-memory BM25',
+                exc,
+            )
+            # First failure disables the SQL path for this process to
+            # avoid hammering Postgres for every subsequent query
+            # while the index is being built / on a node without it.
+            self._PG_FTS_ENABLED = False
+            return None
+
+        results: list[RetrievedChunk] = []
+        for rank, row in enumerate(rows):
+            file_path, chunk_content, chunk_type, chunk_name, score = row
+            results.append(
+                RetrievedChunk(
+                    file=file_path,
+                    content=chunk_content or '',
+                    chunk_type=chunk_type or 'window',
+                    chunk_name=chunk_name,
+                    score=float(score),
+                    bm25_rank=rank,
+                    cosine_rank=None,
+                )
+            )
+        return results
+
     def _bm25_search(
         self,
         query: str,
         subproject_id: str | None = None,
         top_k: int | None = None,
     ) -> list[RetrievedChunk]:
+        # Try the Postgres-backed path first. Returns None (not [])
+        # on failure so we can distinguish "no results" from "index
+        # missing / DB error".
+        pg_results = self._bm25_search_pg(query, subproject_id, top_k)
+        if pg_results is not None:
+            return pg_results
+
         top_k = top_k or self.bm25_top_k
         index, corpus = self._get_or_build_bm25(subproject_id=subproject_id)
         if index is None or not corpus:
