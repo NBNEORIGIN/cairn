@@ -110,12 +110,20 @@ async def crm_learning_stats():
                 out['wiki_chunks'] = int(cur.fetchone()[0])
                 cur.execute("SELECT COUNT(*) FROM claw_code_chunks")
                 out['total_chunks'] = int(cur.fetchone()[0])
-                cur.execute(
-                    """SELECT MAX(created_at) FROM claw_code_chunks
-                        WHERE chunk_type IN ('email','wiki')"""
-                )
-                last = cur.fetchone()[0]
-                out['last_chunk_at'] = last.isoformat() if last else None
+                # Best-effort last-write timestamp — column name varies
+                # by schema version (created_at vs indexed_at vs ts).
+                for col in ('indexed_at', 'created_at', 'ts'):
+                    try:
+                        cur.execute(
+                            f"SELECT MAX({col}) FROM claw_code_chunks "
+                            f"WHERE chunk_type IN ('email','wiki')"
+                        )
+                        last = cur.fetchone()[0]
+                        out['last_chunk_at'] = last.isoformat() if last else None
+                        break
+                    except Exception:
+                        conn.rollback()
+                        continue
     except Exception as exc:
         out['embeddings_error'] = str(exc)
 
