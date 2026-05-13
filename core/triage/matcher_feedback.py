@@ -114,19 +114,44 @@ def apply_boosts_to_candidates(
 ) -> tuple[list[dict], int]:
     """Apply project boosts to a candidate list in-place, then re-sort.
 
-    Returns ``(candidates, n_boosted)`` where n_boosted is the count
-    of candidates whose score was actually multiplied (i.e. the
-    sender had prior reassigns to that project).
+    Phase 5 update (2026-05-13): boost source switched from parsing
+    review_notes for 'reassigned to ...' lines to the canonical
+    ``cairn_intel.sender_project_associations`` table. Falls back to
+    the review_notes parser if the association table read fails (or
+    is empty for this sender), so nothing regresses on environments
+    where the migration hasn't run yet.
 
-    Each boosted candidate gets two extra fields stamped on it so the
-    digest / audit can show the boost happened:
-
+    Each boosted candidate carries an audit trail:
         match_score_pre_boost: float
         feedback_boost:        float
     """
     if not candidates:
         return candidates, 0
-    boosts = project_boosts_for(sender)
+
+    # Primary path — read from the learned association table. Boost
+    # factor is derived from the association *score* (which is
+    # already normalised to ~[0, 1.5]), squashed into the same
+    # [1.0, 2.0] envelope as the legacy boost so the magnitude is
+    # comparable.
+    boosts: dict[str, float] = {}
+    try:
+        from core.triage.sender_associations import top_associations_for
+        for row in top_associations_for(sender, limit=8):
+            if row['score'] <= 0:
+                continue
+            # score 0   → boost 1.0  (no effect)
+            # score 0.5 → boost 1.25
+            # score 1.0 → boost 1.50
+            # score 1.5 → boost 2.00 (cap)
+            boosts[row['project_id']] = min(2.0, 1.0 + 0.5 * row['score'])
+    except Exception as exc:
+        log.warning('sender_associations lookup failed: %s', exc)
+
+    # Fallback — the legacy review_notes parser. Useful before the
+    # association table is backfilled / on a fresh deploy.
+    if not boosts:
+        boosts = project_boosts_for(sender)
+
     if not boosts:
         return candidates, 0
 

@@ -255,6 +255,59 @@ async def crm_learning_stats():
                     """
                 )
                 out['senders_with_rejection_history'] = int(cur.fetchone()[0])
+
+                # Phase 5 counters — the learned association table is
+                # the headline metric for Toby's "is Deek getting
+                # better at routing?" question. Three numbers:
+                #   - rows: how much memory has accumulated
+                #   - auto_eligible_senders: senders the matcher would
+                #     short-circuit for today
+                #   - senders_with_associations: total distinct
+                #     senders Deek has any signal for
+                try:
+                    cur.execute(
+                        "SELECT COUNT(*) FROM cairn_intel.sender_project_associations"
+                    )
+                    out['sender_associations_rows'] = int(cur.fetchone()[0])
+                    cur.execute(
+                        """SELECT COUNT(DISTINCT sender_email)
+                             FROM cairn_intel.sender_project_associations"""
+                    )
+                    out['senders_with_associations'] = int(cur.fetchone()[0])
+                    # Senders eligible for auto-match — replicates the
+                    # logic in sender_associations.auto_match_for in
+                    # SQL so we don't have to N+1 in Python.
+                    cur.execute(
+                        """
+                        WITH scored AS (
+                          SELECT sender_email, project_id,
+                                 confirmations, overrides, rejections,
+                                 GREATEST(0.0,
+                                   (1.0*confirmations + 1.5*overrides - 1.2*rejections)
+                                   / NULLIF(confirmations + overrides + rejections, 0)
+                                 ) AS score
+                            FROM cairn_intel.sender_project_associations
+                        ),
+                        ranked AS (
+                          SELECT *, ROW_NUMBER() OVER (
+                                       PARTITION BY sender_email
+                                       ORDER BY score DESC
+                                   ) AS rk
+                            FROM scored
+                        )
+                        SELECT COUNT(DISTINCT sender_email)
+                          FROM ranked
+                         WHERE rk = 1
+                           AND score >= 0.70
+                           AND (confirmations + overrides + rejections) >= 3
+                        """
+                    )
+                    out['auto_match_eligible_senders'] = int(cur.fetchone()[0])
+                except Exception as exc:
+                    out['sender_associations_error'] = str(exc)
+                    out['sender_associations_rows'] = 0
+                    out['senders_with_associations'] = 0
+                    out['auto_match_eligible_senders'] = 0
     except Exception as exc:
         out['feedback_error'] = str(exc)
 

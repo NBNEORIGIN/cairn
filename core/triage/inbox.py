@@ -269,6 +269,15 @@ def stage_to_sales(
         approved_by=staged_by or 'inbox-action',
         review_action='staged_to_sales',
     )
+    # Phase 5: staging a matched draft is a positive signal for the
+    # (sender, project) association. Same semantic as archive but it
+    # also went through SMTP.
+    try:
+        if row.get('project_id') and row.get('email_sender'):
+            from core.triage.sender_associations import record_action
+            record_action(row['email_sender'], row['project_id'], 'confirmation')
+    except Exception:
+        logger.exception('sender_associations confirmation failed on stage %s', triage_id)
     return {
         'ok': True,
         'triage_id': triage_id,
@@ -329,11 +338,14 @@ def archive_draft(triage_id: int, *, archived_by: str = '', reason: str = '') ->
     with _conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                'SELECT email_message_id FROM cairn_intel.email_triage WHERE id = %s',
+                """SELECT email_message_id, email_sender, project_id
+                     FROM cairn_intel.email_triage WHERE id = %s""",
                 (triage_id,),
             )
-            mid_row = cur.fetchone()
-            message_id = mid_row[0] if mid_row else None
+            head_row = cur.fetchone()
+            if not head_row:
+                return {'ok': False, 'error': 'not found'}
+            message_id, email_sender, current_project_id = head_row
             cur.execute(
                 """UPDATE cairn_intel.email_triage
                       SET reviewed_at = NOW(),
@@ -353,6 +365,19 @@ def archive_draft(triage_id: int, *, archived_by: str = '', reason: str = '') ->
         approved_by=archived_by or 'inbox-action',
         review_action='archived',
     )
+    # Phase 5 (2026-05-13): archiving a matched draft is the strongest
+    # positive signal — Toby sent the reply for THIS project. Record
+    # a confirmation so the matcher learns this (sender, project)
+    # association without needing an explicit reassign.
+    if current_project_id and email_sender:
+        try:
+            from core.triage.sender_associations import record_action
+            record_action(email_sender, current_project_id, 'confirmation')
+        except Exception:
+            logger.exception(
+                'sender_associations confirmation failed on archive %s',
+                triage_id,
+            )
     return {'ok': True, 'triage_id': triage_id}
 
 
@@ -459,13 +484,14 @@ def reassign_to_project(
     with _conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                'SELECT email_message_id, project_id FROM cairn_intel.email_triage WHERE id = %s',
+                """SELECT email_message_id, project_id, email_sender
+                     FROM cairn_intel.email_triage WHERE id = %s""",
                 (triage_id,),
             )
             head = cur.fetchone()
             if not head:
                 return {'ok': False, 'error': 'not found'}
-            message_id, old_project_id = head[0], head[1]
+            message_id, old_project_id, email_sender = head[0], head[1], head[2]
             cur.execute(
                 """UPDATE cairn_intel.email_triage
                       SET project_id = %s,
@@ -492,6 +518,20 @@ def reassign_to_project(
                     conn.commit()
         except Exception:
             logger.exception('failed to mirror reassign for triage %s', triage_id)
+
+    # Phase 5: write the directed correction into the learned
+    # sender↔project association table. Override on the new project,
+    # rejection on the old (if there was one and it's different).
+    if email_sender:
+        try:
+            from core.triage.sender_associations import record_action
+            if new_project_id:
+                record_action(email_sender, new_project_id, 'override')
+            if old_project_id and old_project_id != new_project_id:
+                record_action(email_sender, old_project_id, 'rejection')
+        except Exception:
+            logger.exception('sender_associations write failed on reassign %s', triage_id)
+
     return {
         'ok': True,
         'triage_id': triage_id,

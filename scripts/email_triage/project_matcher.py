@@ -277,6 +277,44 @@ def match_project(
     sender_email = _bare_email(sender_raw)
     exact_match = _exact_email_match(sender_email, base, token) if sender_email else None
 
+    # ── Phase 5 (2026-05-13): learned sender↔project memory ──────────────
+    # If Deek has seen Toby confirm / reassign this sender to a single
+    # project enough times with strong signal, skip the fuzzy search
+    # and bind directly. This is the lever that turns "every email
+    # needs review" into "the second time you see a sender, Deek
+    # already knows where it goes". See core/triage/sender_associations.
+    learned_match: dict | None = None
+    try:
+        from core.triage.sender_associations import (
+            auto_match_for, top_associations_for,
+        )
+        am = auto_match_for(sender_raw) if sender_raw else None
+        if am:
+            log.info(
+                'project_matcher: AUTO-MATCH sender=%s project=%s score=%.2f evidence=%s',
+                sender_raw, am['project_id'], am['score'], am['evidence'],
+            )
+            learned_match = {
+                'project_id':       am['project_id'],
+                'match_score':      max(am['score'], EXACT_EMAIL_MATCH_SCORE),
+                'project_name':     '(learned association)',
+                'source_type':      'learned_association',
+                'last_activity_at': '',
+                'status':           '',
+                'excerpt':          (
+                    f"Toby has actioned {am['evidence']['total_actions']} "
+                    f"email(s) from this sender on this project "
+                    f"(confs={am['evidence']['confirmations']}, "
+                    f"overrides={am['evidence']['overrides']}, "
+                    f"rejections={am['evidence']['rejections']})."
+                ),
+                'learned_score':    am['score'],
+                'learned_evidence': am['evidence'],
+            }
+    except Exception as exc:
+        log.warning('learned association lookup failed for %s: %s', sender_raw, exc)
+        learned_match = None
+
     # Build the best query we can from the signals available
     query_parts: list[str] = []
     project_hint = (classifier_result.get('project_hint') or '').strip()
@@ -382,6 +420,21 @@ def match_project(
             # move to the top.
             candidates.pop(already)
         candidates.insert(0, exact_match)
+        candidates = candidates[:TOP_CANDIDATES]
+
+    # ── Phase 5: prepend the learned association as the unambiguous
+    # winner. If Toby has trained Deek that this sender belongs to
+    # project P with strong evidence, that beats fuzzy search every
+    # time. We still return the fuzzy candidates as alternatives so
+    # he can pick a different project for THIS particular email (a
+    # repeat client emailing about a different job) — they just sit
+    # below the learned winner.
+    if learned_match:
+        candidates = [
+            c for c in candidates
+            if c.get('project_id') != learned_match['project_id']
+        ]
+        candidates.insert(0, learned_match)
         candidates = candidates[:TOP_CANDIDATES]
 
     if not candidates:
