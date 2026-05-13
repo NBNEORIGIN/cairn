@@ -208,16 +208,37 @@ async def crm_learning_stats():
                 out['auto_skipped_by_reason_7d'] = [
                     {'reason': r[0], 'count': int(r[1])} for r in cur.fetchall()
                 ]
+
+                # Phase 2 counter: how many reassignments has Toby done
+                # in the last 7 days, and how many distinct senders does
+                # the matcher now have boost rules for? The "reassigns"
+                # number is the input; the "senders_with_boost" number
+                # is the matcher's *learned* state — that's the one that
+                # proves Phase 2 is reading feedback back.
+                cur.execute(
+                    """SELECT COUNT(*) FROM cairn_intel.email_triage
+                        WHERE review_notes LIKE 'reassigned to %%'
+                          AND reviewed_at >= NOW() - INTERVAL '7 days'"""
+                )
+                out['reassigns_7d'] = int(cur.fetchone()[0])
+                cur.execute(
+                    """
+                    SELECT COUNT(DISTINCT LOWER(email_sender))
+                      FROM cairn_intel.email_triage
+                     WHERE review_notes LIKE 'reassigned to %%'
+                       AND reviewed_at >= NOW() - INTERVAL '365 days'
+                    """
+                )
+                out['senders_with_matcher_boost'] = int(cur.fetchone()[0])
     except Exception as exc:
         out['feedback_error'] = str(exc)
 
-    # Read-back consumption flags. Phase 1 of the loop ships
-    # auto-skip on spam/internal, so the matcher-side flag flips on
-    # for that pathway. Reranker and project-matcher (Phase 2/3)
-    # remain off until those land.
+    # Read-back consumption flags. Phase 1 (skip rules) and Phase 2
+    # (matcher feedback) are live; reranker (Phase 3) and persistent
+    # BM25 (Phase 4) remain unwired.
     out['feedback_consumed_by_skip_rules'] = True
+    out['feedback_consumed_by_matcher'] = True
     out['feedback_consumed_by_reranker'] = False
-    out['feedback_consumed_by_matcher'] = False
     out['bm25_persisted'] = (out.get('tsvector_indexes') or 0) > 0
 
     return out

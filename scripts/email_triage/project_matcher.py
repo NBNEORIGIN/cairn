@@ -390,6 +390,25 @@ def match_project(
             'project_name': '', 'candidates': [],
         }
 
+    # ── Phase 2 of the learning loop (2026-05-13): feedback-aware ──────
+    # boost.  If Toby has reassigned mail from this sender to a
+    # specific project in the past year, prefer that project. The
+    # function stamps match_score_pre_boost + feedback_boost on each
+    # boosted candidate so the digest can show "boosted by your past
+    # reassigns" and the audit trail is intact.
+    try:
+        from core.triage.matcher_feedback import apply_boosts_to_candidates
+        candidates, n_boosted = apply_boosts_to_candidates(candidates, sender_raw)
+        if n_boosted > 0:
+            log.info(
+                'project_matcher: applied %d feedback boost(s) for sender=%s',
+                n_boosted, sender_raw,
+            )
+    except Exception as exc:
+        # Don't let feedback failures break the matcher — log + carry on
+        # with the unboosted candidate list.
+        log.warning('project_matcher: feedback boost skipped: %s', exc)
+
     top = candidates[0]
     # project_id on the return is set only when the top match clears
     # the confidence bar. An exact email match always clears it
