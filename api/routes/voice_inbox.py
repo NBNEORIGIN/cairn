@@ -173,12 +173,49 @@ async def crm_learning_stats():
                         WHERE draft_reply IS NOT NULL"""
                 )
                 out['drafts_written_total'] = int(cur.fetchone()[0])
+
+                # Phase 1 learning-loop counter: how many emails has the
+                # triage_runner skipped in the last 7 days because Toby
+                # previously marked the sender spam/internal/domain?
+                # If this number grows over the coming week, the loop
+                # is closed for the spam-skip case.
+                cur.execute(
+                    """SELECT COUNT(*) FROM cairn_intel.email_triage
+                        WHERE review_action = 'auto_skipped'
+                          AND reviewed_at >= NOW() - INTERVAL '7 days'"""
+                )
+                out['auto_skipped_7d'] = int(cur.fetchone()[0])
+                cur.execute(
+                    """SELECT COUNT(*) FROM cairn_intel.email_triage
+                        WHERE review_action = 'auto_skipped'"""
+                )
+                out['auto_skipped_total'] = int(cur.fetchone()[0])
+                # Per-reason breakdown for the dashboard.
+                cur.execute(
+                    """SELECT
+                          CASE
+                            WHEN review_notes LIKE 'auto_skipped: internal_domain%%' THEN 'internal_domain'
+                            WHEN review_notes LIKE 'auto_skipped: sender_marked_spam%%' THEN 'sender_marked_spam'
+                            WHEN review_notes LIKE 'auto_skipped: sender_marked_internal%%' THEN 'sender_marked_internal'
+                            ELSE 'other'
+                          END AS reason,
+                          COUNT(*)
+                         FROM cairn_intel.email_triage
+                        WHERE review_action = 'auto_skipped'
+                          AND reviewed_at >= NOW() - INTERVAL '7 days'
+                        GROUP BY 1 ORDER BY 2 DESC"""
+                )
+                out['auto_skipped_by_reason_7d'] = [
+                    {'reason': r[0], 'count': int(r[1])} for r in cur.fetchall()
+                ]
     except Exception as exc:
         out['feedback_error'] = str(exc)
 
-    # 4. Read-back check — is anyone reading review_action to weight
-    #    future matches? Today: no. We surface this as a literal flag
-    #    so the UI can render the honest status.
+    # Read-back consumption flags. Phase 1 of the loop ships
+    # auto-skip on spam/internal, so the matcher-side flag flips on
+    # for that pathway. Reranker and project-matcher (Phase 2/3)
+    # remain off until those land.
+    out['feedback_consumed_by_skip_rules'] = True
     out['feedback_consumed_by_reranker'] = False
     out['feedback_consumed_by_matcher'] = False
     out['bm25_persisted'] = (out.get('tsvector_indexes') or 0) > 0

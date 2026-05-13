@@ -320,6 +320,44 @@ def _process_one(email: dict, commit: bool) -> dict:
         (email.get('subject') or '')[:80],
     )
 
+    # ── Phase 1 of the learning loop (2026-05-13): hard skip rules ────────
+    # Before we burn LLM budget on classification / matching / drafting,
+    # check whether Toby has already trained Deek to ignore this sender.
+    # Internal-domain / confirmed-spam / confirmed-internal short-circuit
+    # to a row marked review_action='auto_skipped' — the row never
+    # appears in the pending inbox.
+    from core.triage.feedback_rules import should_skip_drafting, format_skip_note
+    skip = should_skip_drafting(email.get('sender') or '')
+    if skip is not None:
+        log.info(
+            'feedback_rules: skip %s sender=%s reason=%s',
+            email.get('message_id'),
+            email.get('sender'),
+            skip['reason'],
+        )
+        return {
+            'email_message_id': email.get('message_id'),
+            'email_mailbox': email.get('mailbox') or '',
+            'email_sender': email.get('sender'),
+            'email_subject': email.get('subject'),
+            'email_received_at': email.get('received_at'),
+            'classification': skip['reason'],
+            'classification_confidence': 'high',
+            'classification_reason': format_skip_note(skip),
+            'client_name_guess': None,
+            'project_id': None,
+            'project_match_score': None,
+            'analyzer_brief': None,
+            'analyzer_job_size': None,
+            'skip_reason': format_skip_note(skip),
+            # Mark as already-reviewed so the row drops out of the
+            # pending list immediately — Toby trained Deek for this
+            # decision, it doesn't need a second look.
+            '_auto_skip': True,
+            '_auto_skip_reason': skip['reason'],
+            '_auto_skip_evidence': skip.get('evidence') or {},
+        }
+
     classification = classify_email(email)
     classification_name = classification['classification']
 

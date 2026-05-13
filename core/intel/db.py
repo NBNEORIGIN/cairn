@@ -263,20 +263,44 @@ def upsert_email_triage(
     row.setdefault('draft_reply', None)
     row.setdefault('draft_model', None)
 
+    # Phase 1 of learning-loop (2026-05-13): the triage runner can flag
+    # a row as auto-skipped (sender previously marked spam / internal,
+    # or sender is in an internal domain). Such rows land pre-reviewed:
+    # reviewed_at = NOW(), review_action = 'auto_skipped'. They never
+    # appear in /dashboard/inbox.
+    is_auto_skip = bool(row.pop('_auto_skip', False))
+    auto_reason = row.pop('_auto_skip_reason', '') or ''
+    auto_evidence = row.pop('_auto_skip_evidence', None)
+    if is_auto_skip:
+        # Compose a review_notes line documenting why we skipped.
+        evidence_str = (
+            ', '.join(f'{k}={v}' for k, v in (auto_evidence or {}).items())
+            if auto_evidence else ''
+        )
+        row['_review_notes'] = (
+            f'auto_skipped: {auto_reason} ({evidence_str})'
+            if evidence_str else f'auto_skipped: {auto_reason}'
+        )
+    row.setdefault('_review_notes', None)
+
     sql = f"""
     INSERT INTO {schema}.email_triage (
         email_message_id, email_mailbox, email_sender, email_subject,
         email_received_at, classification, classification_confidence,
         classification_reason, client_name_guess, project_id,
         project_match_score, analyzer_brief, analyzer_job_size,
-        skip_reason, match_candidates, draft_reply, draft_model
+        skip_reason, match_candidates, draft_reply, draft_model,
+        reviewed_at, review_action, review_notes
     ) VALUES (
         %(email_message_id)s, %(email_mailbox)s, %(email_sender)s,
         %(email_subject)s, %(email_received_at)s, %(classification)s,
         %(classification_confidence)s, %(classification_reason)s,
         %(client_name_guess)s, %(project_id)s, %(project_match_score)s,
         %(analyzer_brief)s, %(analyzer_job_size)s, %(skip_reason)s,
-        %(match_candidates_json)s::jsonb, %(draft_reply)s, %(draft_model)s
+        %(match_candidates_json)s::jsonb, %(draft_reply)s, %(draft_model)s,
+        CASE WHEN %(_is_auto_skip)s THEN NOW() ELSE NULL END,
+        CASE WHEN %(_is_auto_skip)s THEN 'auto_skipped' ELSE NULL END,
+        %(_review_notes)s
     )
     ON CONFLICT (email_message_id) DO UPDATE SET
         classification            = EXCLUDED.classification,
@@ -291,9 +315,25 @@ def upsert_email_triage(
         match_candidates          = EXCLUDED.match_candidates,
         draft_reply               = EXCLUDED.draft_reply,
         draft_model               = EXCLUDED.draft_model,
-        processed_at              = NOW()
+        processed_at              = NOW(),
+        -- Only stamp auto-skip metadata when this run actually set it,
+        -- so a later manual action by Toby isn't clobbered by an
+        -- accidental reprocessing of the same message_id.
+        reviewed_at   = CASE WHEN %(_is_auto_skip)s
+                             AND email_triage.reviewed_at IS NULL
+                             THEN NOW()
+                             ELSE email_triage.reviewed_at END,
+        review_action = CASE WHEN %(_is_auto_skip)s
+                             AND email_triage.review_action IS NULL
+                             THEN 'auto_skipped'
+                             ELSE email_triage.review_action END,
+        review_notes  = CASE WHEN %(_is_auto_skip)s
+                             AND email_triage.review_action IS NULL
+                             THEN EXCLUDED.review_notes
+                             ELSE email_triage.review_notes END
     RETURNING id
     """
+    row['_is_auto_skip'] = is_auto_skip
     with get_conn(db_url) as conn:
         with conn.cursor() as cur:
             cur.execute(sql, row)
