@@ -376,17 +376,72 @@ class _CrmEditBody(BaseModel):
     model_config = ConfigDict(extra='ignore')
     draft_reply: str
     edited_by: Optional[str] = None
+    # Phase 6 (2026-05-15): caller can attach the AI review findings
+    # that were surfaced before the user clicked Save. We log them
+    # alongside the diff so the dataset for future style-learning
+    # carries the "what concerns did the AI flag at edit-time?" signal.
+    ai_review_findings: Optional[dict] = None
 
 
 @crm_router.post('/{triage_id}/edit')
 async def crm_edit_inbox_item(triage_id: int, payload: _CrmEditBody):
     """Save Toby's edits to the draft. Doesn't mark reviewed — same
-    semantics as the PWA's /api/voice/inbox/{id}/edit."""
+    semantics as the PWA's /api/voice/inbox/{id}/edit.
+
+    Side effect (Phase 6): captures (original, prior, edited) into
+    cairn_intel.draft_edits for the style-learning loop. Caller passes
+    edited_by + optional ai_review_findings; we record both."""
     from core.triage.inbox import update_draft_text
-    result = update_draft_text(triage_id, payload.draft_reply)
+    result = update_draft_text(
+        triage_id,
+        payload.draft_reply,
+        edited_by=payload.edited_by or '',
+        ai_review_findings=payload.ai_review_findings,
+    )
     if not result.get('ok'):
         raise HTTPException(400, result.get('error', 'edit failed'))
     return result
+
+
+class _CrmReviewBody(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+    edited_draft: str
+
+
+@crm_router.post('/{triage_id}/ai-review')
+async def crm_ai_review(triage_id: int, payload: _CrmReviewBody):
+    """Pre-save AI review of an edited draft. Returns a structured set
+    of findings (typos, factual concerns, tone notes, follow-through
+    misses) the inbox UI renders inline.
+
+    Read-only — does NOT persist anything. The caller is expected to
+    pass the same findings back when it eventually POSTs /edit so we
+    capture them alongside the diff.
+    """
+    from core.triage.inbox import get_pending_draft
+    from core.triage.edit_review import review_edit
+
+    row = get_pending_draft(triage_id)
+    if not row:
+        raise HTTPException(404, 'triage row not found')
+
+    # Original draft = the very first Deek output. If we haven't
+    # captured it yet (this is the user's first edit ever), the
+    # current draft_reply is still pristine — use it.
+    original = (
+        row.get('draft_reply_initial')
+        if row.get('draft_reply_initial')
+        else row.get('draft_reply')
+    ) or ''
+
+    findings = review_edit(
+        email_body=row.get('email_body') or '',
+        original_draft=original,
+        edited_draft=payload.edited_draft or '',
+        sender=row.get('email_sender') or '',
+        subject=row.get('email_subject') or '',
+    )
+    return findings
 
 
 class _CrmRejectBody(BaseModel):

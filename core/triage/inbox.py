@@ -41,7 +41,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 import psycopg2
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import RealDictCursor, Json
 
 
 logger = logging.getLogger(__name__)
@@ -199,7 +199,7 @@ def get_pending_draft(triage_id: int) -> Optional[dict]:
                t.email_message_id, t.email_mailbox,
                t.processed_at, t.classification, t.classification_confidence,
                t.project_id, t.match_candidates, t.client_name_guess,
-               t.draft_reply, t.draft_model,
+               t.draft_reply, t.draft_reply_initial, t.draft_model,
                t.reviewed_at, t.review_action, t.review_notes,
                COALESCE(r.body_text, r.body_html, '') AS email_body
           FROM cairn_intel.email_triage t
@@ -221,25 +221,90 @@ def get_pending_draft(triage_id: int) -> Optional[dict]:
 
 # ── Write paths ────────────────────────────────────────────────────────────
 
-def update_draft_text(triage_id: int, new_text: str) -> dict:
+def update_draft_text(
+    triage_id: int,
+    new_text: str,
+    *,
+    edited_by: str = '',
+    ai_review_findings: Optional[dict] = None,
+) -> dict:
     """Inline edit of the drafted reply before staging. Doesn't mark
-    the row as reviewed — Toby can edit-then-stage-later."""
-    if not new_text or not new_text.strip():
+    the row as reviewed — Toby can edit-then-stage-later.
+
+    Phase 6 of inbox learning loop (2026-05-15): captures the diff
+    between Deek's original AI draft and this edit into
+    ``cairn_intel.draft_edits`` so the drafter can pull recent edits
+    as few-shot style examples for future drafts.
+
+      - First edit on a triage row: stamps draft_reply_initial with
+        whatever was there before, so we always know what Deek
+        originally produced (even after multiple edits).
+      - Every edit (first or Nth): inserts a row into draft_edits with
+        original + prior + new text + any AI review findings the
+        caller passed through.
+    """
+    new_text = (new_text or '').strip()
+    if not new_text:
         return {'ok': False, 'error': 'empty text'}
+
     with _conn() as conn:
         with conn.cursor() as cur:
+            # Capture the row BEFORE this edit lands so we can log the
+            # (original, prior, edited) triple.
+            cur.execute(
+                """SELECT draft_reply, draft_reply_initial,
+                          email_sender, classification, project_id
+                     FROM cairn_intel.email_triage WHERE id = %s""",
+                (triage_id,),
+            )
+            head = cur.fetchone()
+            if not head:
+                return {'ok': False, 'error': 'not found'}
+            prior_draft, original_draft, email_sender, classification, project_id = head
+
+            # First-edit case: stamp the initial column so we can diff
+            # against Deek's pristine output later. Don't overwrite
+            # if it's already set.
+            if original_draft is None:
+                original_draft = prior_draft  # the unedited Deek text
+                cur.execute(
+                    """UPDATE cairn_intel.email_triage
+                          SET draft_reply_initial = %s
+                        WHERE id = %s
+                          AND draft_reply_initial IS NULL""",
+                    (prior_draft, triage_id),
+                )
+
             cur.execute(
                 """UPDATE cairn_intel.email_triage
                       SET draft_reply = %s,
                           draft_model = COALESCE(draft_model, '') || ' | edited@' || NOW()::text
                     WHERE id = %s
                     RETURNING id""",
-                (new_text.strip(), triage_id),
+                (new_text, triage_id),
             )
             row = cur.fetchone()
+            if not row:
+                return {'ok': False, 'error': 'update failed'}
+
+            # Log the edit unless it's a no-op (avoid filling the table
+            # if a tool re-sends the same text).
+            if (prior_draft or '').strip() != new_text:
+                cur.execute(
+                    """INSERT INTO cairn_intel.draft_edits
+                       (triage_id, email_sender, classification, project_id,
+                        original_draft, prior_draft, edited_draft,
+                        ai_review_findings, edited_by)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)""",
+                    (
+                        triage_id, email_sender, classification, project_id,
+                        original_draft, prior_draft, new_text,
+                        Json(ai_review_findings or {}),
+                        edited_by or 'unknown',
+                    ),
+                )
             conn.commit()
-    if not row:
-        return {'ok': False, 'error': 'not found'}
+
     return {'ok': True, 'triage_id': triage_id, 'length': len(new_text)}
 
 
