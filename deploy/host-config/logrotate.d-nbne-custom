@@ -1,0 +1,28 @@
+# /etc/logrotate.d/nbne-custom
+#
+# Rotates the custom log files our crontab writes — these live outside
+# any package's default logrotate config and would otherwise grow
+# unbounded. Symptom that prompted this: deek-ami-sync.log added 2026-05-13,
+# grew to 55 MB in 2 days. Multiply by ~25 similar files and the disk
+# budget is gone in a quarter.
+#
+# Owner: deek/deploy/host-config/logrotate.d-nbne-custom
+# Synced to host by: deek/deploy/host-config/sync-to-host.sh
+#
+# Verify after editing: `logrotate -d /etc/logrotate.d/nbne-custom`
+
+/var/log/cairn-*.log
+/var/log/deek-*.log
+/var/log/crm-*.log
+/var/log/manufacture-*.log
+/var/log/nbne-*.log
+{
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    su root root
+}

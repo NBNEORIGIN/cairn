@@ -1,0 +1,76 @@
+# /var/spool/cron/crontabs/root — canonical version
+# Owner: deek/deploy/host-config/crontab.canonical
+# Sync via: deek/deploy/host-config/sync-to-host.sh
+#
+# DO NOT EDIT THE LIVE CRONTAB DIRECTLY. Edit this file, commit,
+# then run sync-to-host.sh from a Deek dev box. The sync script
+# diffs before applying and aborts on suspicious removals.
+#
+# Schedule grouping:
+#   ── Disk hygiene ──        02:00 daily / Monday 02:30 / hourly
+#   ── Disk alerts ──         every 15 min
+#   ── Cairn / Deek crons ──  existing operational schedule
+#   ── Backups ──             03:00 daily (ark + nbne backup.sh)
+#   ── Wiki / Etsy / FX ──    existing operational schedule
+
+# ─────────────────────────────────────────────────────────────────────
+# Disk hygiene & alerts (Deek host-config 2026-05-15)
+# ─────────────────────────────────────────────────────────────────────
+0  2 * * *      /opt/nbne/scripts/prune-daily.sh >> /var/log/nbne-prune.log 2>&1
+30 2 * * 1      /opt/nbne/scripts/prune-weekly.sh >> /var/log/nbne-prune.log 2>&1
+5  * * * *      /opt/nbne/scripts/disk-telemetry.sh >> /var/log/nbne-disk-telemetry.log 2>&1
+*/15 * * * *    /opt/nbne/scripts/disk-alert.sh >> /var/log/nbne-disk-alert.log 2>&1
+
+# ─────────────────────────────────────────────────────────────────────
+# Cairn / Deek operational crons
+# ─────────────────────────────────────────────────────────────────────
+0 23 * * 0 curl -sf -X POST http://localhost:8765/api/wiki/compile?scope=all >> /var/log/cairn-wiki-compile.log 2>&1
+0 */2 * * * docker exec -w /app -e PYTHONPATH=/app deploy-deek-api-1 python -m scripts.backfill.run --source crm_reflection --max-bulk-llm-calls 50 --commit --run-id crm-reflection-$(date +\%s) --sample-size 0 >> /var/log/cairn-crm-reflection.log 2>&1
+0 2 * * * docker exec -w /app -e PYTHONPATH=/app deploy-deek-api-1 python scripts/consolidate_memories.py >> /var/log/deek-consolidation.log 2>&1
+0 3 * * * docker exec -w /app -e PYTHONPATH=/app deploy-deek-api-1 python scripts/dream_maintenance.py >> /var/log/deek-dream-maint.log 2>&1
+30 2 * * * docker exec -w /app -e PYTHONPATH=/app deploy-deek-api-1 python scripts/dream_nightly.py >> /var/log/deek-dream.log 2>&1
+30 7 * * * docker exec -w /app -e PYTHONPATH=/app deploy-deek-api-1 python scripts/send_memory_brief.py --user toby@nbnesigns.com >> /var/log/deek-memory-brief.log 2>&1
+32 7 * * * docker exec -w /app -e PYTHONPATH=/app deploy-deek-api-1 python scripts/send_memory_brief.py --user jo@nbnesigns.com >> /var/log/deek-memory-brief-jo.log 2>&1
+34 7 * * * docker exec -w /app -e PYTHONPATH=/app deploy-deek-api-1 python scripts/send_memory_brief.py --user ivan@nbnesigns.com >> /var/log/deek-memory-brief-ivan.log 2>&1
+5,35 * * * * docker exec -w /app -e PYTHONPATH=/app deploy-deek-api-1 python scripts/process_memory_brief_replies.py >> /var/log/deek-memory-brief-replies.log 2>&1
+10,40 * * * * docker exec -w /app -e PYTHONPATH=/app deploy-deek-api-1 python scripts/process_triage_replies.py >> /var/log/deek-triage-replies.log 2>&1
+*/15 * * * * docker exec deploy-deek-api-1 python /app/scripts/process_deek_inbox.py >> /var/log/cairn-email-ingest.log 2>&1
+25 */2 * * * docker exec -w /app -e PYTHONPATH=/app deploy-deek-api-1 python -m scripts.backfill.run --source material_prices --max-bulk-llm-calls 50 --commit --run-id material-prices-$(date +\%s) --sample-size 0 >> /var/log/cairn-material-prices.log 2>&1
+*/30 * * * * docker exec -w /app -e PYTHONPATH=/app -e DEEK_EMAIL_TRIAGE_ENABLED=true deploy-deek-api-1 python -m scripts.email_triage.triage_runner --max-emails 5 --window-days 7 --commit >> /var/log/cairn-triage.log 2>&1
+7-59/30 * * * * docker exec -w /app -e PYTHONPATH=/app -e DEEK_EMAIL_TRIAGE_ENABLED=true deploy-deek-api-1 python -m scripts.email_triage.digest_sender --max-per-run 20 --commit >> /var/log/cairn-digest.log 2>&1
+0 6 * * * docker exec -w /app -e PYTHONPATH=/app deploy-deek-api-1 python scripts/poll_arxiv.py >> /var/log/deek-arxiv-poll.log 2>&1
+30 * * * * docker exec -w /app -e PYTHONPATH=/app deploy-deek-api-1 python scripts/draft_pending_research_briefs.py >> /var/log/deek-arxiv-autodraft.log 2>&1
+30 7 * * * docker exec -w /app -e PYTHONPATH=/app deploy-deek-api-1 python scripts/nudge_stalled_projects.py >> /var/log/deek-nudge-stalled.log 2>&1
+*/5 * * * * docker exec -w /app -e PYTHONPATH=/app deploy-deek-api-1 python scripts/send_pending_nudges.py >> /var/log/deek-nudge-sender.log 2>&1
+7,22,37,52 * * * * docker exec -w /app -e PYTHONPATH=/app deploy-deek-api-1 python scripts/process_sent_folder.py >> /var/log/deek-sent-folder.log 2>&1
+*/5 7-21 * * * docker exec -w /app -e PYTHONPATH=/app deploy-deek-api-1 python scripts/notify_inbox_drafts.py >> /var/log/deek-inbox-notify.log 2>&1
+*/3 7-21 * * * docker exec -w /app -e PYTHONPATH=/app deploy-deek-api-1 python scripts/sync_drafts_to_crm.py >> /var/log/deek-crm-draft-sync.log 2>&1
+0 8 * * * curl -s -X POST http://127.0.0.1:3023/api/cairn/email/scheduled-review -H "x-api-key: $(grep ^CAIRN_API_KEY= /opt/crm/.env | cut -d= -f2)" >> /var/log/crm-email-review.log 2>&1
+*/5 * * * * curl -s -X POST http://127.0.0.1:3023/api/email/poll -H "x-api-key: $(grep ^CAIRN_API_KEY= /opt/crm/.env | cut -d= -f2)" >> /var/log/crm-email-poll.log 2>&1
+
+# ─────────────────────────────────────────────────────────────────────
+# Wiki / FX / Etsy / Amazon
+# ─────────────────────────────────────────────────────────────────────
+30 */4 * * * cd /opt/nbne/deek && git pull --ff-only origin master >> /var/log/cairn-wiki-sync.log 2>&1 && curl -s -X POST http://localhost:8765/admin/wiki-sync -H "X-API-Key: claw-dev-key-change-in-production" >> /var/log/cairn-wiki-sync.log 2>&1
+0 6 * * * curl -sf -X POST http://localhost:8765/api/wiki/compile?scope=modules >> /var/log/cairn-wiki-compile.log 2>&1
+0 7 * * * docker exec -w /app -e PYTHONPATH=/app deploy-deek-api-1 python scripts/run_fx_sync.py >> /var/log/deek-fx-sync.log 2>&1
+15 7 * * * docker exec -w /app -e PYTHONPATH=/app deploy-deek-api-1 python -c "import asyncio; from core.etsy_intel.sync import sync_all; print(asyncio.run(sync_all()))" >> /var/log/deek-etsy-sync.log 2>&1
+0 */6 * * * curl -s -X POST http://localhost:8765/ami/spapi/sync -H "X-API-Key: vtGHpaK5NwkTIezBigwkifanrzoeWVC6D_k3Vr1D9Oc" >> /var/log/deek-ami-sync.log 2>&1
+
+# ─────────────────────────────────────────────────────────────────────
+# Manufacture
+# ─────────────────────────────────────────────────────────────────────
+0 6 * * * cd /opt/nbne/manufacture && docker exec docker-backend-1 python manage.py sync_restock_all >> /var/log/manufacture-restock.log 2>&1
+
+# ─────────────────────────────────────────────────────────────────────
+# Backups (run after operational crons quiet down)
+# ─────────────────────────────────────────────────────────────────────
+0 3 * * * /opt/nbne/scripts/backup.sh >> /var/log/nbne-backup.log 2>&1
+30 3 * * * /opt/ark/backup.sh >> /var/log/ark-backup.log 2>&1
+0 3 * * 0 tar -czf /opt/nbne/backups/clayport-uploads-$(date +\%Y\%m\%d).tar.gz /opt/nbne/client-sites/clayport/images/uploads/
+
+# ─────────────────────────────────────────────────────────────────────
+# Ark backup local retention (added 2026-05-15 — cleans daily snapshots
+# older than 14 days; remote snapshots still go to nbne1 180d + Contabo)
+# ─────────────────────────────────────────────────────────────────────
+0 4 * * * find /backups/ark/daily/*/ -maxdepth 1 -mindepth 1 -type d -mtime +14 -exec rm -rf {} + >> /var/log/ark-local-prune.log 2>&1
